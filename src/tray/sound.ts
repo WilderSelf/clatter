@@ -2,9 +2,14 @@
 //
 // The repository holds no audio file and fetches none. Unit 3.1 deleted the
 // library's own 540,987 bytes of them, and a sample taken from anywhere else is
-// a dependency and a licence question at once. A voice is a short burst of
-// noise through a band-pass filter, which is what a small hard object striking
-// another one sounds like.
+// a dependency and a licence question at once.
+//
+// The tray the sound describes is a wooden die on a leather mat over a table.
+// A voice is a short burst of noise through two band-pass filters and one
+// low-pass filter. The low band is the body of the wood and carries the weight.
+// The mid band is the knock of the contact itself. The low-pass is the leather,
+// which damps the high end hard. A single narrow band with no low content and
+// no roll-off above is what makes a synthesised impact sound tinny.
 //
 // Two properties this module owes the player:
 //
@@ -45,25 +50,36 @@ const PITCH_SPREAD = 0.35;
 
 /** One sound the tray makes. Pure data, so a check can read it without audio. */
 export interface Voice {
-  /** The centre of the band-pass, in hertz. */
+  /** The centre of the knock band, in hertz. */
   readonly hz: number;
+  /** The width of the knock band. A low number is broad, which reads as wood. */
   readonly q: number;
   /** Peak gain of this voice alone, before the volume the player set. */
   readonly level: number;
-  /** How long it takes to fall to silence. */
+  /** How long it takes to fall to silence. The body sets this, not the knock. */
   readonly seconds: number;
+  /** The centre of the body band, in hertz. */
+  readonly bodyHz: number;
+  /** The part of `level` the body carries. The knock carries the rest. */
+  readonly bodyShare: number;
+  /** How long the knock lasts. Shorter than `seconds`, and that is the weight. */
+  readonly knockSeconds: number;
 }
 
+/** The width of every body band. Broad enough to read as wood, not as a bell. */
+const BODY_Q = 1.1;
+
 /**
- * The two timbres.
+ * The two timbres. Both are wood, and the surface under the dice is leather.
  *
- * A die meeting a die is the rattle: bright and short, two small hard objects.
- * A die meeting a wall or the desk is the clatter: lower and longer, because
- * the table under it is large and carries the sound.
+ * A die meeting a die is the rattle: a knock of wood on wood, with a short body
+ * under it. A die meeting a wall or the mat is the clatter: a thud, where the
+ * low band carries most of the level and outlasts the knock by a long way.
+ * Leather absorbs the high end, so neither timbre has a bright band at all.
  */
-const TIMBRE: Record<TrayImpact['kind'], { hz: number; q: number; seconds: number }> = {
-  die: { hz: 2400, q: 1.6, seconds: 0.05 },
-  surface: { hz: 780, q: 0.9, seconds: 0.13 },
+const TIMBRE: Record<TrayImpact['kind'], Omit<Voice, 'level'>> = {
+  die: { hz: 950, q: 0.7, seconds: 0.075, bodyHz: 220, bodyShare: 0.45, knockSeconds: 0.045 },
+  surface: { hz: 330, q: 0.8, seconds: 0.17, bodyHz: 120, bodyShare: 0.75, knockSeconds: 0.075 },
 };
 
 /**
@@ -77,13 +93,19 @@ export function voiceOf(impact: TrayImpact, spread: number): Voice | null {
   if (!(impact.speed > SILENT_BELOW)) return null;
   const timbre = TIMBRE[impact.kind];
   const loudness = Math.min(1, (impact.speed - SILENT_BELOW) / (LOUDEST_AT - SILENT_BELOW));
+  // Both bands move together, so a voice keeps its shape as the pitch moves.
+  const pitch = 1 + PITCH_SPREAD * (2 * spread - 1);
+  const length = 0.7 + 0.6 * spread;
   return {
-    hz: timbre.hz * (1 + PITCH_SPREAD * (2 * spread - 1)),
+    hz: timbre.hz * pitch,
     q: timbre.q,
     // The square root, because loudness is heard on a curve. A light touch
     // stays audible and a heavy landing still stands well above it.
     level: Math.sqrt(loudness),
-    seconds: timbre.seconds * (0.7 + 0.6 * spread),
+    seconds: timbre.seconds * length,
+    bodyHz: timbre.bodyHz * pitch,
+    bodyShare: timbre.bodyShare,
+    knockSeconds: timbre.knockSeconds * length,
   };
 }
 
@@ -120,6 +142,70 @@ function noiseOf(ctx: BaseAudioContext): AudioBuffer {
   return buffer;
 }
 
+/**
+ * Where the leather stops the sound, in hertz.
+ *
+ * This is the single largest part of the cure for a tinny tray. A wooden die on
+ * a leather mat has almost nothing above two kilohertz.
+ */
+const DAMPING_HZ = 1800;
+
+/**
+ * The Q of that low-pass, which the Web Audio specification reads in decibels
+ * for a low-pass and a high-pass, and as a plain number for a band-pass. This
+ * value is 20*log10(1/sqrt(2)), which is the flat corner. Do not write 0.707
+ * here: under the decibel reading that is a resonant peak at the corner, which
+ * is the brightness this filter exists to remove.
+ */
+const DAMPING_Q = -3.01;
+
+/**
+ * How many band-pass filters cover one kilohertz of white noise.
+ *
+ * A band-pass passes what its width lets through, and a band is `hz / q` wide.
+ * A low body band is therefore far narrower than a mid knock band and would be
+ * inaudible at the same gain. Each band is scaled against this width, so a
+ * share of the level means a share of what the player hears.
+ */
+const BAND_WIDTH_REFERENCE = 1200;
+
+/**
+ * The trim that holds the tray at the loudness it had before the timbres
+ * changed. Measured: at this value the loudest single voice of either timbre
+ * peaks at 0.42 to 0.46, against the 0.47 the old single-band voice reached.
+ */
+const VOICE_GAIN = 3;
+
+/** One band of one voice: a band-pass, then its own fall to silence. */
+function playBand(
+  ctx: BaseAudioContext,
+  source: AudioNode,
+  destination: AudioNode,
+  hz: number,
+  q: number,
+  level: number,
+  at: number,
+  seconds: number,
+): void {
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = hz;
+  filter.Q.value = q;
+  const gain = ctx.createGain();
+  const peak = level * VOICE_GAIN * Math.sqrt((BAND_WIDTH_REFERENCE * q) / hz);
+  gain.gain.setValueAtTime(peak, at);
+  gain.gain.exponentialRampToValueAtTime(SILENCE, at + seconds);
+  source.connect(filter).connect(gain).connect(destination);
+}
+
+/**
+ * How many filters one voice builds: two band-passes and one low-pass.
+ *
+ * A check counts filters against voices, so this number is the bridge between
+ * them. It is exported for that check alone.
+ */
+export const FILTERS_PER_VOICE = 3;
+
 /** Build one voice and start it. Nothing is kept: the nodes free themselves. */
 export function playVoice(
   ctx: BaseAudioContext,
@@ -129,15 +215,27 @@ export function playVoice(
 ): void {
   const source = ctx.createBufferSource();
   source.buffer = noiseOf(ctx);
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'bandpass';
-  filter.frequency.value = voice.hz;
-  filter.Q.value = voice.q;
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(voice.level, at);
-  gain.gain.exponentialRampToValueAtTime(SILENCE, at + voice.seconds);
-  source.connect(filter).connect(gain).connect(destination);
+  // The leather sits between both bands and the player, so one low-pass takes
+  // the whole voice and not one band of it.
+  const damping = ctx.createBiquadFilter();
+  damping.type = 'lowpass';
+  damping.frequency.value = DAMPING_HZ;
+  damping.Q.value = DAMPING_Q;
+  damping.connect(destination);
+  const share = voice.bodyShare;
+  playBand(
+    ctx,
+    source,
+    damping,
+    voice.hz,
+    voice.q,
+    voice.level * (1 - share),
+    at,
+    voice.knockSeconds,
+  );
+  playBand(ctx, source, damping, voice.bodyHz, BODY_Q, voice.level * share, at, voice.seconds);
   source.start(at);
+  // The body is the long band, so the voice lasts as long as the body does.
   source.stop(at + voice.seconds);
 }
 

@@ -12,7 +12,14 @@
 
 import { describe, expect, it } from 'vitest';
 import type { TrayImpact } from './vendor/dice-tray.js';
-import { clampVolume, createSoundEngine, LOUDEST_AT, SILENT_BELOW, voiceOf } from './sound';
+import {
+  clampVolume,
+  createSoundEngine,
+  FILTERS_PER_VOICE,
+  LOUDEST_AT,
+  SILENT_BELOW,
+  voiceOf,
+} from './sound';
 
 /** A collision, named so a failure says which one. */
 function impact(kind: TrayImpact['kind'], speed: number, self = 1, other = 2): TrayImpact {
@@ -31,7 +38,8 @@ interface FakeFilter {
  *
  * It records what was built rather than what was heard. The first gain is the
  * one the engine connects to the destination, so `gains[0]` is the output the
- * player's volume must reach, and one filter is built per voice.
+ * player's volume must reach, and every voice builds `FILTERS_PER_VOICE`
+ * filters.
  */
 function fakeContext(): {
   ctx: BaseAudioContext;
@@ -116,6 +124,27 @@ describe('voiceOf', () => {
     expect(clatter?.seconds).toBeGreaterThan(rattle?.seconds ?? Infinity);
   });
 
+  it('gives every voice a body that is lower than its knock and outlasts it', () => {
+    // Weight is this property and nothing else: a low band under the contact,
+    // carrying real level, still sounding after the knock has gone. A voice
+    // whose body died with its knock reads as a click however low it is tuned.
+    for (const kind of ['die', 'surface'] as const) {
+      const voice = voiceOf(impact(kind, LOUDEST_AT), 0.5);
+      expect(voice?.bodyHz, `${kind}: the body sits under the knock`).toBeLessThan(voice?.hz ?? 0);
+      expect(voice?.seconds, `${kind}: the body outlasts the knock`).toBeGreaterThan(
+        voice?.knockSeconds ?? Infinity,
+      );
+      expect(voice?.bodyShare, `${kind}: the body carries real level`).toBeGreaterThan(0.25);
+    }
+    // Leather takes the knock out of a landing and leaves the thud. Wood on
+    // wood keeps more of its knock.
+    const die = voiceOf(impact('die', LOUDEST_AT), 0.5);
+    const surface = voiceOf(impact('surface', LOUDEST_AT), 0.5);
+    expect(surface?.bodyShare, 'the mat is more body than the dice are').toBeGreaterThan(
+      die?.bodyShare ?? 1,
+    );
+  });
+
   it('moves the pitch and the length with the spread it is given', () => {
     const low = voiceOf(impact('die', LOUDEST_AT), 0);
     const high = voiceOf(impact('die', LOUDEST_AT), 0.999);
@@ -197,7 +226,12 @@ describe('the sound engine', () => {
       counts.paired + counts.quiet + counts.triggers,
       'the three outcomes account for the whole stream',
     ).toBe(counts.impacts);
-    expect(fake.filters.length, 'one filter per voice reached the graph').toBe(counts.triggers);
+    // Filters against voices, at the fixed rate one voice builds them. The
+    // constant is the bridge, so the check still catches a voice that reached
+    // the graph with no filter at all, and an impact that made two voices.
+    expect(fake.filters.length, 'every voice built its whole filter chain').toBe(
+      counts.triggers * FILTERS_PER_VOICE,
+    );
   });
 
   it('is silent at a level of zero, and a level of zero is not the same as off', () => {
