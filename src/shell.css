@@ -22,6 +22,12 @@
   --focus: #2b4a5b;
   --mark-success: #14614b;
   --mark-bane: #8a4512;
+  /* The dice material axis. The stress dice differ by material only. */
+  --die-face: #fffdf7;
+  --die-edge: #cfc7b7;
+  --die-pip: #171614;
+  --die-face-stress: #efece3;
+  --die-edge-stress: #bdb5a4;
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -357,6 +363,278 @@ body {
   color: var(--ink-dim);
 }
 
+/* ---------------- the dice, drawn flat ----------------
+ *
+ * Carried from docs/design/0013-screen-final.html. Option C: the shelf holds
+ * every die that stays on the table and the zone holds what the push throws
+ * again. Pool order holds inside each zone. Decision 4.
+ *
+ * The three lock states are told by ground and by frame, never by colour alone,
+ * and the stress dice differ by material only. */
+
+.zones {
+  display: grid;
+  gap: 10px;
+}
+
+.shelf {
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: var(--s2);
+}
+
+.throwzone {
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  padding: var(--s2);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.band-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin: 0 0 6px;
+}
+
+.band-h span {
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 400;
+}
+
+.tray {
+  --die: 46px;
+  --slot: 50px;
+  --gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--slot), 1fr));
+  gap: var(--gap);
+  align-content: start;
+}
+
+.slot {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 4px 2px 3px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+}
+
+.slot.rule {
+  background: var(--raised);
+  border-color: var(--line);
+}
+
+.slot.choice {
+  background: var(--raised);
+  border-style: dashed;
+  border-color: var(--accent);
+  cursor: pointer;
+}
+
+.slot.loose {
+  cursor: pointer;
+}
+
+.die {
+  position: relative;
+  width: var(--die);
+  height: var(--die);
+  border-radius: calc(var(--die) / 5);
+  background: var(--die-face);
+  border: 1px solid var(--die-edge);
+  display: grid;
+  place-items: center;
+  background-repeat: no-repeat;
+}
+
+/* A face count over six prints its value, because pips read to six. */
+.die.num {
+  font-size: calc(var(--die) / 2.2);
+  font-weight: 600;
+}
+
+.stress .die {
+  background-color: var(--die-face-stress);
+  border-color: var(--die-edge-stress);
+}
+
+.slot.loose .die {
+  box-shadow:
+    0 3px 0 var(--die-edge),
+    0 6px 10px rgb(0 0 0 / 14%);
+  transform: rotate(-2.5deg);
+}
+
+.slot.rule .die,
+.slot.choice .die {
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 10%);
+}
+
+/* The short shake of a die the throw moved. A die that stayed keeps its
+   element and therefore never replays it. Section 7 turns it into a cut when
+   the player asks for less motion. */
+@keyframes die-shake {
+  0% {
+    transform: translate3d(0, -10px, 0) rotate(-14deg);
+  }
+  40% {
+    transform: translate3d(0, 0, 0) rotate(9deg);
+  }
+  70% {
+    transform: rotate(-4deg);
+  }
+  100% {
+    transform: rotate(0);
+  }
+}
+
+.slot.thrown .die {
+  animation: die-shake 280ms ease-out;
+}
+
+.slot.thrown.loose .die {
+  animation-name: die-shake-loose;
+}
+
+@keyframes die-shake-loose {
+  0% {
+    transform: translate3d(0, -10px, 0) rotate(-14deg);
+  }
+  40% {
+    transform: translate3d(0, 0, 0) rotate(9deg);
+  }
+  100% {
+    transform: rotate(-2.5deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot.thrown .die,
+  .slot.thrown.loose .die {
+    animation: none;
+  }
+}
+
+.pips {
+  --pip: radial-gradient(circle at 50% 50%, var(--die-pip) 44%, transparent 48%);
+  background-size: 21% 21%;
+}
+
+.f1 {
+  background-image: var(--pip);
+  background-position: 50% 50%;
+}
+
+.f2 {
+  background-image: var(--pip), var(--pip);
+  background-position:
+    26% 26%,
+    74% 74%;
+}
+
+.f3 {
+  background-image: var(--pip), var(--pip), var(--pip);
+  background-position:
+    26% 26%,
+    50% 50%,
+    74% 74%;
+}
+
+.f4 {
+  background-image: var(--pip), var(--pip), var(--pip), var(--pip);
+  background-position:
+    26% 26%,
+    74% 26%,
+    26% 74%,
+    74% 74%;
+}
+
+.f5 {
+  background-image: var(--pip), var(--pip), var(--pip), var(--pip), var(--pip);
+  background-position:
+    26% 26%,
+    74% 26%,
+    50% 50%,
+    26% 74%,
+    74% 74%;
+}
+
+.f6 {
+  background-image: var(--pip), var(--pip), var(--pip), var(--pip), var(--pip), var(--pip);
+  background-position:
+    26% 22%,
+    74% 22%,
+    26% 50%,
+    74% 50%,
+    26% 78%,
+    74% 78%;
+}
+
+/* A badge number is the success count of that die, so an artifact die worth
+   two successes reads correctly. Shape carries the meaning: a success is a
+   circle and a bane is a triangle. */
+.badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.badge.s {
+  background: var(--mark-success);
+  border-radius: 50%;
+}
+
+.badge.b {
+  background: var(--mark-bane);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  padding-top: 6px;
+  font-size: 0;
+}
+
+/* The caption keeps the identity at every width. The state word is dropped
+   while the die is small, because the frame already says it. */
+.cap {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--ink-dim);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.cap b {
+  font-size: 10px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.cap em {
+  display: none;
+  font-style: normal;
+}
+
 /* ---------------- the table ---------------- */
 
 .table {
@@ -536,6 +814,11 @@ body {
   .btn small {
     font-size: 11px;
   }
+  .tray {
+    --die: 58px;
+    --slot: 62px;
+    --gap: var(--s2);
+  }
 }
 
 @media (min-width: 1100px) {
@@ -550,5 +833,22 @@ body {
   }
   .cell {
     min-height: 70px;
+  }
+  .zones {
+    gap: var(--s4);
+  }
+  .tray {
+    --die: 84px;
+    --slot: 90px;
+    --gap: var(--s3);
+  }
+  .cap {
+    font-size: 11px;
+  }
+  .cap b {
+    font-size: 12px;
+  }
+  .cap em {
+    display: inline;
   }
 }

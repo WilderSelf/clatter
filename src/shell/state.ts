@@ -9,10 +9,12 @@
 // the player has typed and asks the core what it means.
 
 import type { Die, DieType } from '../rules/die';
+import { latestValue } from '../rules/die';
 import type { ArtifactFaces, Builder, DiceSpec, Mode } from '../rules/pool';
 import {
   applyDifficulty,
   buildPool,
+  firstRoll,
   ladderState,
   MODIFIER_LIMIT,
   poolBuilder,
@@ -20,6 +22,15 @@ import {
   stepIndex,
   STEP_LADDER,
 } from '../rules/pool';
+import type { PushPreviewOutcome } from '../rules/push';
+import { generations, previewPush, push } from '../rules/push';
+import type { LockState, PushCostUnit, PushProfile } from '../rules/push-profile';
+import { isLocked, lockState, PUSH_PROFILES } from '../rules/push-profile';
+import type { RandomSource } from '../rules/random';
+import type { RollResult } from '../rules/roll';
+import { baneCount, successCount } from '../rules/roll';
+import { score } from '../rules/success';
+import { clickDie } from '../tray/affordance';
 
 /**
  * The artifact tile steps along an enumerated ladder, in the manner of
@@ -70,6 +81,16 @@ const ZERO_COUNTS: Counts = Object.freeze({
   stress: 0,
 });
 
+/**
+ * The profile the application rolls under.
+ *
+ * The drawn screen shows the third preset, where the price of a push is a
+ * stress rise and a stress bane stops the sequence. Section 7 of
+ * `docs/design/0002-screen-design.md` names it. Unit 4.1 turns this into a
+ * choice behind the disclosure, and nothing here branches on the id.
+ */
+export const DEFAULT_PROFILE_ID = 'pool-stress-and-complications';
+
 export interface AppState {
   readonly mode: Mode;
   readonly counts: Counts;
@@ -79,6 +100,12 @@ export interface AppState {
   /** The builder is open at rest A and collapsed at rest B. */
   readonly builderOpen: boolean;
   readonly sheetOpen: boolean;
+  /** The push profile in force, by id. Unit 4.1 lets the player change it. */
+  readonly profileId: string;
+  /** The dice on the table, or `null` while the table is empty. */
+  readonly result: RollResult | null;
+  /** The dice the last throw moved. Those dice shake and no other does. */
+  readonly thrown: readonly string[];
 }
 
 export function emptyState(mode: Mode): AppState {
@@ -89,7 +116,19 @@ export function emptyState(mode: Mode): AppState {
     difficulty: 0,
     builderOpen: true,
     sheetOpen: false,
+    profileId: DEFAULT_PROFILE_ID,
+    result: null,
+    thrown: [],
   };
+}
+
+/** The profile record itself. An unknown id is a fault, not a fallback. */
+export function profileOf(state: AppState): PushProfile {
+  const held = PUSH_PROFILES.find((profile) => profile.id === state.profileId);
+  if (held === undefined) {
+    throw new Error(`no push profile is named ${state.profileId}`);
+  }
+  return held;
 }
 
 function clamp(value: number, low: number, high: number): number {
@@ -237,10 +276,11 @@ export function withDifficulty(state: AppState, value: number): AppState {
 
 /**
  * Switch the mode. The built pool is destroyed, which is why the switch lives
- * behind the disclosure and not one tap from the throw.
+ * behind the disclosure and not one tap from the throw. The table is cleared
+ * with it, because a roll of the old pool cannot be pushed under the new one.
  */
 export function withMode(state: AppState, mode: Mode): AppState {
-  return { ...emptyState(mode), sheetOpen: state.sheetOpen };
+  return { ...emptyState(mode), sheetOpen: state.sheetOpen, profileId: state.profileId };
 }
 
 const TYPE_ORDER: readonly DieType[] = [
@@ -310,4 +350,225 @@ export function difficultyPreview(state: AppState): string {
     return `The next roll takes ${before - after} ${plural(before - after)} away.`;
   }
   return 'The next roll takes no dice away and adds none.';
+}
+
+// ---------------------------------------------------------------------------
+// The throw — Unit 2.2
+//
+// Every answer below comes from the rules core. This file throws nothing,
+// locks nothing and prices nothing: `firstRoll`, `push`, `previewPush`,
+// `isLocked` and `score` decide, and the screen renders what they say.
+// ---------------------------------------------------------------------------
+
+/**
+ * Throw the built pool. A pool of no dice fails automatically and draws nothing
+ * from the random source, so the table stays empty and the builder still
+ * collapses. Both rest states of section 1 stay reachable from an empty pool.
+ */
+export function rollNow(state: AppState, random: RandomSource): AppState {
+  const outcome = firstRoll(
+    applyDifficulty(builderOf(state), state.difficulty),
+    random,
+    state.counts.stress,
+  );
+  if (outcome.kind === 'automaticFailure') {
+    return { ...state, builderOpen: false, result: null, thrown: [] };
+  }
+  const result: RollResult = { dice: outcome.dice, stressAfter: outcome.stressAfter };
+  return {
+    ...state,
+    builderOpen: false,
+    result,
+    thrown: result.dice.map((die) => die.id),
+  };
+}
+
+/** What the push would cost, or `null` while the table is empty. */
+export function pushPreview(state: AppState): PushPreviewOutcome | null {
+  return state.result === null ? null : previewPush(state.result, profileOf(state));
+}
+
+/** True while the push button may be pressed. The core refuses, never the shell. */
+export function canPush(state: AppState): boolean {
+  const preview = pushPreview(state);
+  return preview !== null && preview.kind === 'available' && preview.rerollCount > 0;
+}
+
+/**
+ * Push. The core re-throws the loose dice and repeats every locked value, so
+ * the kept dice keep their faces and their identities.
+ *
+ * The stress counter belongs to the application, and Decision 1 caps it at ten.
+ * The core hands back the stress the profile derived, and the cap is applied
+ * here, where the counter lives.
+ */
+export function pushNow(state: AppState, random: RandomSource): AppState {
+  if (state.result === null) return state;
+  const pushed = push(state.result, profileOf(state), random);
+  if (pushed.kind === 'refused') return state;
+  return {
+    ...state,
+    result: { dice: pushed.dice, stressAfter: pushed.stressAfter },
+    thrown: pushed.rerolled,
+    counts: {
+      ...state.counts,
+      stress: Math.min(POOL_CAPS.stress, pushed.stressAfter),
+    },
+  };
+}
+
+/** Keep a die by choice, or release one. A rule lock refuses and nothing moves. */
+export function toggleDie(state: AppState, id: string): AppState {
+  if (state.result === null) return state;
+  return {
+    ...state,
+    result: { ...state.result, dice: clickDie(state.result.dice, id, profileOf(state)) },
+    thrown: [],
+  };
+}
+
+/** The two zones of the tray. Pool order holds inside each one. Decision 4. */
+export function zonesOf(state: AppState): {
+  readonly kept: readonly Die[];
+  readonly loose: readonly Die[];
+} {
+  const profile = profileOf(state);
+  const dice = state.result?.dice ?? [];
+  return {
+    kept: dice.filter((die) => isLocked(die, profile)),
+    loose: dice.filter((die) => !isLocked(die, profile)),
+  };
+}
+
+/** The short name a die carries on the table, as `At1` or `St10`. */
+const TYPE_TAG: Readonly<Record<DieType, string>> = {
+  attribute: 'At',
+  skill: 'Sk',
+  gear: 'Ge',
+  artifact: 'Ar',
+  bonus: 'Bo',
+  stress: 'St',
+};
+
+export function dieTag(die: Die): string {
+  return `${TYPE_TAG[die.type]}${die.id.slice(die.type.length + 1)}`;
+}
+
+/** The `data-el` name of one die, as section 6 fixes it: `die-at1`. */
+export function dieElement(die: Die): string {
+  return `die-${dieTag(die).toLowerCase()}`;
+}
+
+/** What the screen draws for one die, and what a screen reader hears. */
+export interface DieView {
+  readonly die: Die;
+  readonly element: string;
+  readonly tag: string;
+  readonly value: number | null;
+  readonly state: LockState;
+  readonly successes: number;
+  readonly bane: boolean;
+  /** The state word the caption prints beside the tag. */
+  readonly word: string;
+  /** The accessible name. Shape and colour carry the same facts to the eye. */
+  readonly label: string;
+}
+
+const STATE_WORD: Readonly<Record<LockState, string>> = {
+  rule: 'kept',
+  choice: 'yours',
+  loose: 'back',
+};
+
+const STATE_SENTENCE: Readonly<Record<LockState, string>> = {
+  rule: 'The rules keep it on the table.',
+  choice: 'You keep it on the table. Press to send it back.',
+  loose: 'It goes back in the cup. Press to keep it.',
+};
+
+export function dieView(die: Die, profile: PushProfile): DieView {
+  const value = latestValue(die);
+  const state = lockState(die, profile);
+  const successes = score(die);
+  const bane = value === 1;
+  const worth =
+    successes === 0 ? '' : successes === 1 ? ' One success.' : ` ${successes} successes.`;
+  return {
+    die,
+    element: dieElement(die),
+    tag: dieTag(die),
+    value,
+    state,
+    successes,
+    bane,
+    word: STATE_WORD[state],
+    label:
+      `${dieTag(die)} shows ${value === null ? 'nothing' : value}.` +
+      worth +
+      (bane ? ' A bane.' : '') +
+      ` ${STATE_SENTENCE[state]}`,
+  };
+}
+
+/** What the status line reads. Every figure is derived, never stored. */
+export interface Readout {
+  readonly successes: number;
+  readonly banes: number;
+  readonly dice: number;
+  readonly stress: number;
+  readonly pushes: number;
+}
+
+export function readout(state: AppState): Readout {
+  const result = state.result;
+  return {
+    successes: result === null ? 0 : successCount(result),
+    banes:
+      result === null
+        ? 0
+        : Object.values(baneCount(result)).reduce((total, each) => total + each, 0),
+    dice: result === null ? 0 : result.dice.length,
+    stress: state.counts.stress,
+    pushes: result === null ? 0 : Math.max(0, generations(result.dice) - 1),
+  };
+}
+
+/**
+ * What one push costs, in the unit the profile charges. Keyed by `cost.unit`,
+ * which is a data field, so a fifth cost model is a new row here as well.
+ */
+const COST_SENTENCE: Readonly<Record<PushCostUnit, (total: number) => string>> = {
+  ratingPoint: (total) => `The banes cost ${total} rating ${total === 1 ? 'point' : 'points'}.`,
+  healthPoint: (total) => `The banes cost ${total} ${total === 1 ? 'point' : 'points'} of health.`,
+  refereePoint: (total) => `The referee gains ${total} ${total === 1 ? 'point' : 'points'}.`,
+  complicationCheck: () => 'A complication check is due.',
+};
+
+/**
+ * The sentence on the cost row. It reads `previewPush` and never recomputes a
+ * cost, so the number the player commits to is the number the rules apply.
+ */
+export function costLine(state: AppState): string {
+  const preview = pushPreview(state);
+  if (preview === null) {
+    return 'No dice are on the table.';
+  }
+  if (preview.kind === 'refused') {
+    return preview.reason === 'atPushLimit'
+      ? 'No push is left. This roll is at the push limit.'
+      : 'A stress die shows a bane. No push is left.';
+  }
+  const price =
+    preview.cost.total === 0 ? '' : ` ${COST_SENTENCE[preview.cost.unit](preview.cost.total)}`;
+  return `Push again — throw ${preview.rerollCount} ` + `${plural(preview.rerollCount)}.${price}`;
+}
+
+/** What the push button prints under its own name: the count and the stress. */
+export function pushNote(state: AppState): string {
+  const preview = pushPreview(state);
+  if (preview === null || preview.kind === 'refused') {
+    return 'no push is left';
+  }
+  const stress = Math.min(POOL_CAPS.stress, preview.stressAfter);
+  return `${preview.rerollCount} ${plural(preview.rerollCount)}, stress ${stress}`;
 }

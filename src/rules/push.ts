@@ -116,7 +116,7 @@ export function pushCost(result: RollResult, profile: PushProfile): PushCostRead
 }
 
 /** The number of generations the matrix holds. The first roll is generation 0. */
-function generations(dice: readonly Die[]): number {
+export function generations(dice: readonly Die[]): number {
   return dice.reduce((longest, die) => Math.max(longest, die.values.length), 0);
 }
 
