@@ -1,6 +1,9 @@
-# Release checklist — the network half of Units 0.5 and 0.6
+# Release checklist — Units 0.5, 0.6 and 5.2
 
-**COMPLETE 2026-08-09.** Every step is done. This file is retained because two of its warnings were bought at a price.
+**Units 0.5 and 0.6 are COMPLETE, 2026-08-09.** Steps 1 to 9 are done. That part of this file is
+retained because two of its warnings were bought at a price.
+
+**Unit 5.2 adds steps 10 to 12, 2026-08-10.** Read the "Unit 5.2" section near the end.
 
 Everything an agent can build without the network is built. This file holds what is left.
 
@@ -162,6 +165,55 @@ grep -q Clatter page.html && echo "body carries the name"
 `vite.config.ts` is `/clatter/`, so the built page loads its script from
 `/clatter/assets/…`. A 200 with an empty screen means `base` and the repository name disagree.
 
+## Unit 5.2 — the version tag and the release
+
+The version is `0.1.0`, set in `package.json`. The tag is `v0.1.0`.
+
+**Cut the tag after the pull request merges.** A tag cut before the merge points at a commit that
+never reached `main`.
+
+### 10. Tag the merged commit
+
+```sh
+git switch main
+git pull --ff-only
+git tag -a v0.1.0 -m "Clatter 0.1.0"
+git push origin v0.1.0
+```
+
+**Who runs it.** An agent may. `git push*` carries a sandbox exclusion. The workspace deny rule
+matches `git push origin main`, and a tag ref is a different string, so the rule does not stop this.
+If a tag push is refused, stop and hand this command to the owner. Do not reword it to miss the
+pattern.
+
+**No branding token in the tag name.** The tag carries the version alone.
+
+### 11. Create the release
+
+```sh
+gh release create v0.1.0 --title "Clatter 0.1.0" --notes-file <path>
+```
+
+Write the notes in Simplified Technical English. Name no product, no publisher and no game.
+
+**The branding gate does not read a release.** It reads four surfaces: the tracked tree, `dist/`,
+the commit messages of the pull request, and the repository description and topics. A release title
+and a release body are outside all four. Read the notes yourself before you publish them.
+
+### 12. Check the live site after the deploy
+
+The tag does not deploy. `deploy.yml` runs on a push to `main`, so the merge deploys the site and
+the tag names the same commit.
+
+```sh
+curl -sS -o page.html -w '%{http_code}\n' "https://$OWNER.github.io/$REPO/"
+# Read every asset URL OUT of page.html. Do not guess one and do not retype one.
+grep -oE '(src|href)="[^"]+"' page.html
+```
+
+**Why the URLs are read and never guessed.** A wrong base path answers 200 with a blank screen.
+Unit 0.6 made this rule. Fetch each URL the page names and record its status.
+
 ## Recorded for the ledger
 
 Paste into the ledger rows for 0.5 and 0.6:
@@ -169,3 +221,25 @@ Paste into the ledger rows for 0.5 and 0.6:
 - the URL of the first green CI run,
 - the blocked merge state from step 6,
 - the deployed URL and the HTTP status from step 9.
+
+Paste into the ledger row for 5.2:
+
+- the tag name and the commit it points at,
+- the release URL,
+- every asset URL read out of the live page, with its HTTP status.
+
+## What the owner still owes
+
+No agent can close these.
+
+- **Unit 5.3, the owner gate.** The feel of the finished application on a phone and on a tablet.
+- **The phone performance reading.** `sheet-overlay` prints four figures. The owner runs it on a
+  phone once per phase and pastes the JSON into the ledger. CI cannot measure a real frame rate.
+- **The screen-reader run.** One roll and one push with a screen reader. The keyboard half is gated
+  in CI. The screen-reader half is not.
+- **The spreadsheet pivot.** Export a campaign-sized log, open the CSV in a spreadsheet, and pivot
+  it by dice type and push count.
+- **The import cap decision.** `BLOCKED:budget`, raised at Units 4.5 and 4.6. A full-buffer export
+  leaves little room a row under the import cap. The arithmetic and three priced options sit in the
+  notes of `LEDGER.md` under the heading that names this token.
+- **Unit 5.4, the custom subdomain.** Optional. It needs one DNS record from the owner.

@@ -69,6 +69,8 @@ Status table for each unit. Every unit appends one row after it lands.
 | fix | The pointer probe aimed where no pointer can land | Done | #20 | `--table` lost a die to the pointer route on some throws, with `die-at2 did not answer the click`. **Neither candidate cause was the cause.** The die was not buried: `unreachable=0` on every failing run, and the two dice that were lost held 1,415 and 1,820 whole pixels of their own front surface. The die cells did not eat the press either: the click reached the canvas, and `pointer-events: none` of Decision 9 held at every point measured. **The cause is the probe.** It walked outwards from a die's centre and returned the FIRST point that belonged to the die, which lies on the boundary with whatever covers the centre, by construction. That point is fractional, and the driver rounds every pointer coordinate to a whole pixel — `Math.round` in `node_modules/puppeteer-core/lib/puppeteer/bidi/Input.js`. The press therefore landed across the boundary and the neighbour took it. Measured at seed 108: the aim read `(232.626, 495.087)` where the raycast answers die 22, the rounded point `(233, 495)` answers die 7, and `die-sk3` toggled instead of `die-st8`. **The fix is a construction, not a rule.** `window.__clatterAim` scans the whole pixels the die's projected disc covers, keeps the ones where the die is the frontmost body, and answers the one furthest from any pixel that is not, by a Chebyshev distance transform. The answer is a whole pixel, so rounding changes nothing, and it is the point deepest inside what the player sees. One implementation serves `--table` and `--affordance`. `CLICK_PROBE_RINGS` and `CLICK_PROBE_ANGLES` are gone and nothing replaced them: the scan has no free parameter. **No shipping file changed.** The pointer route was already correct. Over 64 throw seeds at 1440x900 the mode now reads `passed=64 of 64` at `checks=10 failures=0 skipped=0`, against 2 red in 32 before the fix, and seed 2107814439 passes. `table.every-aim-is-a-whole-pixel-the-pointer-can-address` is new. The pointer check now counts `refused` against the dice the screen draws as images and `toggled` against the dice it draws as buttons, and the key route counts the same split through a different instrument, so a die a neighbour hides can no longer be absorbed into a refusal. **`BLOCKED:owner-gate` on the small tray.** At 360x760 the heap buries a die in 7 of 24 throws and the pointer route cannot reach it. The keyboard route reaches every die at every width. See the notes under this table. Three red-proofs passed. Initial JavaScript 43,390 gzip bytes, the lazy chunk 151,876, the render counters 841, 842 and 77, and `npm run perf` 203 steps with the scene digest unchanged — every one of them unchanged, because no shipping file moved. |
 | 4.10 | Error surfaces. **Unit 4.10 is now complete.** | Done | #21 | One error surface, four rows, no control. **Decision 19 of `docs/design/0012-settled-decisions.md` settles the shape** and section 3 of `docs/design/0002-screen-design.md` lists it under the read-only parts, so the control budget of section 3 and both keyboard walks of section 6 are unchanged. `src/shell/faults.ts` holds eight faults over four slots, and the denominator is PARSED out of the union declarations of the five modules that refuse: 27 declared outcomes, 9 with a surface and 18 with a written reason for none. `node scripts/browser.mjs --faults` drives six of the eight to their real failure and reads the surface off the screen, `--faults --quota-kb` drives the seventh, and the eighth prints `NOT JUDGED` with its reason. Every recovery route is TAKEN, and two of them had the wrong words until the route was taken. Seven red-proofs. Initial JavaScript 43,390 to 44,486 gzip bytes against the budget in `budgets.json`, with the branch point measured in a throw-away worktree rather than remembered. See the notes under this table. |
 | 4.11 | Accessibility gate. **Unit 4.11 is now complete. Phase 4 is closed.** | Done | #22 | A keyboard-only run from an empty pool to a pushed result, in CI, with N read out of the design and never restated. `node scripts/browser.mjs --a11y` presses real Tab, arrow, Enter and Escape keys at both drawn widths and takes no pointer at all, counted by the page itself. `src/app.test.tsx` runs the same journey under jsdom. The audit is **axe-core 4.13.0, MPL-2.0, pinned exactly**, and Decision 20 of `docs/design/0012-settled-decisions.md` settles the licence: MPL obligations attach to distribution, this repository distributes none of the covered files, and `scripts/check-bundle-size.mjs` proves it with a calibrated marker. It ran 90 rules and found **two real defects, both fixed here**: seven buttons nested inside the `role="slider"` difficulty, and the cost row outside every landmark. **The disclosure sheet is a real modal at last** — it carried `aria-modal="true"` with no hold on the Tab key from Unit 2.1 to Unit 4.10. The two stale count sentences in section 6 of the screen design are corrected, and a check now reads every sentence of that document that states a walk count. CI judges the whole gate on the flat dice and prints the 3D half as NOT JUDGED, `skipped=1`. See the notes under this table. |
+| 5.1 | Offline — the mount, judged on a graphics card. **Unit 5.1 is now complete.** | Done | #23 | **The check the earlier row called unjudgeable is now judged, and nothing in this repository changed to do it.** `node scripts/browser.mjs --offline --hardware` ran on this host with the sandbox off, on `AMD Radeon RX 6700 XT (radeonsi, navi22, ACO, DRM 3.64, 7.1.7-200.fc44.x86_64)`. The run reads `checks=8 failures=0 skipped=0`, against `checks=8 failures=0 skipped=1` on 2026-08-09. `offline.the-lazy-3d-chunk-mounts` is green rather than `NOT JUDGED`: the status line reads `"a canvas on the table"`, the page holds 1 canvas element, and the renderer choice of Unit 3.7 reads `tray`. **The tray mounted from the precache with the origin stopped.** The harness confirmed `origin_unreachable=true` before the reload, the worker holds 8 entries over 1 cache, and the lazy 3D chunk answered `status=200` over 596,587 bytes with the server down. So the plan's acceptance — the application loads with the network disabled after one visit — is proven with the tray mounting, and not only with the flat renderer. **Two things made it judgeable, and both are outside this unit.** The owner added `node scripts/browser.mjs*` to `sandbox.excludedCommands` on 2026-08-09, and Unit 3.5's screen half put the tray inside the application. The earlier skip was a statement about the sandbox, not about the code, which is why the row said so by name rather than passing by omission. **Nothing was re-scoped.** The open item read "The `--hardware` run stays with the owner", and the `--hardware` run has now been made. See the notes under this table. |
+| 5.2 | Release — the README, the version and the tag. **Unit 5.2 is now complete.** | Done | #23 | The README describes the application as it now stands, the version is `0.1.0`, and the tag `v0.1.0` is cut from the merge commit of #23. **The README was rewritten, not patched.** It was written when the application held a pool builder and flat dice, and fourteen units landed after it. It now names the pool builder and both modes, the roll, the push and its cost preview, the 3D table and the flat fallback with the recorded permanent fall, the three marks on the dice, the synthesised sound, the three theme axes and the colour builder, the roll log with its record view, its three statistics and its CSV export and import, the share card, the four overlay readings, the error surface, the keyboard route and offline use. **Every claim was checked against the code or against a ledger row, and the four errors the first README made were checked for by shape.** The fallback claim is read off `src/shell/renderer.ts`, which also corrected a draft sentence: the fall is permanent but the player can ask for the table again, and only a platform below the bar cannot. The `npm test` claim is read off the `test` script in `package.json` and states plainly that it drives no browser. The claim about other tools stays the narrow one about 3D integrations. The file holds no semicolon and no marketing adjective, checked by grep. No budget is retyped: the README points at `budgets.json`, and the log capacity points at `RING_CAPACITY` in `src/log/store.ts` rather than restating 5,000. **The version is `0.1.0` and not `1.0.0`.** The application is feature-complete through Phase 4 and Unit 5.1, and the owner gate at Unit 5.3 has not run, so it has never been judged on real hardware. A major version would claim a stability nobody has reviewed. **The branding gate, over all four surfaces:** `files_scanned=160 binary_skipped=91 unreadable=0 enumerated=251 terms_loaded=24`, `hits=0`, `surfaces=tracked,dist,commits,metadata`, and the wrapper reads `accounted=251 expected=251 tracked=241 dist=10`, exit 0. The metadata surface was fed a real `gh api repos/WilderSelf/clatter` reading of a 105-character description and 6 topics, which the owner set. **The gate reads four surfaces and a release is not one of them.** See the notes under this table. |
 
 
 ## Unit 4.11 — the accessibility gate
@@ -6495,3 +6497,178 @@ still visible under the panel.
 **The owner still owes the phone reading.** The plan's owner action stands: open the application on
 the phone, turn `sheet-overlay` on, roll, and paste the four figures into this file. The desktop
 reading above is not that measurement and is labelled as such.
+
+## Unit 5.1 — the mount, judged on a graphics card
+
+The open item read: "The `--hardware` run stays with the owner. The sandbox gives no WebGL."
+
+That was written on 2026-08-09. It was true then. It was measured again on 2026-08-10 rather than
+assumed either way, and it is no longer true.
+
+### What was run
+
+```sh
+npm run build
+node scripts/browser.mjs --offline --hardware --url http://localhost:4173/clatter/
+```
+
+The sandbox was off. The harness started and stopped its own preview server, because the mode has
+to prove the server stopped.
+
+### What it read
+
+| Reading | Value |
+|---|---|
+| Renderer | `AMD Radeon RX 6700 XT (radeonsi, navi22, ACO, DRM 3.64, 7.1.7-200.fc44.x86_64)` |
+| Summary | `mode=hardware checks=8 failures=0 skipped=0` |
+| Summary on 2026-08-09 | `checks=8 failures=0 skipped=1` |
+| Origin before the reload | `origin_unreachable=true`, server pid held by the harness |
+| Precache | 8 entries over 1 cache |
+| Lazy 3D chunk, offline | `status=200`, 596,587 bytes, 0 failed requests |
+| Renderer choice | `tray` |
+| Canvas elements | 1 |
+| Table status line | `"a canvas on the table"` |
+| Frames sampled | 62 over 1000 ms, against a floor of 30 |
+
+`offline.the-lazy-3d-chunk-mounts` is the check that was `NOT JUDGED`. It is now green. The skip is
+gone from the summary, so the coverage is read off the same line that reported the hole.
+
+### What settled it, and what did not
+
+**No file in this repository changed for this row.** Two things outside it moved:
+
+1. The owner added `node scripts/browser.mjs*` to `sandbox.excludedCommands` on 2026-08-09. The
+   harness can now reach `/dev/dri` and the display.
+2. Unit 3.5's screen half put the 3D tray inside the application, so the table is a route a
+   throw reaches rather than a fixture the harness builds.
+
+The earlier row named its skip, printed it in the summary and stated the reason. That is why this
+row could measure the same check rather than argue about it.
+
+### What the plan asked for
+
+The acceptance is "the app loads with the network disabled after one visit". The offline mode
+proves it end to end on the graphics card: the worker installs on the first visit, the origin is
+confirmed unreachable, the reload renders 3 of 3 named parts, the chunk comes out of the precache,
+**the tray mounts**, and the manifest and both icons read offline.
+
+### What is open
+
+**Nothing.** Unit 5.1 is complete.
+
+## Unit 5.2 — the README, the version and the tag
+
+### The README
+
+The first README was reviewed before any commit and four errors were caught. This rewrite was
+checked against those four shapes, one at a time, because the same review does not run twice.
+
+| The first README's error | How this rewrite was checked |
+|---|---|
+| It claimed a capability the code did not have. | Every sentence of "What the application does" was read against the module that implements it. The fallback sentence was corrected while doing this: `src/shell/renderer.ts` makes the fall permanent **and** gives the player a switch back, and only a platform below the bar cannot use that switch. The draft said the fall was simply permanent. |
+| It claimed `npm test` covers the browser harness. | The `test` script in `package.json` was read. The README states what that script runs and says plainly that it drives no browser. |
+| It overstated a claim about other tools. | The narrow claim is kept, word for word: every existing 3D dice **integration** hides the kept dice. Nothing is claimed about dice tools in general. |
+| It held a marketing adjective and a semicolon. | `grep` over the file for semicolons and for a list of marketing words. Both exit 1, which is no match. |
+
+**A green branding gate is not a review of the document.** The earlier row wrote that lesson and it
+held here: the gate reads forbidden tokens, not false statements. Nothing below was checked by the
+gate.
+
+Three further disciplines were applied:
+
+- **No budget is retyped.** The README points at `budgets.json` and says in a sentence that it
+  states no number from it.
+- **No constant is retyped either.** The log capacity points at `RING_CAPACITY` in
+  `src/log/store.ts`. A prose copy of 5,000 is a cache with no invalidation.
+- **No "not affiliated with" disclaimer.** Writing one requires naming the publisher, which is the
+  thing being avoided. Constraint 1.
+
+### The version
+
+`0.1.0`, set in `package.json`. It was `0.0.0`.
+
+The reason for 0 and not 1: the application is feature-complete through Phase 4 and Unit 5.1, and
+the owner gate at Unit 5.3 has not run. Nobody has judged the feel of it on a phone or on a tablet.
+A major version claims a stability that no review has confirmed. `0.1.0` claims a first working
+release, which is what this is.
+
+### The tag and the release
+
+The tag is `v0.1.0`, cut from the merge commit of pull request #23, after the merge. A tag cut
+before the merge points at a commit that never reached `main`.
+
+The tag name carries the version alone. No branding token reaches it.
+
+### The branding gate, and which surfaces it actually reads
+
+```
+branding-gate: files_scanned=160 binary_skipped=91 unreadable=0 enumerated=251 terms_loaded=24
+branding-gate: binary metadata NOT scanned in 91 files (PNG tEXt, PNG iTXt, JPEG EXIF and the like): .jpg .png
+branding-gate: hits=0 surfaces=tracked,dist,commits,metadata
+branding-count: OK accounted=251 expected=251 scanned=160 binary_skipped=91 tracked=241 dist=10
+```
+
+Exit 0. Run as `sh scripts/check-branding-count.sh --base origin/main --metadata-file <file>`,
+where the file is a real `gh api repos/WilderSelf/clatter` reading.
+
+**The four surfaces it reads:**
+
+1. **The tracked tree**, which carries the README. 241 tracked paths.
+2. **`dist/`**, which is the built output. 10 files.
+3. **The commit messages** of this pull request, over `origin/main..HEAD`.
+4. **The repository description and the topics**, from the `gh api` file. The owner set a
+   105-character description and 6 topics on 2026-08-09. `npm test` alone passes no metadata file,
+   so it prints `metadata` in the surface list while reading nothing. **This row's figures come
+   from a run that was fed the file.**
+
+**What it does not read, stated plainly:**
+
+- **The release title and the release notes.** A release lives in the GitHub API and in no file.
+  The notes were read by hand before publication instead.
+- **The tag name and the tag message.** Same reason.
+- **The pull-request title and body.** The gate reads commit messages, not the pull request.
+- **Text inside a binary file.** 91 files were skipped as binary and their PNG `tEXt`, PNG `iTXt`
+  and JPEG EXIF chunks were not read. The gate prints that hole on every run that skips a file.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npm test` | exit 0. Vitest 466 tests over 44 files, plus 23 `node:test` cases with 1 skipped by design |
+| `npm run build` | exit 0, `precache coverage: 7 of 7` |
+| `node scripts/check-bundle-size.mjs` | exit 0, `failures=0` |
+| `npm run perf` | exit 0, `steps_to_rest_fixed_seed_scene measured=203`, spread 0 over 5 runs, scene digest matched |
+| Initial JavaScript | 44,828 gzip bytes. The budget is `initial_js_gzip_bytes` in `budgets.json` and the measurement is under it. |
+| Lazy 3D chunk | 151,876 gzip bytes, against `lazy_3d_chunk_gzip_bytes` in the same file |
+| Service worker | 5,972 gzip bytes over 2 files, reported with no budget |
+| Twelve-die render counters | 841 draw calls, 842 triangles, 77 textures, each under its ceiling in `budgets.json` |
+| `--offline --hardware` | `checks=8 failures=0 skipped=0` |
+| `--tray --hardware` | `checks=7 failures=0 skipped=0` |
+
+No code changed in this pull request. The three render counters and the steps to rest were measured
+again anyway, because a claim that nothing moved is worth less than a reading.
+
+### What is open
+
+**Nothing of Unit 5.2.** It is complete.
+
+## What the owner still owes, across the whole project
+
+Every unit an agent can close is closed. Six items remain and no agent can take one.
+
+1. **Unit 5.3 — the owner gate.** Judge the feel of the finished application on a phone and on a
+   tablet. This is one of the two owner judgements the plan allows.
+2. **The phone performance reading.** Open the application on a phone, turn `sheet-overlay` on,
+   roll, and paste the four figures into this file. CI cannot measure a real frame rate.
+3. **The screen-reader run.** One roll and one push with a screen reader. Unit 4.11 gated the
+   keyboard half in CI. The screen-reader half was deferred to Unit 5.3 by the plan.
+4. **The spreadsheet pivot.** Export a campaign-sized log, open the CSV in a spreadsheet, pivot it
+   by dice type and by push count, and re-import it.
+5. **The import cap decision — `BLOCKED:budget`.** Raised at Units 4.5 and 4.6. A full-buffer
+   export leaves very little room a row under the import cap. The arithmetic and three priced
+   options sit under the heading that names this token in this file. Do not pick one for the owner.
+6. **Unit 5.4 — the custom subdomain.** Optional. It needs one DNS record.
+
+`docs/release-checklist.md` carries the same list, beside the commands.
