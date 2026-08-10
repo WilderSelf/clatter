@@ -113,7 +113,11 @@ export async function mountTray(
   }
 
   const { DiceBox: Tray } = await loadTray();
-  container.style.background = TRAY_SURFACE_COLOR;
+  // The tray surface is a theme axis of six — Unit 4.8. The application writes
+  // `--tray-surface` on the root element, so the inline value below follows a
+  // change of the axis without a remount. The literal after the comma is what a
+  // caller outside the application gets, and it is the row Unit 3.2 shipped.
+  container.style.background = `var(--tray-surface, ${TRAY_SURFACE_COLOR})`;
 
   // A custom colour set, not one of the six named sets. Every die face is drawn
   // on this neutral base and `throwPool` multiplies the colour of the type into

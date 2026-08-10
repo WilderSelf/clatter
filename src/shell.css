@@ -7,28 +7,28 @@
  * end of this file, under Unit 4.4. Its record view is a shell: the transposed
  * matrix of Decision 3 arrives with Unit 4.5.
  *
- * Every colour is a role, never a hue. Unit 4.8 replaces this block with the
- * three theme axes and no rule below has to change. */
+ * Every colour is a role, never a hue.
+ *
+ * **This file holds no colour of its own.** Unit 4.8 took the role block out of
+ * `:root` and put it in `src/theme/css-vars.ts`, which says which palette token
+ * fills which role, and `src/app.tsx` writes those properties on the root
+ * element on every change of a theme axis. A rule below therefore paints
+ * whichever of the six interface palettes is in force, and no rule below had to
+ * change to make that true.
+ *
+ * `src/theme/shell-css.test.ts` enumerates every colour literal left in this
+ * file and asserts the list against the three the file is allowed. All three
+ * are the same kind of thing: black at a fraction of one, spent as a shadow or
+ * as a dimming layer. A shadow is the absence of light rather than a colour of
+ * the theme, and a scrim has to darken every palette including the light one.
+ * Add a fourth literal and that check goes red.
+ *
+ * The dice material is not in this block either. A flat die takes the body
+ * colour of its own type through `--die-face`, written on the die by the
+ * screen, so the dice axis reaches the flat renderer exactly as it reaches the
+ * 3D one. */
 
 :root {
-  --page: #dedad2;
-  --surface: #f4f1ec;
-  --raised: #fffefb;
-  --sunken: #e5e0d6;
-  --ink: #171614;
-  --ink-dim: #6a655c;
-  --line: #d3cdc1;
-  --accent: #2b4a5b;
-  --accent-ink: #ffffff;
-  --focus: #2b4a5b;
-  --mark-success: #14614b;
-  --mark-bane: #8a4512;
-  /* The dice material axis. The stress dice differ by material only. */
-  --die-face: #fffdf7;
-  --die-edge: #cfc7b7;
-  --die-pip: #171614;
-  --die-face-stress: #efece3;
-  --die-edge-stress: #bdb5a4;
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -261,7 +261,7 @@ body {
 }
 
 .cell-n.zero {
-  color: #a9a296;
+  color: var(--ink-dim);
   font-weight: 400;
 }
 
@@ -365,8 +365,11 @@ body {
   border-radius: 3px;
 }
 
+/* The centre notch is the one a player returns to, so it is told from the other
+   six by the boundary colour rather than by a shade of its own. */
 .tk-n.centre {
-  background: #d8d2c6;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .tk-n.on {
@@ -404,7 +407,6 @@ body {
   border: 2px dashed var(--accent);
   border-radius: 8px;
   padding: var(--s2);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
 .band-h {
@@ -471,7 +473,7 @@ body {
   height: var(--die);
   border-radius: calc(var(--die) / 5);
   background: var(--die-face);
-  border: 1px solid var(--die-edge);
+  border: 1px solid var(--line);
   display: grid;
   place-items: center;
   background-repeat: no-repeat;
@@ -483,14 +485,9 @@ body {
   font-weight: 600;
 }
 
-.stress .die {
-  background-color: var(--die-face-stress);
-  border-color: var(--die-edge-stress);
-}
-
 .slot.loose .die {
   box-shadow:
-    0 3px 0 var(--die-edge),
+    0 3px 0 var(--line),
     0 6px 10px rgb(0 0 0 / 14%);
   transform: rotate(-2.5deg);
 }
@@ -613,7 +610,7 @@ body {
   place-items: center;
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
+  color: var(--mark-ink);
 }
 
 .badge.s {
@@ -689,9 +686,7 @@ body {
   max-width: 46%;
   margin: 0;
   padding: 3px var(--s2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--raised);
+  color: var(--on-tray);
 }
 
 .zones.over .shelf .band-h {
@@ -744,10 +739,21 @@ body {
  * on each other. The throw is not spread to fix it, because spreading it moves
  * `steps_to_rest_fixed_seed_scene` and the pinned scene digest. The harness
  * counts the dice that show no surface of their own and reports the number. */
+/* The one thing drawn ON the tray surface in the flat renderer, so `--on-tray`
+   is spent where a browser without WebGL can still read it. It holds no tab
+   stop, so neither keyboard walk of section 6 changes. */
+.table-note {
+  margin: 0;
+  padding: var(--s3);
+  text-align: center;
+  font-size: 13px;
+  color: var(--on-tray);
+}
+
 .table {
   min-height: 200px;
   border-radius: 8px;
-  background: var(--sunken);
+  background: var(--tray-surface);
   display: grid;
   place-items: center;
 }
@@ -838,10 +844,6 @@ body {
   color: var(--accent-ink);
 }
 
-.btn.go small {
-  opacity: 0.85;
-}
-
 .icon-btn {
   min-height: 44px;
   min-width: 44px;
@@ -861,7 +863,7 @@ body {
 .scrim {
   position: fixed;
   inset: 0;
-  background: rgb(23 22 20 / 45%);
+  background: rgb(0 0 0 / 55%);
   display: grid;
   align-items: end;
   justify-items: center;
@@ -1079,6 +1081,56 @@ body {
   text-transform: uppercase;
   color: var(--ink-dim);
   white-space: nowrap;
+}
+
+/* ---------------- the theme panel, Unit 4.8 ----------------
+ *
+ * Three groups of six, and each group is one tab stop with an arrow walk, which
+ * is section 2 of the screen design. The swatch beside a name is decoration and
+ * carries `aria-hidden`, because the name is what a reader says and the state is
+ * what a reader hears. A control that were only a swatch would have neither. */
+
+.thm-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--s2);
+}
+
+.thm-row {
+  gap: var(--s1);
+}
+
+.thm-sw {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+
+/* The colour a player types, and the same colour behind a picker. The field is
+   the control that carries the name and the value. */
+.thm-seed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  min-height: 44px;
+}
+
+.thm-pick {
+  width: 44px;
+  min-height: 44px;
+  padding: 2px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+@media (min-width: 600px) {
+  .thm-rows {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* ---------------- the history destination — Unit 4.4 ----------------
@@ -1336,7 +1388,6 @@ body {
   height: 6px;
   border-radius: 50%;
   background: var(--ink-dim);
-  opacity: 0.7;
 }
 
 .hist-mx td[data-cell='absent'] {

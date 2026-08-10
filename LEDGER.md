@@ -42,7 +42,7 @@ Status table for each unit. Every unit appends one row after it lands.
 | 4.5 | CSV export | Export half done. Export button open. Recorded order deviation. | — | **Done:** the full-buffer measurement. `exportCsvInChunks` in `src/log/csv.ts` builds the file a chunk of rolls at a time, and each chunk becomes its own `Blob`, so the heap holds one chunk and never the whole document. `readRollsInPages` in `src/log/store.ts` reads the buffer a page at a time, because `readRolls` rebuilds 5,000 rolls in one task. The `--log-csv` harness mode measures the whole of what an export button does. **Open:** the export button and the download. Both are interface work and wait at `BLOCKED:owner-gate` on Unit 2.0. The unit is not complete. See the notes under this table. |
 | 4.6 | CSV import | Round trip through the real store done. Import control open. Recorded order deviation. | — | **Done:** store, export, import, store, with every field of every roll compared. `appendRolls` takes a `replace` option that empties the log inside the transaction of the insert, which is the call site Unit 4.6 was waiting for. The three decisions the plan settled are now asserted through the real store: an import replaces the log, a duplicate `roll_id` is rejected, and the size cap refuses a file before it is parsed. **Open:** the import control, the file picker and the byte-size check on the file itself, plus the message an invalid import shows, which is Unit 4.10. All of it is interface work and waits at `BLOCKED:owner-gate` on Unit 2.0. The unit is not complete. See the notes under this table. |
 | 4.9 | Share card | Capture half done. Summary, download and share open. Recorded order deviation. | — | **Done:** the capture. `src/tray/capture.ts` draws one fresh frame through the exposed renderer and copies it in the same task. The function is **synchronous on purpose**, because a synchronous function cannot await and an await between the render and the copy is the black-frame defect. No `preserveDrawingBuffer`, and no screenshot library. `scripts/browser.mjs --share` ran on the graphics card with the sandbox off, over a mixed pool of 24 dice at `--throw-seed 5`: luminance variance 383.92 luma levels squared against a floor of 25, and 28,892 distinct pixel values against a floor of more than 1,000, both read off the decoded JPEG. The file measures 93,833 bytes, opens `ffd8ff`, closes `ffd9`, declares 1440 by 900 and decodes to 1440 by 900, against a canvas of 1440 by 900 device pixels. The red-proof `--capture-later` copies the canvas one task after the render, which is the defect itself: variance 0.00, one distinct value, exit 1, and **the file check stayed green** on a valid 36,223-byte JPEG of an empty table. The card is `docs/design/0009-share-card-1440.jpg`. Both chunks are unchanged at 6,953 and 151,876 gzip bytes, because nothing in `src/` imports the module yet. `npm run perf` still reads 203 steps with the scene digest unchanged. Branding gate `files_scanned=94`, `hits=0`, exit 0. **Open:** the summary composition, the download button and the Web Share call. All three are design work and wait at `BLOCKED:owner-gate` on Unit 2.0. **Unit 4.9 is not complete.** See the notes under this table. |
-| 4.8 | Themes | Data half done. Picker and builder controls open. | — | **Done:** the three axes and every contrast claim over them. `src/theme/themes.ts` holds six presets on each of three independent axes — dice, tray surface and interface palette — and all three carry the six names Unit 3.1 installed in the vendored tray: `ember`, `ash`, `verdigris`, `bone`, `void` and `cobalt`. **Every colour is a literal in a row.** No resolver derives one, so a seventh preset is a seventh row. The `ash` dice row IS the Unit 3.3 table, imported and not copied, and the `ash` surface is the one Unit 3.2 shipped, now written once and read by `src/tray/scene.ts`. **The text denominator is 6, and it is measured, not assumed.** All 216 combinations run, each one reads its seven text ratios through `resolveTheme`, and each interface palette answers one way over all 36 settings of the other two axes, so the 216 collapse to 6. A text colour that read the tray would give more than one answer and go red. 42 palette pairs pass, tightest `bone` textMuted over surface at 5.28 to 1 against a floor of 4.5. **The readout over the tray enumerates all 36**, palette against surface, asserted as a product, lowest 12.38 to 1 against the same floor. The floors are WCAG 2.2, SC 1.4.3 for text and SC 1.4.11 for a control. **The type ladder holds in all six dice themes**, 90 pairs against a product of 6 themes and 15 pairs, closest 8.59 CIE L* against the Unit 3.3 floor of 8, and that closest pair is the shipped `ash` row. Per theme: ember 8.92, ash 8.59, verdigris 8.87, bone 8.85, void 8.87, cobalt 8.92. No theme failed and no floor moved. Two more claims came with the new axes, because an invariant proven for one instance does not compose: the black numeral over 36 bodies, lowest 4.50 to 1 against a floor of 4, and every die against every surface over 216 combinations, lowest 3.25 to 1 against a floor of 3. Every tray surface is dark by construction, and the row says why. `src/theme/builder.ts` holds the colour builder's arithmetic: `withLightness` walks a colour to a chosen CIE L*, `deriveDiceTheme` puts six types on the ladder from one colour, `derivePalette` builds a page around a colour and keeps that colour as the accent unchanged, and `checkPalette` and `checkDiceTheme` report every pair that misses its floor. The checker judges the six shipped rows and a colour a player picked through one rule. A colour too dark to carry a control on a dark page is reported rather than replaced. `src/theme/contrast.ts` holds the arithmetic and adds no dependency. `Settings` gains `diceThemeId`, `traySurfaceId` and `interfacePaletteId` at version 5, with a 4 to 5 migration step, and the migration table runs 20 cases against a 20-item enumeration. Three red-proofs passed, one per claim: a `bone` text colour broke at "bone: text over background reads 3.14 to 1", an `ember` readout broke at "the ember readout on the ember tray reads 4.22 to 1", and a `verdigris` type colour broke at "verdigris: gear and skill are 1.1 L* apart". Each was restored from a saved copy. Initial JavaScript moves from 6,953 to 7,028 gzip bytes, all of it the six surface hexes that `scene.ts` now reads from the theme module. The lazy chunk is unchanged at 151,876. The dice rows and the palettes enter no chunk, because nothing in `src/` imports them yet. Branding gate `files_scanned=94`, `hits=0`, exit 0. **Open:** the theme picker, the colour builder's controls, and the stylesheet that spends a palette. All of it is interface work and waits at `BLOCKED:owner-gate` on Unit 2.0. **Unit 4.8 is not complete.** |
+| 4.8 | Themes. **Unit 4.8 is now complete.** | Done | #17 | The open half lands: the picker, the colour builder's controls, and the stylesheet that spends a palette. **`src/shell.css` holds no colour of its own.** The role block left `:root`, `src/theme/css-vars.ts` says which palette token fills which role, and `src/app.tsx` writes those properties on the root element in a layout effect, so a change of an axis reaches the whole application at run time and not only at startup. Decision 15 of `docs/design/0012-settled-decisions.md` records it. **Three colour literals are left and all three are the same kind of thing:** black at a fraction of one, spent twice as a shadow and once as a scrim. `css-vars.test.ts` enumerates every literal the file still holds, compares the list against those three, and measures each one to be black and translucent, so a fourth literal cannot join the list by being written into it. **The palette grew four tokens** — `sunken`, `line`, `markSuccess` and `markBane` — and every one is a literal in all six rows, so no resolver derives a colour and a seventh preset is still a seventh row. `line` answers the non-text floor against all three grounds, because a button, a pool tile and a text field are each told from the page by their boundary. The two marks do not follow the theme, and the row says why. `checkPalette` moves from 7 pairs to 21, and the six rows pass all 126. **Three axes reach three places, and every value is read off the rendered result.** `node scripts/browser.mjs --theme` is the new mode and it exits 0 at `checks=10 failures=0 skipped=0` on the graphics card: 6 of 6 page colours read off `.screen`, 6 of 6 tray surfaces read off the element the tray mounts into, 18 flat die bodies against a product of 6 rows by 3 dice types with 18 distinct readings, and 18 more read off the 3D materials through the seam `table.tsx` publishes, with the throw counter held at 2 through all six so the dice were repainted where they lay. **Every contrast claim holds on the rendered screen:** 90 readings against a product of 6 interface palettes by 15 roles, each ink off the element and each ground off the first ancestor that really paints one, lowest 3.06 to 1 on the bone edge of a button, at the WCAG 2.2 floors of 4.5 and 3. **The report reaches the player by name:** 7 findings, 5 from `checkPalette` and 2 from `checkDiceTheme`, computed IN NODE over the same seeds, and the screen names all 7; the page did not move, so the colour is reported and never replaced. **`deriveDiceTheme` gains `exact`, behind `theme-exact-dice`,** because a laddered dice set is readable by construction and `checkDiceTheme` could otherwise never report anything a builder made — the claim had no route to be proved on. **A built theme survives a reload** through the real store, and the record holds the two SEEDS and never the colours. **Keyboard alone reaches and operates the panel:** 26 controls, 0 unnamed, 0 without a state, in 5 groups, and one arrow key moved the page from `rgb(31, 32, 33)` to `rgb(24, 33, 32)`. Section 6 still reads eleven visits before the throw and thirty-five after it, in BOTH instruments. `Settings` gains `builtTheme` at version 8, with a 7 to 8 step, and the migration table runs 36 cases against a 36-item enumeration. Vitest moves from 334 to 353 tests over 35 files. `--shell`, `--sheet`, `--history` and `--blocked-chunk` all stay green. Initial JavaScript moves from 33,449 to 37,631 gzip bytes against the 61,440 in `budgets.json`; the lazy chunk is unchanged at 151,876; the three render counters are unchanged at 841, 842 and 77. Seventeen injections were proved red and every one was restored by editing the injection back. The captures are `docs/design/0019-theme-<row>-1440.png` for all six interface palettes, plus the panel and the builder at 360 px and 1440 px. **Open:** nothing. One pre-existing `--table` failure is reported under the notes and it is not this unit's. |
 | 4.7 | Statistics view | Computation done. Charts open. Recorded order deviation. | — | **Done:** the computation. `summariseLog` in `src/log/statistics.ts` answers the three statistics the plan names: the success rate by pool size, the push outcomes, and how often pushing paid off. **It reads the stored derived values and re-derives none.** It reads `dice[].cells[].successes`, the null cells that say a die did not exist yet, `successes`, `pushCount`, `costType` and `costAmount`, and nothing else. It never reads `cells[].value` and it imports no push profile as a value, so no profile can reach the code to re-price a past roll. **"Pushing paid off" is defined in the code, and the definition travels in the returned record as `paidOffDefinition`:** a push paid off when the roll ends with more successes than it held before the first push. Three definitions were rejected and the reasons are in the module: successes per unit of cost, because the four cost units are different things and do not add together; crossing a target number, because the rules have none; and the last push alone, because a player pushes a roll and not a generation. The hand-built log of 6 entries runs against expectations written out by hand: pool size 3 gives 3 rolls, 2 with a success, 3 successes and a rate of 2/3, pool size 5 gives 3 rolls, 3 with a success, 5 successes and a rate of 1, the pushes give 4 pushed rolls over 5 pushes, 1 better, 2 the same and 1 worse, 6 successes before and 7 after, and a cost of 3 rating points, 3 complication checks, 1 health point and no referee point, and the paid-off rate is 1/4. Three denominators are counted a second way: the rolls of every pool-size row sum to the entries read, the better, same and worse counts sum to the pushed rolls, and the pushes are counted again off the case table. **An empty log cannot pass silently:** the entries read are asserted above zero, and the three degenerate cases answer for themselves — no rolls gives 0 entries, no rows and a null rate, no pushes gives a null rate that is asserted to be neither zero nor a NaN, and one roll gives one row. **Two red-proofs passed, and each named the statistic that shifted.** Re-deriving the cost from the edited profile moved `pushes.costByUnit.ratingPoint` from 17 to 34 over 8 rolls, which is the doubled price the edit set, exit 1. Re-deriving the successes from the stored face turned 5 tests red at once: every pool-size row fell to 0 successes and a rate of 0, the paid-off rate fell from 0.25 to 0, and the artifact roll read 7 successes on the escalating curve against the 4 the entry stored under the flat one. Both injections were restored from a saved copy and the file hash matches. Vitest moves from 176 to 194 tests. Both chunks are unchanged at 7,028 and 151,876 gzip bytes, because nothing in `src/` imports the module yet. **Open:** the charts. They are interface work and wait at `BLOCKED:owner-gate` on Unit 2.0. **Unit 4.7 is not complete.** |
 | 4.3 | Saved pool presets | Store done. List interface open. Recorded order deviation. | — | **Done:** the storage. `Settings` gains `poolPresets` at version 6, over the same injected store `src/settings/settings.ts` already carries. No second store was built. A preset holds a name and a `PoolCounts`, which is what `poolBuilder` takes, so a recalled preset goes straight back into the rules core. **Step mode is not saved:** its pool is one index on the ladder plus the extras, and the unit asks for a named pool. Four operations answer a new record and never throw: `savePoolPreset`, `recallPoolPreset`, `movePoolPreset` and `deletePoolPreset`. A refusal is a record, and there are four: `emptyName`, `nameTooLong`, `atPresetLimit` and `noSuchPreset`. The name is the identity of a preset, so a save under a name the record holds replaces that preset where it stands. **The reorder is asserted over three presets, because a move of one of two is not observable.** The recall is asserted by rolling the recalled pool through `firstRoll`, not by comparing records: 6 dice came back, the artifact die kept its 10 faces, and all 6 threw one generation. **The two caps are asserted separately.** Twenty presets save one at a time and the twenty-first is refused with `atPresetLimit`, while a replacement is still let through. A name of 60 characters saves and one of 61 is refused with `nameTooLong`, and the same pair of assertions runs over 60 and 61 emoji, because the cap is counted in code points. **The name is user text and storage keeps every byte of it.** A name holding markup, both kinds of quote, an ampersand and an emoji round trips through the store and is compared byte for byte in UTF-8 over all 54 of its bytes. Nothing is escaped, stripped or executed here. **The interface must render the name through `textContent`.** That is Constraint 8, it is not closed by this half, and it belongs to the list interface. The migration gains a 5 to 6 step, and the migration table runs 26 cases against a 26-item enumeration, 6 of them new. An over-long stored list is cut at the cap rather than emptied, and that is asserted by name, because a migration that answered with an empty list would pass a bound alone. A stored preset with a bad name, a bad count or a duplicate name is dropped. `scripts/browser.mjs` compared every settings field by identity, which a field holding a list breaks, so it now reads them through `sameSetting`. That helper runs 11 cases in `scripts/browser.test.mjs` under `npm test`, and the identity defect turns them red. Vitest moves from 176 to 194 tests. Both chunks are unchanged at 7,028 and 151,876 gzip bytes. **Open:** the preset list on the screen, the name field, the drag or the buttons that reorder, and the `textContent` rendering. All of it is interface work and waits at `BLOCKED:owner-gate` on Unit 2.0. **Unit 4.3 is not complete.** |
 | fix | Two harness checks measured the wrong thing | Done | — | `--settings-store` failed with `an unknown stored version read poolPresets away from the defaults`, and `--log-csv` failed with a longest task of 58.0 ms against the 50 ms ceiling. Neither shipping module was wrong and neither changed. **Cause 1: the driver drops a repeated object reference.** `readSettings` answers the one frozen `DEFAULT_SETTINGS` record for every unusable stored value, and that record holds one frozen `poolPresets` array. The driver serialises a repeated object once and delivers every later reference to it as `undefined`. The first of the six reads therefore arrived with `[]`, the other five arrived with the field missing, and so did the default record the run compared them against. Three checks compared `[]` against `undefined` and failed. Five field readings compared `undefined` against `undefined` and could not have failed at all. Every settings record now crosses the connection as JSON text, because text is a primitive and cannot be shared. The run counts the field readings it makes: 66 of 66, over six cases and eleven fields, with the field list taken from the default record, so a field added later is compared without an edit. `migrate` is unchanged. It answers an unknown version with the identical frozen defaults record, over all eleven fields, and a probe in the page proved that identity. **The pure test was the deeper defect.** `src/settings/settings.test.ts` bounded each field to its allowed values and never compared it against the value the case names, so 26 migration cases passed while the plan's own acceptance went untested. Each case now carries the record it must answer with, and the loop walks `Object.keys(DEFAULT_SETTINGS)` and counts 286 comparisons against 26 cases times 11 fields. Red-proof: a `migrate` that answers an unknown version with one leftover preset leaves the old test green at 16 of 16 and turns the repaired test red at `an unknown future version: poolPresets`. The same defect turns the repaired harness check red. **Cause 2: the export check measured the wall clock and not the work.** The gate was the longest gap between two ticks of a re-arming timer, and such a gap also counts a garbage collection and anything else the browser runs in the same window. Measured with the sandbox off, on an idle machine, over ten runs of `--log-csv` alone: the gap read 13, 14, 14, 15, 15, 15, 57, 57, 58 and 58 ms, so four runs of ten failed. The export's own longest stretch of the main thread held at 9 to 11 ms in those same runs. The spike always lands at a chunk boundary about a third of the way in, and a second and a third export in the same page never reproduce it. Eight busy cores moved the gap by about 7 ms and explain none of the spike. `src/log/csv.ts` and `src/log/store.ts` have not changed since Unit 4.5, so no regression exists and the 13 ms recorded there was one of the six runs in ten that miss the spike. The ceiling stays at 50 ms and `budgets.json` is untouched. **The gate is now the longest stretch the export itself held the main thread.** The run marks the thread on both sides of every yield, which gives one window per chunk plus the tail: 101 windows against the 100 chunks plus one, which is its own denominator. An export that stopped yielding would be one window of the whole build. The timer stays beside it and is reported, and the read phase is named as reported and not gated, because the browser rebuilds a page of rolls in a task of its own. Red-proof: `--long-task-ms 80` reads 83.0 ms and turns the check red. Eight runs after the fix all exit 0, with the gate between 9.0 and 11.0 ms, and one of them reports a 57 ms wall gap beside a 10 ms gate. All thirteen harness invocations exit 0 at seed 5. Vitest holds at 194 tests. Branding gate `files_scanned=101`, `hits=0`, exit 0. |
@@ -5222,3 +5222,157 @@ defect the code comment warns about, which is clamping the rating to the nearest
 
 - **Unit 4.3 is complete.** Nothing of it is deferred.
 - The panel writes no step pool, and that is a decision with its reason recorded, not a deferral.
+
+## Unit 4.8 — the open half: the picker, the builder's controls, and a stylesheet that spends a palette
+
+### What landed
+
+`sheet-theme` draws three groups of six rows plus the colour builder, `src/theme/css-vars.ts` says
+which palette token fills which role, and `src/shell.css` holds no colour of its own. Decision 15 of
+`docs/design/0012-settled-decisions.md` records every choice below, and section 7 of
+`docs/design/0002-screen-design.md` carries the one amendment.
+
+### The trap this unit was written against, and where it landed
+
+**A palette that resolves is not a palette that is spent.** Every claim about the screen is measured
+off a rendered element in the driven browser, and nothing in the theme mode reads `resolveTheme`.
+The page colour comes off `.screen`, the tray surface off the element the tray mounts into, a flat
+die body off the die, and a 3D die body off the material through the seam.
+
+**Changing which token fills which role is how a proved palette fails.** The first draft of
+`css-vars.test.ts` read `PALETTE_ROLES` out of the module and then asserted the module against it.
+Two roles were swapped inside `PALETTE_ROLES` and every check stayed green. The map is now written
+out again in the check, and the same injection goes red at
+`ember: --ink takes text: expected '#C1ACA6' to be '#F7E4DE'`.
+
+### A check that could not fail, and the control that gave it a route
+
+`checkDiceTheme` judges three things: the ladder step, the black numeral, and the die against the
+tray. A dice set the builder derives places every rung at a fixed CIE L*, so all three hold whatever
+colour arrived and the checker can never report anything about a set the builder made. The claim
+that its findings reach the player therefore had no route to be proved on.
+
+`deriveDiceTheme` gains `exact`, behind `theme-exact-dice`. Off, the six dice are derived around the
+chosen colour and are readable by construction. On, that colour itself goes on the rung nearest its
+own lightness, and the checker reports whatever that costs. It is the same promise `derivePalette`
+has always made for the accent, and it is what makes the dice half of the report a live claim: the
+browser run reads 5 findings from `checkPalette` and 2 from `checkDiceTheme`, and the screen names
+all 7.
+
+### The four tokens the palette grew, and why each one is a literal
+
+The stylesheet paints four grounds and two semantic marks. The data half named neither, so
+`sunken`, `line`, `markSuccess` and `markBane` are new literals in all six rows. Nothing derives
+them: the values were computed once with `withLightness` and written into the rows, so a seventh
+preset is still a seventh row.
+
+**`line` is the load-bearing one.** A button, a pool tile and a text field are each told from the
+page by their boundary rather than by their ground, so the boundary answers WCAG 2.2 SC 1.4.11 at
+3 to 1 against all three grounds. That is a heavier edge than the drawn screen carried, and it is
+the price of the claim rather than a taste. The bone row needed its `line` at CIE L* 50 rather than
+52, because 52 read 2.81 to 1 against its own `sunken`.
+
+**The two marks do not follow the theme.** Five dark rows carry one green and one warm colour at
+L* 70, and the light row carries the same two at L* 38. A success is green and a bane is warm in
+every palette, so the meaning does not move when the page does, and shape carries it anyway.
+
+### The three literals the stylesheet keeps, and why they are not palette colours
+
+`rgb(0 0 0 / 14%)` under a loose die, `rgb(0 0 0 / 10%)` inside a die on a pad, and
+`rgb(0 0 0 / 55%)` behind the disclosure sheet. A shadow is the absence of light rather than a
+colour of the theme, and a scrim has to darken every palette, including the light one. The check
+does not trust the list: it enumerates what the file holds, compares it against those three, and
+then measures each one to be black and translucent, so a fourth literal cannot join by being
+written into the table.
+
+Three colours the drawn screen held were replaced rather than excused: the empty-tile digit and the
+centre notch of the difficulty track now take roles, and the badge number takes `--mark-ink`. The
+5 per cent accent tint on the throw zone was removed, because it was the one derived colour left in
+the file and the dashed accent border already names the zone.
+
+### The flat dice take the dice axis, and the stress die loses its material
+
+Every flat die takes the body colour of its own type, which is what the 3D die has always done. The
+drawn screen gave the stress dice a material of their own because every die was one neutral body
+then. The six types are a lightness ladder, no two rungs closer than 8 CIE L*, so a greyscale copy
+still separates them.
+
+### Where the readout over the tray is measured, and where it is not
+
+`--on-tray` is spent twice: on the two zone bands over the 3D table, and on `table-note`, the one
+line drawn on the flat table. The browser probe measures it through `table-note`, because that
+element is a child of the element the tray surface paints. Over the 3D table the bands lie on the
+canvas, which is a SIBLING and not an ancestor, so an ancestor walk would measure them against the
+page and report a ratio that means nothing. The first run did exactly that and reported
+`bone: a zone band reads 1.03 to 1`. The claim itself is proved over all 36 combinations in
+`theme.test.ts` and again in `css-vars.test.ts`.
+
+### The seventeen red-proofs
+
+Nine over the test runner:
+
+1. a hex in a rule — `every colour literal left in src/shell.css: expected [ '#ff0000', … ]`
+2. `color: white` — `a colour keyword is a colour this file holds: expected [ 'white in "white"' ]`
+3. a role nothing spends — `these roles are written and nothing paints with them: expected [ '--mark-ink' ]`
+4. two roles swapped — `ember: --ink takes text: expected '#C1ACA6' to be '#F7E4DE'`
+5. an axis reading another axis — `the dice axis reads the ember row`
+6. a built theme ignored — `the built theme is the one on the screen: expected false to be true`
+7. a palette literal darkened — `ash: --ink-dim over --surface reads 1.48 to 1`
+8. a readout darkened — `verdigris: a readout on the ember tray reads 1.08 to 1`
+9. a role read from nowhere — `these roles are written and nothing paints with them: expected [ '--tray-surface' ]`
+
+Four over the panel, in jsdom:
+
+10. `checkDiceTheme` dropped — `the report names the numeral on a stress die`
+11. `checkPalette` dropped — `the theme really does miss its floors: expected 0 to be greater than 0`
+12. the refusal removed — the report read `This theme is on the screen now.` for a failing theme
+13. `aria-hidden` off a swatch — `a swatch is decoration … expected +0 to be 18`
+
+Eight over the driven browser, each one rebuilt and re-run:
+
+14. `--surface` repointed — `6 disagreed with the row: [ember drew rgb(29, 23, 20) against rgb(38, 30, 27); …]`
+15. `--tray-surface` repointed — `6 disagreed: [ember drew rgb(38, 30, 27) against rgb(62, 24, 16); …]`
+16. one body colour for every type — `12 disagreed: [ember attribute drew rgb(251, 128, 86) …]`
+17. `paintPool` removed — `15 disagreed with the row [ember attribute is #EFEFEA; …]`
+18. a palette literal darkened — `4 missed a floor [verdigris: a quiet reading reads 1.30 to 1 …]`
+19. the picker's name removed — `2 of them without an accessible name [color, color]`
+20. `checkDiceTheme` dropped from the panel — `the report … names 5 of them by name. Unsaid: [the numeral on a stress die; a stress die on the #23262B tray]`
+21. the settings write replaced by a state-only write — `it drew rgb(24, 33, 32) after a real reload … The record crossed the reload as nothing`
+
+Each injection was confirmed to have landed before the run, and every file was restored by editing
+the injection back rather than by a command that discards the working tree.
+
+### The captures, and what they show
+
+Six at 1440 px, one per interface palette, each with a pool on the table:
+`0019-theme-ember-1440.png`, `-ash-`, `-verdigris-`, `-bone-`, `-void-` and `-cobalt-`. The six
+files differ in size, which the first run did not: that run captured the same image six times,
+because it ended on a reloaded page still carrying a built theme and the rows then changed nothing.
+A capture that cannot differ proves nothing, so the built theme is cleared first and a pool is
+thrown before the frames.
+
+The panel and the builder are captured at 360 px and 1440 px: `0019-theme-panel-360.png`,
+`0019-theme-panel-1440.png`, `0019-theme-builder-360.png` and `0019-theme-builder-1440.png`.
+
+Every image was looked at. The six palettes each read as themselves, the light row included: the
+bone page is warm and light with dark ink and a dark olive filled button, and the five dark rows
+each carry one hue with the dice standing off the ground. The panel holds two columns of rows at
+360 px and three at 1440 px, and the builder fits both.
+
+### Reported, not fixed
+
+**`node scripts/browser.mjs --table` fails on some throw seeds, and it is not this unit's.** The run
+at seed 2107814439 reported `die-at2 did not answer the click: aria-pressed stayed false`. The same
+seed was replayed on `main` in a separate worktree and it failed the same way. Three other seeds
+passed on this branch. The failure is a die the raycast proves is on top and a real pointer click
+misses, which is the hazard Decision 9 already records.
+
+### Measurements
+
+- Four validate commands, all exit 0.
+- `node scripts/browser.mjs --theme` — `checks=10 failures=0 skipped=0`.
+- `--shell` 8 checks, `--sheet` 11, `--history` 21, `--blocked-chunk` 11, all `failures=0 skipped=0`.
+- `--tray` — the three render counters at 841, 842 and 77 against 968, 969 and 89.
+- `npm run perf` — `steps_to_rest_fixed_seed_scene measured=203 budget=224`, scene digest matched.
+- Initial JavaScript 37,631 gzip bytes and the lazy 3D chunk 151,876. Both under the budget.
+- Branding gate `files_scanned=136`, `hits=0`, exit 0.

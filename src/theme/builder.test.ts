@@ -127,20 +127,29 @@ describe('derivePalette', () => {
     // Too dark for a dark page. The accent is the player's own colour and the
     // builder does not quietly replace it, so the check has to say so.
     const findings = checkPalette(derivePalette('#1B2431', 'dark'), SURFACES);
+    // Five findings, and the last two are the report doing its job twice over.
+    // A colour too dark to be a control on a dark page also drives `onAccent`
+    // to the light end of its own family, and that end cannot carry text on the
+    // two marks either. Both answers are reported. Neither colour is replaced.
     expect(findings.map((finding) => finding.pair)).toEqual([
-      'accent over background',
-      'accent over surface',
+      'text on a control over the success mark',
+      'text on a control over the bane mark',
+      'a control over the page',
+      'a control over a panel',
+      'a control over a well',
     ]);
     for (const finding of findings) {
-      expect(finding.floor, 'a control takes the non-text floor').toBe(NON_TEXT_FLOOR);
+      expect(finding.floor, `${finding.pair} takes a floor this file states`).toBe(
+        finding.pair.startsWith('a control') ? NON_TEXT_FLOOR : TEXT_FLOOR,
+      );
       expect(finding.measured, `${finding.pair} reads ${finding.measured.toFixed(2)}`).toBeLessThan(
-        NON_TEXT_FLOOR,
+        finding.floor,
       );
     }
 
     // Too light for a light page, and the same colour is fine on a dark one.
     const onLight = checkPalette(derivePalette('#FFEDB7', 'light'), SURFACES);
-    expect(onLight.map((finding) => finding.pair)).toContain('accent over background');
+    expect(onLight.map((finding) => finding.pair)).toContain('a control over the page');
     expect(checkPalette(derivePalette('#FFEDB7', 'dark'), SURFACES)).toEqual([]);
   });
 });
@@ -149,13 +158,21 @@ describe('the checks', () => {
   it('names every text pair a palette breaks, and no other', () => {
     const usable = derivePalette('#3CBFA5', 'dark');
     expect(checkPalette(usable, SURFACES), 'the palette starts usable').toEqual([]);
-    expect(PALETTE_PAIR_COUNT, 'a palette answers for seven pairs of its own').toBe(7);
+    // Twenty pairs of its own, counted here as a product rather than as a
+    // literal: five inks against the grounds each one is drawn on. The list is
+    // in `builder.ts` and the arithmetic below is a second walk of the same
+    // claim, so a pair dropped from that list fails this line.
+    const INKS = { text: 3, textMuted: 3, onAccent: 3, accent: 3, line: 3, marks: 2 * 3 };
+    expect(PALETTE_PAIR_COUNT, 'a palette answers for every pair of its own').toBe(
+      Object.values(INKS).reduce((sum, each) => sum + each, 0),
+    );
 
     const broken = { ...usable, text: usable.surface };
     const findings = checkPalette(broken, SURFACES);
     expect(findings.map((finding) => finding.pair)).toEqual([
-      'text over background',
-      'text over surface',
+      'body text over the page',
+      'body text over a panel',
+      'body text over a well',
     ]);
     expect(findings[0]?.floor, 'text takes the text floor').toBe(TEXT_FLOOR);
     expect(findings[1]?.measured, 'a colour on itself reads 1 to 1').toBeCloseTo(1, 10);
@@ -166,7 +183,7 @@ describe('the checks', () => {
     const findings = checkPalette(palette, SURFACES);
     expect(findings.length, 'one finding per surface it fails on').toBe(SURFACES.length);
     for (const finding of findings) {
-      expect(finding.pair).toMatch(/^onTray over #/);
+      expect(finding.pair).toMatch(/^a readout over the #[0-9A-F]{6} tray$/);
       expect(finding.measured).toBeLessThan(TEXT_FLOOR);
     }
   });
@@ -177,15 +194,17 @@ describe('the checks', () => {
 
     const collapsed = { ...theme, skill: theme.gear };
     const found = checkDiceTheme(collapsed, SURFACES);
-    expect(found.map((finding) => finding.pair)).toEqual(['gear and skill, in CIE L*']);
+    expect(found.map((finding) => finding.pair)).toEqual(['a gear die and a skill die, in CIE L*']);
     expect(found[0]?.floor).toBe(LADDER_FLOOR);
     expect(found[0]?.measured).toBeCloseTo(0, 6);
 
     const darkened = { ...theme, stress: '#101010' };
     const ink = checkDiceTheme(darkened, SURFACES).map((finding) => finding.pair);
     expect(ink, 'a body too dark loses the numeral and the tray at once').toEqual(
-      expect.arrayContaining(['the numeral on stress']),
+      expect.arrayContaining(['the numeral on a stress die']),
     );
-    expect(ink.filter((pair) => pair.startsWith('stress on #')).length).toBe(SURFACES.length);
+    expect(ink.filter((pair) => pair.startsWith('a stress die on the #')).length).toBe(
+      SURFACES.length,
+    );
   });
 });

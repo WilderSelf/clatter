@@ -22,7 +22,7 @@
 // Every rule comes from `src/shell/state.ts`, which asks the rules core. No
 // count, no cap, no lock and no cost is worked out here.
 
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { LogEntry } from './log/entry';
 import type { Die } from './rules/die';
 import type { RandomSource } from './rules/random';
@@ -102,6 +102,11 @@ import {
   withPreset,
   zonesOf,
 } from './shell/state';
+import type { BuiltTheme } from './theme/builder';
+import type { AppliedTheme } from './theme/css-vars';
+import { appliedTheme, dieFaceStyle, themeVariables } from './theme/css-vars';
+import type { DiceTheme, ThemeId } from './theme/themes';
+import { ThemePanel } from './shell/theme-panel';
 import type { TrayDecision } from './tray/capability';
 import { decideTray, probeCapability } from './tray/capability';
 import { mountTray } from './tray/scene';
@@ -445,6 +450,7 @@ function Slot({
   view,
   layout,
   spot,
+  colours,
   shaken,
   active,
   onPress,
@@ -452,11 +458,18 @@ function Slot({
   view: DieView;
   layout: TrayLayout;
   spot: TraySpots[string] | undefined;
+  colours: DiceTheme;
   shaken: boolean;
   active: boolean;
   onPress: () => void;
 }) {
   const over = layout === 'over';
+  // The dice axis reaches the flat die here, one body colour per dice type,
+  // exactly as `src/tray/throw.ts` reaches the 3D die. The cell over the table
+  // draws no die, so the colour costs it nothing.
+  const style = [over ? overStyle(spot) : null, dieFaceStyle(colours, view.die.type)]
+    .filter((part) => part !== null && part !== undefined)
+    .join(';');
   const classes = ['slot', view.state];
   if (over) classes.push('over');
   if (view.die.type === 'stress') classes.push('stress');
@@ -512,7 +525,7 @@ function Slot({
         role="img"
         tabIndex={active ? 0 : -1}
         aria-label={view.label}
-        style={over ? overStyle(spot) : undefined}
+        style={style}
       >
         {drawn}
       </div>
@@ -527,7 +540,7 @@ function Slot({
       aria-pressed={view.state === 'choice'}
       aria-label={view.label}
       onClick={onPress}
-      style={over ? overStyle(spot) : undefined}
+      style={style}
     >
       {drawn}
     </button>
@@ -541,6 +554,7 @@ function Zone({
   views,
   layout,
   spots,
+  colours,
   thrown,
   ordinal,
   activeId,
@@ -552,6 +566,7 @@ function Zone({
   views: readonly DieView[];
   layout: TrayLayout;
   spots: TraySpots;
+  colours: DiceTheme;
   thrown: readonly string[];
   ordinal: number;
   activeId: string;
@@ -582,6 +597,7 @@ function Zone({
             view={view}
             layout={layout}
             spot={spots[view.die.id]}
+            colours={colours}
             shaken={thrown.includes(view.die.id)}
             active={view.element === activeId}
             onPress={() => onPress(view.die.id)}
@@ -609,11 +625,13 @@ function DiceTray({
   setState,
   layout,
   spots,
+  colours,
 }: {
   state: AppState;
   setState: (change: Change) => void;
   layout: TrayLayout;
   spots: TraySpots;
+  colours: DiceTheme;
 }) {
   const profile = profileOf(state);
   const zones = zonesOf(state);
@@ -671,6 +689,7 @@ function DiceTray({
         views={kept}
         layout={layout}
         spots={spots}
+        colours={colours}
         thrown={state.thrown}
         ordinal={state.throwOrdinal}
         activeId={active}
@@ -683,6 +702,7 @@ function DiceTray({
         views={loose}
         layout={layout}
         spots={spots}
+        colours={colours}
         thrown={state.thrown}
         ordinal={state.throwOrdinal}
         activeId={active}
@@ -704,6 +724,7 @@ function Sheet({
   state,
   setState,
   renderer,
+  applied,
   presetNote,
   storage,
   onSavePreset,
@@ -711,12 +732,15 @@ function Sheet({
   onMovePreset,
   onDeletePreset,
   onAskForTray,
+  onChooseRow,
+  onBuildTheme,
   onOpenHistory,
   onClose,
 }: {
   state: AppState;
   setState: (change: Change) => void;
   renderer: RendererState;
+  applied: AppliedTheme;
   presetNote: PresetNote;
   /** What the browser reports the origin uses, or null where it reports none. */
   storage: { usage: number | null; quota: number | null } | null;
@@ -725,6 +749,8 @@ function Sheet({
   onMovePreset: (preset: PoolPreset, toIndex: number) => void;
   onDeletePreset: (preset: PoolPreset) => void;
   onAskForTray: (wanted: boolean) => void;
+  onChooseRow: (axis: 'interface' | 'surface' | 'dice', id: ThemeId) => void;
+  onBuildTheme: (built: BuiltTheme | null) => void;
   onOpenHistory: () => void;
   onClose: () => void;
 }) {
@@ -826,6 +852,22 @@ function Sheet({
           ))}
           <p class="sheet-note">{ARTIFACT_CURVE_NOTE[state.artifactCurve]}</p>
         </fieldset>
+        {/* The theme, on three independent axes, plus the colour builder.
+
+            Section 4 of `docs/design/0002-screen-design.md` names it against
+            Unit 4.8. The sheet is a second surface and carries no share of the
+            control budget of section 3, and none of the three groups holds a
+            tab stop of the main screen, so both keyboard walks of section 6 are
+            unchanged. */}
+        <ThemePanel
+          applied={applied}
+          diceThemeId={renderer.settings.diceThemeId}
+          traySurfaceId={renderer.settings.traySurfaceId}
+          interfacePaletteId={renderer.settings.interfacePaletteId}
+          builtTheme={renderer.settings.builtTheme}
+          onChooseRow={onChooseRow}
+          onBuild={onBuildTheme}
+        />
         {/* The history, and what it costs the browser to keep.
 
             `sheet-history` opens the history destination. Section 4 of
@@ -959,6 +1001,12 @@ export function App({
   );
   const [logFailure, setLogFailure] = useState<string | null>(null);
   const dice = throwDice(state);
+  // ---- The theme — Unit 4.8 ----
+  //
+  // The colours in force, read off the same record every other choice lives in.
+  // A built theme replaces the dice row and the interface row; the tray surface
+  // stays a shipped row, and `src/theme/css-vars.ts` says why.
+  const applied = appliedTheme(renderer.settings);
   const onTheTable = renderer.choice.renderer === 'tray';
   const layout: TrayLayout = onTheTable ? 'over' : 'flat';
   const toggle = useRef<HTMLButtonElement>(null);
@@ -974,6 +1022,22 @@ export function App({
   // from a callback the mount holds and that callback captured an older render.
   // The write goes here rather than inside the state change, so the change
   // itself stays pure and the store is written exactly once per change.
+  // The stylesheet holds no colour of its own, so the roles are written here.
+  // It is a layout effect and not an effect, because a paint between the render
+  // and the write would draw the page in the theme it was leaving. The write is
+  // property by property, so no text is parsed on the way in.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    for (const [role, colour] of Object.entries(themeVariables(applied))) {
+      root.style.setProperty(role, colour);
+    }
+  }, [
+    renderer.settings.diceThemeId,
+    renderer.settings.traySurfaceId,
+    renderer.settings.interfacePaletteId,
+    renderer.settings.builtTheme,
+  ]);
+
   const held = useRef(renderer);
   const apply = (change: (previous: RendererState) => RendererState): void => {
     const previous = held.current;
@@ -981,6 +1045,30 @@ export function App({
     held.current = next;
     if (next.settings !== previous.settings) writeSettings(store, next.settings);
     setRenderer(next);
+  };
+
+  /**
+   * Choose a row on one axis.
+   *
+   * The write goes through the one writer, so the record the renderer choice
+   * lives in is the record the theme lives in and a later fall to flat dice
+   * cannot put an older theme back. Choosing a row does not clear a theme the
+   * player built: the rows stay chosen underneath it, and `theme-clear` is what
+   * returns to them.
+   */
+  const chooseThemeRow = (axis: 'interface' | 'surface' | 'dice', id: ThemeId): void => {
+    const field =
+      axis === 'interface'
+        ? 'interfacePaletteId'
+        : axis === 'surface'
+          ? 'traySurfaceId'
+          : 'diceThemeId';
+    apply((previous) => ({ ...previous, settings: { ...previous.settings, [field]: id } }));
+  };
+
+  /** Put a built theme on the screen, or take it off. */
+  const buildThemeNow = (built: BuiltTheme | null): void => {
+    apply((previous) => ({ ...previous, settings: { ...previous.settings, builtTheme: built } }));
   };
 
   // ---- The saved pools — Unit 4.3 ----
@@ -1221,16 +1309,29 @@ export function App({
               mount={mount}
               onFall={() => apply(fallToFlat)}
               onSpots={setSpots}
+              colours={applied.diceColours}
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
             />
             {state.result === null ? null : (
-              <DiceTray state={state} setState={setState} layout={layout} spots={spots} />
+              <DiceTray
+                state={state}
+                setState={setState}
+                layout={layout}
+                spots={spots}
+                colours={applied.diceColours}
+              />
             )}
           </div>
         ) : (
           <>
             {state.result === null ? null : (
-              <DiceTray state={state} setState={setState} layout={layout} spots={NO_SPOTS} />
+              <DiceTray
+                state={state}
+                setState={setState}
+                layout={layout}
+                spots={NO_SPOTS}
+                colours={applied.diceColours}
+              />
             )}
             <Table
               shown={!state.builderOpen && state.result === null}
@@ -1239,6 +1340,7 @@ export function App({
               mount={mount}
               onFall={() => apply(fallToFlat)}
               onSpots={setSpots}
+              colours={applied.diceColours}
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
             />
           </>
@@ -1318,6 +1420,7 @@ export function App({
           state={state}
           setState={setState}
           renderer={renderer}
+          applied={applied}
           presetNote={presetNote}
           storage={storage}
           onSavePreset={(name) =>
@@ -1337,6 +1440,8 @@ export function App({
             runPreset((settings) => deletePoolPreset(settings, preset.name), PRESET_DELETED_TEXT)
           }
           onAskForTray={(wanted) => apply((previous) => askForTray(previous, wanted))}
+          onChooseRow={chooseThemeRow}
+          onBuildTheme={buildThemeNow}
           onOpenHistory={openHistory}
           onClose={closeSheet}
         />

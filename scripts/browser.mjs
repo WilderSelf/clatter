@@ -191,6 +191,7 @@
 // and a hardware run inside the sandbox fails by design. Run a hardware run
 // through the `node scripts/browser.mjs*` sandbox exclusion.
 
+import { register } from 'node:module';
 import { spawn } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { writeFileSync, readFileSync } from 'node:fs';
@@ -7471,6 +7472,658 @@ async function tabFrom(page, start, steps) {
   return seen;
 }
 
+// ---------------------------------------------------------------------------
+// The theme — the open half of Unit 4.8.
+//
+// It answers the questions no green suite can answer, because every one of them
+// is about what the ENGINE resolved rather than about what a module returned:
+//
+//   1. A change on each axis reaches its place. Three axes, six rows each, and
+//      every value is read off the rendered element and never off the setting.
+//   2. Every contrast claim the data half proves still holds once the stylesheet
+//      spends the palette. The denominator is six palettes by the roles the
+//      screen really paints, and each ink is judged against the first ancestor
+//      that really paints a ground.
+//   3. Keyboard alone reaches the panel, operates it, and changes the screen.
+//   4. A colour the builder cannot use is reported by name. The oracle is the
+//      two checkers, run IN NODE over the same seeds.
+//   5. A theme a player built survives a real reload, through the real store.
+//
+// The oracles are the repository's own modules, imported here as source.
+// ---------------------------------------------------------------------------
+
+/** The floors, restated. WCAG 2.2 SC 1.4.3 for text, SC 1.4.11 for a control. */
+const THEME_TEXT_FLOOR = 4.5;
+const THEME_NON_TEXT_FLOOR = 3;
+
+/**
+ * Every role the screen paints at rest B, the property that carries it, and the
+ * floor it answers to.
+ *
+ * The ground is not named here. It is the first ancestor that really paints
+ * one, resolved in the browser, so a rule that moved an element onto another
+ * ground is measured on the ground it ended up on.
+ */
+const ROLE_PROBES = [
+  {
+    name: 'a status reading',
+    selector: '.statusline .st-item',
+    prop: 'color',
+    floor: THEME_TEXT_FLOOR,
+  },
+  { name: 'a quiet reading', selector: '.st-dim', prop: 'color', floor: THEME_TEXT_FLOOR },
+  { name: 'the cost line', selector: '.cost-t', prop: 'color', floor: THEME_TEXT_FLOOR },
+  { name: 'a zone band', selector: '.band-h', prop: 'color', floor: THEME_TEXT_FLOOR },
+  { name: 'a die caption', selector: '.cap', prop: 'color', floor: THEME_TEXT_FLOOR },
+  { name: 'a die tag', selector: '.cap b', prop: 'color', floor: THEME_TEXT_FLOOR },
+  {
+    name: 'the label of a quiet button',
+    selector: '[data-el="disclosure-toggle"]',
+    prop: 'color',
+    floor: THEME_TEXT_FLOOR,
+  },
+  {
+    name: 'the label of a filled button',
+    selector: '.btn.go',
+    prop: 'color',
+    floor: THEME_TEXT_FLOOR,
+    self: true,
+  },
+  {
+    name: 'the success mark',
+    selector: '.mark.s',
+    prop: 'backgroundColor',
+    floor: THEME_NON_TEXT_FLOOR,
+  },
+  {
+    name: 'the bane mark',
+    selector: '.mark.b',
+    prop: 'backgroundColor',
+    floor: THEME_NON_TEXT_FLOOR,
+  },
+  {
+    name: 'the filled button itself',
+    selector: '.btn.go',
+    prop: 'backgroundColor',
+    floor: THEME_NON_TEXT_FLOOR,
+  },
+  {
+    name: 'the edge of a die',
+    selector: '.die',
+    prop: 'borderTopColor',
+    floor: THEME_NON_TEXT_FLOOR,
+  },
+  {
+    name: 'the edge of a button',
+    selector: '[data-el="edit-pool-button"]',
+    prop: 'borderTopColor',
+    floor: THEME_NON_TEXT_FLOOR,
+  },
+  {
+    name: 'the edge of a card',
+    selector: '.shelf',
+    prop: 'borderTopColor',
+    floor: THEME_NON_TEXT_FLOOR,
+  },
+  {
+    name: 'a readout on the tray',
+    selector: '[data-el="table-note"]',
+    prop: 'color',
+    floor: THEME_TEXT_FLOOR,
+  },
+];
+
+/** `#rrggbb` as the `rgb(r, g, b)` text a browser answers with. */
+function asRgb(hex) {
+  const [r, g, b] = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+/** Choose a row on one axis, through the real control. */
+async function chooseThemeRow(page, axis, id) {
+  await page.evaluate(
+    (element, value) => {
+      document.querySelector(`[data-el="${element}"] input[value="${value}"]`)?.click();
+    },
+    `theme-axis-${axis}`,
+    id,
+  );
+}
+
+/** The colour the engine resolved for one element and one property. */
+async function paintOf(page, selector, prop) {
+  return page.evaluate(
+    (css, name) => {
+      const found = document.querySelector(css);
+      return found === null ? null : getComputedStyle(found)[name];
+    },
+    selector,
+    prop,
+  );
+}
+
+/** Type a colour into one of the builder's fields, the way a player does. */
+async function typeSeed(page, element, seed) {
+  await page.evaluate(
+    (name, value) => {
+      const field = document.querySelector(`[data-el="${name}"]`);
+      if (field === null) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    element,
+    seed,
+  );
+}
+
+/** Read every role probe, each against the first ancestor that paints a ground. */
+async function readPaints(page, probes) {
+  return page.evaluate((list) => {
+    const groundOf = (each, self) => {
+      const start = self ? each : each.parentElement;
+      for (let at = start; at !== null; at = at.parentElement) {
+        const paint = getComputedStyle(at).backgroundColor;
+        if (paint !== 'transparent' && !/,\s*0\)$/.test(paint)) return paint;
+      }
+      return getComputedStyle(document.body).backgroundColor;
+    };
+    return list.map((probe) => {
+      const found = document.querySelector(probe.selector);
+      if (found === null) return { name: probe.name, missing: true };
+      return {
+        name: probe.name,
+        missing: false,
+        ink: getComputedStyle(found)[probe.prop],
+        ground: groundOf(found, probe.self === true && probe.prop !== 'backgroundColor'),
+        floor: probe.floor,
+      };
+    });
+  }, probes);
+}
+
+async function runTheme(page, options, checks) {
+  // The oracle is the application's own theme modules, imported here as source.
+  // `scripts/ts-resolve.mjs` supplies the extension Vite would have supplied,
+  // so this file reads the same rows the screen reads and never a copy of them.
+  register('./ts-resolve.mjs', import.meta.url);
+  const themes = await import('../src/theme/themes.ts');
+  const builder = await import('../src/theme/builder.ts');
+
+  // The run starts from the defaults, so nothing an earlier run stored decides
+  // what this one reads.
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // A browser that refuses storage answers the defaults anyway.
+    }
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="disclosure-toggle"]', { timeout: 30000 });
+
+  const NAMES = [...themes.THEME_IDS];
+
+  // ---- 1. The interface axis and the tray axis reach their places. ----
+  //
+  // The builder is collapsed first, so the table is on the screen and both
+  // readings come off a rendered element rather than off the setting.
+  await page.click('[data-el="collapse-button"]');
+  await openSheet(page);
+  const pageReadings = [];
+  const trayReadings = [];
+  for (const id of NAMES) {
+    await chooseThemeRow(page, 'interface', id);
+    pageReadings.push({
+      id,
+      read: await paintOf(page, '.screen', 'backgroundColor'),
+      wanted: asRgb(themes.INTERFACE_PALETTES[id].background),
+    });
+    await chooseThemeRow(page, 'surface', id);
+    trayReadings.push({
+      id,
+      read: await paintOf(page, '[data-el="dice-table"]', 'backgroundColor'),
+      wanted: asRgb(themes.TRAY_SURFACES[id]),
+    });
+  }
+  const pageWrong = pageReadings.filter((each) => each.read !== each.wanted);
+  const trayWrong = trayReadings.filter((each) => each.read !== each.wanted);
+  console.log(
+    `browser: theme page_rows=${pageReadings.length} wrong=${pageWrong.length} ` +
+      `tray_rows=${trayReadings.length} wrong=${trayWrong.length}`,
+  );
+  checks.push({
+    name: 'theme.the-interface-axis-reaches-the-stylesheet',
+    ok: pageReadings.length === NAMES.length && pageWrong.length === 0,
+    detail:
+      `${pageReadings.length} of ${NAMES.length} rows were chosen through the real control, and ` +
+      `the page colour was read off the rendered screen each time. ${pageWrong.length} ` +
+      `disagreed with the row: ` +
+      `[${pageWrong.map((each) => `${each.id} drew ${each.read} against ${each.wanted}`).join('; ')}]. ` +
+      `A palette that resolves is not a palette that is spent, so nothing here reads resolveTheme.`,
+  });
+  checks.push({
+    name: 'theme.the-tray-axis-reaches-the-tray',
+    ok: trayReadings.length === NAMES.length && trayWrong.length === 0,
+    detail:
+      `${trayReadings.length} of ${NAMES.length} rows were chosen and the surface was read off ` +
+      `the element the tray mounts into. ${trayWrong.length} disagreed: ` +
+      `[${trayWrong.map((each) => `${each.id} drew ${each.read} against ${each.wanted}`).join('; ')}].`,
+  });
+
+  // ---- 2. The dice axis reaches the flat dice. ----
+  //
+  // A die has to be on the table, so the pool is thrown first. Each body is
+  // compared against the row for THAT die's type, so a renderer that painted
+  // every die one colour could not pass.
+  //
+  // The flat renderer is asked for by hand through `sheet-tray-renderer`, which
+  // is the control Decision 8 put on the sheet. A cell over the 3D table draws
+  // no die of its own, so the flat dice are where a body colour can be read off
+  // an element at all. The 3D dice are read off the tray itself, below.
+  await page.evaluate(() => {
+    const box = document.querySelector('[data-el="sheet-tray-renderer"] input');
+    if (box !== null && box.checked) box.click();
+  });
+  await closeSheet(page);
+  await page.click('[data-el="edit-pool-button"]');
+  await page.click('[data-el="pool-cell-attribute"] .cell-p');
+  await page.click('[data-el="pool-cell-gear"] .cell-p');
+  await page.click('[data-el="pool-cell-stress"] .cell-p');
+  await page.click('[data-el="roll-button"]');
+  await page.waitForSelector('.die', { timeout: 15000 });
+  await openSheet(page);
+  const diceReadings = [];
+  for (const id of NAMES) {
+    await chooseThemeRow(page, 'dice', id);
+    for (const [type, prefix] of [
+      ['attribute', 'die-at'],
+      ['gear', 'die-ge'],
+      ['stress', 'die-st'],
+    ]) {
+      diceReadings.push({
+        id,
+        type,
+        read: await paintOf(page, `[data-el^="${prefix}"] .die`, 'backgroundColor'),
+        wanted: asRgb(themes.DICE_THEMES[id][type]),
+      });
+    }
+  }
+  const diceWrong = diceReadings.filter((each) => each.read !== each.wanted);
+  const distinct = new Set(diceReadings.map((each) => each.read)).size;
+  console.log(
+    `browser: theme dice_readings=${diceReadings.length} wrong=${diceWrong.length} ` +
+      `distinct=${distinct}`,
+  );
+  checks.push({
+    name: 'theme.the-dice-axis-reaches-the-dice',
+    ok:
+      diceReadings.length === NAMES.length * 3 &&
+      diceWrong.length === 0 &&
+      distinct === NAMES.length * 3,
+    detail:
+      `${diceReadings.length} bodies were read off the dice on the table, against a product of ` +
+      `${NAMES.length} rows by 3 dice types. ${diceWrong.length} disagreed: ` +
+      `[${diceWrong.map((each) => `${each.id} ${each.type} drew ${each.read} against ${each.wanted}`).join('; ')}]. ` +
+      `The ${distinct} readings are all different, so one colour on every die could not pass.`,
+  });
+
+  // ---- 3. The dice axis reaches the 3D dice, without throwing them again. ----
+  //
+  // The materials are read off the tray through the seam `src/shell/table.tsx`
+  // publishes, and the throw counter is read with them: a repaint that threw the
+  // pool again would move it, and the dice would land somewhere else under the
+  // player's hand.
+  await chooseThemeRow(page, 'dice', 'ash');
+  await page.evaluate(() => {
+    const box = document.querySelector('[data-el="sheet-tray-renderer"] input');
+    if (box !== null && !box.checked) box.click();
+  });
+  await closeSheet(page);
+  const tableRan = await page
+    .waitForFunction(() => window.__clatterTable?.box != null, { timeout: 20000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!tableRan) {
+    const why =
+      'the 3D table did not mount, so no material could be read. A sandboxed run gets no ' +
+      'WebGL context at all.';
+    console.log(`browser: theme table NOT JUDGED, ${why}`);
+    checks.push({
+      name: 'theme.the-dice-axis-repaints-the-3d-dice',
+      ok: true,
+      skipped: true,
+      detail: `NOT JUDGED: ${why}`,
+    });
+  } else {
+    await page.click('[data-el="roll-button"]');
+    await page.waitForFunction(() => window.__clatterTable?.busy === false, { timeout: 30000 });
+    const threwAt = await page.evaluate(() => window.__clatterTable?.throws ?? -1);
+    const painted = [];
+    for (const id of NAMES) {
+      await openSheet(page);
+      await chooseThemeRow(page, 'dice', id);
+      await closeSheet(page);
+      const read = await page.evaluate(() => {
+        const seam = window.__clatterTable;
+        if (seam?.box == null) return null;
+        return seam.ordered.map((die, at) => ({
+          type: die.type,
+          hex: `#${seam.box.diceList[at]?.material?.[0]?.color?.getHexString()?.toUpperCase()}`,
+        }));
+      });
+      painted.push({
+        id,
+        read: read ?? [],
+        throws: await page.evaluate(() => window.__clatterTable?.throws ?? -1),
+      });
+    }
+    const wrongPaint = [];
+    let bodies = 0;
+    for (const each of painted) {
+      for (const die of each.read) {
+        if (die.hex !== themes.DICE_THEMES[each.id][die.type].toUpperCase()) {
+          wrongPaint.push(`${each.id} ${die.type} is ${die.hex}`);
+        }
+        bodies += 1;
+      }
+    }
+    const rethrew = painted.filter((each) => each.throws !== threwAt);
+    console.log(
+      `browser: theme table bodies=${bodies} wrong=${wrongPaint.length} ` +
+        `throws=${threwAt} rethrew=${rethrew.length}`,
+    );
+    checks.push({
+      name: 'theme.the-dice-axis-repaints-the-3d-dice',
+      ok: bodies >= NAMES.length && wrongPaint.length === 0 && rethrew.length === 0,
+      detail:
+        `${bodies} die materials were read off the tray through the seam, over ${NAMES.length} ` +
+        `rows, and ${wrongPaint.length} disagreed with the row [${wrongPaint.join('; ')}]. The ` +
+        `tray stayed at ${threwAt} throws through all six, so the dice were repainted where they ` +
+        `lay and never thrown again.`,
+    });
+    // Back to the flat dice for the readings below. The control is on the
+    // sheet, so the sheet has to be open before the press.
+    await openSheet(page);
+    await page.evaluate(() => {
+      const box = document.querySelector('[data-el="sheet-tray-renderer"] input');
+      if (box !== null && box.checked) box.click();
+    });
+    await closeSheet(page);
+  }
+
+  // ---- 4. Every contrast claim still holds, once the palette is spent. ----
+  //
+  // The flat renderer draws every role as a real element on a real ground. Over
+  // the 3D table the two zone bands lie on the canvas, which is a sibling and
+  // not an ancestor, so an ancestor walk would measure them against the page and
+  // report a ratio that means nothing. The readout over the tray is measured
+  // here through `table-note`, which is a child of the element the tray surface
+  // paints.
+  await openSheet(page);
+  await chooseThemeRow(page, 'dice', 'ash');
+  await chooseThemeRow(page, 'surface', 'ash');
+  let measured = 0;
+  let tightest = { ratio: Infinity, said: '' };
+  const absent = [];
+  const under = [];
+  for (const id of NAMES) {
+    await chooseThemeRow(page, 'interface', id);
+    await closeSheet(page);
+    const paints = await readPaints(page, ROLE_PROBES);
+    for (const paint of paints) {
+      if (paint.missing) {
+        absent.push(`${id}: ${paint.name}`);
+        continue;
+      }
+      const ratio = ratioOfRgb(paint.ink, paint.ground);
+      if (ratio === null || ratio < paint.floor) {
+        under.push(
+          `${id}: ${paint.name} reads ${ratio === null ? 'nothing' : ratio.toFixed(2)} to 1 ` +
+            `against ${paint.ground} and must reach ${paint.floor}`,
+        );
+      }
+      if (ratio !== null && ratio < tightest.ratio) {
+        tightest = { ratio, said: `${id} ${paint.name}` };
+      }
+      measured += 1;
+    }
+    await openSheet(page);
+  }
+  console.log(
+    `browser: theme contrast measured=${measured} absent=${absent.length} ` +
+      `under=${under.length} tightest=${tightest.ratio.toFixed(2)} (${tightest.said})`,
+  );
+  checks.push({
+    name: 'theme.every-contrast-claim-holds-on-the-rendered-screen',
+    ok: measured === NAMES.length * ROLE_PROBES.length && absent.length === 0 && under.length === 0,
+    detail:
+      `${measured} readings against a product of ${NAMES.length} interface palettes by ` +
+      `${ROLE_PROBES.length} roles the screen paints. Every ink came off the rendered element ` +
+      `and every ground off the first ancestor that really paints one. ${absent.length} roles ` +
+      `were not on the screen [${absent.join('; ')}] and ${under.length} missed a floor ` +
+      `[${under.join('; ')}]. The tightest reading is ${tightest.ratio.toFixed(2)} to 1 on ` +
+      `${tightest.said}, against 4.5 for text and 3 for a graphical object, which are WCAG 2.2 ` +
+      `SC 1.4.3 and SC 1.4.11.`,
+  });
+
+  // ---- 5. Keyboard alone reaches every control, and changes the screen. ----
+  await chooseThemeRow(page, 'interface', 'ash');
+  const walk = await page.evaluate(() => {
+    const panel = document.querySelector('[data-el="sheet-theme"]');
+    if (panel === null) return { stops: [], unnamed: [], groups: 0, stateless: [] };
+    const nameOf = (each) => {
+      const aria = each.getAttribute('aria-label');
+      if (aria !== null && aria.length > 0) return aria;
+      const inside = (each.closest('label')?.textContent ?? '').trim();
+      if (inside.length > 0) return inside;
+      const named = each.id === '' ? null : document.querySelector(`label[for="${each.id}"]`);
+      const outside = (named?.textContent ?? '').trim();
+      return outside.length > 0 ? outside : (each.textContent ?? '').trim();
+    };
+    const stops = [...panel.querySelectorAll('input, button')]
+      .filter((each) => each.tabIndex >= 0 && !each.disabled)
+      .map((each) => ({
+        role: each.tagName === 'BUTTON' ? 'button' : each.type,
+        name: nameOf(each),
+        state:
+          each.type === 'radio' || each.type === 'checkbox' ? String(each.checked) : each.value,
+      }));
+    return {
+      stops,
+      unnamed: stops.filter((each) => each.name.length === 0).map((each) => each.role),
+      stateless: stops.filter((each) => each.state === undefined || each.state === null).length,
+      groups: panel.querySelectorAll('fieldset').length,
+    };
+  });
+
+  // A real key press on a real control, and the page has to answer it.
+  const before = await paintOf(page, '.screen', 'backgroundColor');
+  const from = await page.evaluate(() => {
+    const input = document.querySelector('[data-el="theme-axis-interface"] input:checked');
+    input?.focus();
+    return document.activeElement?.getAttribute('value') ?? null;
+  });
+  await page.keyboard.press('ArrowDown');
+  const after = await paintOf(page, '.screen', 'backgroundColor');
+  const to = await page.evaluate(
+    () =>
+      document
+        .querySelector('[data-el="theme-axis-interface"] input:checked')
+        ?.getAttribute('value') ?? null,
+  );
+  const short = await page.evaluate((floor) => {
+    const panel = document.querySelector('[data-el="sheet-theme"]');
+    if (panel === null) return ['the panel is not on the screen'];
+    return [...panel.querySelectorAll('label, button')]
+      .map((each) => ({ el: each, box: each.getBoundingClientRect() }))
+      .filter((each) => each.box.height > 0 && each.box.height < floor)
+      .map((each) => `${(each.el.textContent ?? '').trim().slice(0, 24)}: ${each.box.height}px`);
+  }, HIT_TARGET_FLOOR);
+  console.log(
+    `browser: theme keyboard stops=${walk.stops.length} unnamed=${walk.unnamed.length} ` +
+      `groups=${walk.groups} arrow=${from}->${to} page=${before}->${after} short=${short.length}`,
+  );
+  checks.push({
+    name: 'theme.keyboard-alone-reaches-and-operates-every-control',
+    ok:
+      walk.stops.length > 0 &&
+      walk.unnamed.length === 0 &&
+      walk.stateless === 0 &&
+      walk.groups >= 5 &&
+      from !== null &&
+      to !== null &&
+      to !== from &&
+      before !== after &&
+      short.length === 0,
+    detail:
+      `${walk.stops.length} controls, ${walk.unnamed.length} of them without an accessible name ` +
+      `[${walk.unnamed.join(', ')}], in ${walk.groups} groups, and ${walk.stateless} without a ` +
+      `state. One arrow key on the interface group moved the choice from ${from} to ${to} and ` +
+      `the page colour from ${before} to ${after}, so the keyboard alone changes the theme. ` +
+      `${short.length} hit targets sit under the ${HIT_TARGET_FLOOR} px floor of WCAG 2.2 ` +
+      `SC 2.5.8 [${short.join('; ')}].`,
+  });
+
+  // ---- 6. The report names every reading a built theme misses. ----
+  //
+  // The oracle is the two checkers, run IN NODE over the same seeds, so the
+  // report is compared against an answer the screen did not produce.
+  const badPage = '#1B2431';
+  const badDice = '#050505';
+  const surface = themes.TRAY_SURFACES.ash;
+  await typeSeed(page, 'theme-page-seed', badPage);
+  await typeSeed(page, 'theme-dice-seed', badDice);
+  await page.evaluate(() => {
+    document.querySelector('[data-el="theme-exact-dice"] input')?.click();
+  });
+  const beforeApply = await paintOf(page, '.screen', 'backgroundColor');
+  await page.click('[data-el="theme-apply"]');
+  const report = await page.evaluate(
+    () => document.querySelector('[data-el="theme-report"]')?.textContent ?? '',
+  );
+  const fromPalette = builder.checkPalette(builder.derivePalette(badPage, 'dark'), [surface]);
+  const fromDice = builder.checkDiceTheme(builder.deriveDiceTheme(badDice, true), [surface]);
+  const oracle = [...fromPalette, ...fromDice];
+  const unsaid = oracle.filter((finding) => !report.includes(builder.findingSentence(finding)));
+  const afterApply = await paintOf(page, '.screen', 'backgroundColor');
+  console.log(
+    `browser: theme report findings=${oracle.length} palette=${fromPalette.length} ` +
+      `dice=${fromDice.length} unsaid=${unsaid.length} page=${beforeApply}->${afterApply}`,
+  );
+  checks.push({
+    name: 'theme.a-colour-the-builder-cannot-use-is-reported-by-name',
+    ok:
+      oracle.length > 0 &&
+      fromPalette.length > 0 &&
+      fromDice.length > 0 &&
+      unsaid.length === 0 &&
+      report.includes(String(oracle.length)) &&
+      afterApply === beforeApply,
+    detail:
+      `the two checkers answered ${oracle.length} findings IN NODE over the same seeds — ` +
+      `${fromPalette.length} from checkPalette and ${fromDice.length} from checkDiceTheme — and ` +
+      `the report on the screen names ${oracle.length - unsaid.length} of them by name. Unsaid: ` +
+      `[${unsaid.map((each) => each.pair).join('; ')}]. The page stayed ${afterApply}, so the ` +
+      `colour is reported and never replaced, and nothing is applied while a finding stands.`,
+  });
+
+  // ---- 7. A theme a player built survives a real reload. ----
+  const goodPage = '#3CBFA5';
+  const goodDice = '#FF8B68';
+  await page.evaluate(() => {
+    document.querySelector('[data-el="theme-exact-dice"] input')?.click();
+  });
+  await typeSeed(page, 'theme-page-seed', goodPage);
+  await typeSeed(page, 'theme-dice-seed', goodDice);
+  await page.click('[data-el="theme-apply"]');
+  const built = builder.derivePalette(goodPage, 'dark');
+  const builtPage = await paintOf(page, '.screen', 'backgroundColor');
+  const stored = await page.evaluate(() => localStorage.getItem('clatter.settings'));
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="disclosure-toggle"]', { timeout: 30000 });
+  const afterReload = await paintOf(page, '.screen', 'backgroundColor');
+  const trayAfter = await paintOf(page, '[data-el="dice-table"]', 'backgroundColor');
+  const heldSeeds = /"builtTheme":\{[^}]*\}/.exec(stored ?? '')?.[0] ?? 'nothing';
+  console.log(
+    `browser: theme built page=${builtPage} after_reload=${afterReload} ` +
+      `wanted=${asRgb(built.background)} tray=${trayAfter} stored=${heldSeeds}`,
+  );
+  checks.push({
+    name: 'theme.a-built-theme-survives-a-reload',
+    ok:
+      builtPage === asRgb(built.background) &&
+      afterReload === builtPage &&
+      trayAfter === asRgb(themes.TRAY_SURFACES.ash) &&
+      (stored ?? '').includes(goodPage) &&
+      (stored ?? '').includes(goodDice),
+    detail:
+      `the page drew ${builtPage} against ${asRgb(built.background)}, which derivePalette built ` +
+      `IN NODE from the same seed, and it drew ${afterReload} after a real reload. The tray is ` +
+      `${trayAfter} against the shipped row ${asRgb(themes.TRAY_SURFACES.ash)}, because a built ` +
+      `theme replaces the dice and the page and never the table. The record crossed the reload ` +
+      `as ${heldSeeds} in the page's own localStorage, and it holds the two SEEDS rather than ` +
+      `the colours, so the colours are derived again on every read.`,
+  });
+
+  // ---- The captures. A green suite is blind to a screen that looks wrong. ----
+  if (options.captureShell !== null) {
+    // The run ends on a reloaded page carrying the built theme, so the built
+    // theme is cleared first. Without this every capture is the same image and
+    // a capture that cannot differ proves nothing.
+    await openSheet(page);
+    await page.click('[data-el="theme-clear"]');
+    await closeSheet(page);
+    // A pool on the table, so the captures show the screen a player reads
+    // rather than an empty builder.
+    await page.click('[data-el="pool-cell-attribute"] .cell-p');
+    await page.click('[data-el="pool-cell-skill"] .cell-p');
+    await page.click('[data-el="pool-cell-gear"] .cell-p');
+    await page.click('[data-el="pool-cell-stress"] .cell-p');
+    await page.click('[data-el="roll-button"]');
+    await page.waitForSelector('.die', { timeout: 15000 });
+    // The whole application in every interface palette, at the wide width.
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+    for (const id of NAMES) {
+      await openSheet(page);
+      await chooseThemeRow(page, 'interface', id);
+      await chooseThemeRow(page, 'surface', id);
+      await chooseThemeRow(page, 'dice', id);
+      await closeSheet(page);
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0019-theme-${id}-1440.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+    }
+    // The panel itself, at both widths.
+    await openSheet(page);
+    await chooseThemeRow(page, 'interface', 'ash');
+    await chooseThemeRow(page, 'surface', 'ash');
+    await chooseThemeRow(page, 'dice', 'ash');
+    for (const width of [360, 1440]) {
+      await page.setViewport({ width, height: width === 360 ? 760 : 900, deviceScaleFactor: 1 });
+      await page.evaluate(() => {
+        document.querySelector('[data-el="sheet-theme"]')?.scrollIntoView({ block: 'start' });
+      });
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0019-theme-panel-${width}.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+      await page.evaluate(() => {
+        document.querySelector('[data-el="theme-builder"]')?.scrollIntoView({ block: 'end' });
+      });
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0019-theme-builder-${width}.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+    }
+    console.log(`browser: theme captures written to ${options.captureShell}`);
+  }
+}
+
 async function runSheet(page, options, checks) {
   // The run starts from the defaults, so nothing an earlier run stored decides
   // what this one reads.
@@ -9781,6 +10434,7 @@ function parseArgs(argv) {
     offline: false,
     shell: false,
     sheet: false,
+    theme: false,
     history: false,
     blockedChunk: false,
     table: false,
@@ -9827,6 +10481,7 @@ function parseArgs(argv) {
     else if (arg === '--offline') options.offline = true;
     else if (arg === '--shell') options.shell = true;
     else if (arg === '--sheet') options.sheet = true;
+    else if (arg === '--theme') options.theme = true;
     else if (arg === '--history') options.history = true;
     else if (arg === '--blocked-chunk') options.blockedChunk = true;
     else if (arg === '--table') options.table = true;
@@ -9890,6 +10545,7 @@ function parseArgs(argv) {
     ['--offline', options.offline],
     ['--shell', options.shell],
     ['--sheet', options.sheet],
+    ['--theme', options.theme],
     ['--history', options.history],
     ['--blocked-chunk', options.blockedChunk],
     ['--table', options.table],
@@ -9902,6 +10558,7 @@ function parseArgs(argv) {
           options.offline ||
           options.shell ||
           options.sheet ||
+          options.theme ||
           options.history ||
           options.blockedChunk ||
           options.table
@@ -9925,8 +10582,14 @@ function parseArgs(argv) {
   if (options.captureLater && !options.share) {
     throw new Error('--capture-later belongs to --share');
   }
-  if (options.captureShell !== null && !options.shell && !options.sheet && !options.history) {
-    throw new Error('--capture-shell belongs to --shell, --sheet or --history');
+  if (
+    options.captureShell !== null &&
+    !options.shell &&
+    !options.sheet &&
+    !options.theme &&
+    !options.history
+  ) {
+    throw new Error('--capture-shell belongs to --shell, --sheet, --theme or --history');
   }
   if (options.longTaskMs !== 0) {
     if (!options.logStore && !options.logCsv) {
@@ -9956,6 +10619,7 @@ async function run(options) {
       options.offline ||
       options.shell ||
       options.sheet ||
+      options.theme ||
       options.history ||
       options.blockedChunk ||
       options.table
@@ -10041,6 +10705,8 @@ async function run(options) {
       await runShell(page, options, checks);
     } else if (options.sheet) {
       await runSheet(page, options, checks);
+    } else if (options.theme) {
+      await runTheme(page, options, checks);
     } else if (options.history) {
       await runHistory(page, options, checks);
     } else if (options.blockedChunk) {

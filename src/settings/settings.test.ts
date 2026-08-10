@@ -11,7 +11,9 @@
 // six, because the saved pool presets added a list of user text, its two caps
 // and another step. Units 4.1 and 4.2 added the last six, because the
 // push-profile override added a field, another step, and four ways a stored
-// override is unusable.
+// override is unusable. The open half of Unit 4.8 added the last four, because
+// the theme a player builds added a field, another step, and two ways a stored
+// theme is unusable.
 //
 // The allowed values are written out again in this file. Reading them from the
 // module under test would let the module answer its own question.
@@ -70,6 +72,10 @@ const ENUMERATED_CASES = [
   'a profile override with a value outside its domain',
   'a profile override that repeats the preset',
   'a profile override the panel can edit',
+  'a version 7 record from before a built theme existed',
+  'a built theme both seeds and a mode',
+  'a built theme with a seed that is not a colour',
+  'a built theme with a mode that does not ship',
 ] as const;
 
 /** The six theme names, written out again for the same reason as the modes. */
@@ -384,6 +390,43 @@ const CASES: readonly Case[] = [
       },
     },
   },
+  // ---- the theme a player built — the open half of Unit 4.8 ----
+  {
+    name: 'a version 7 record from before a built theme existed',
+    stored: {
+      version: 7,
+      mode: 'step',
+      presetId: 'step-banes-cost-health',
+      diceThemeId: 'void',
+    },
+    expect: { mode: 'step', presetId: 'step-banes-cost-health', diceThemeId: 'void' },
+  },
+  {
+    name: 'a built theme both seeds and a mode',
+    stored: {
+      version: SETTINGS_VERSION,
+      builtTheme: { diceSeed: '#3cbfa5', interfaceSeed: '#ff8b68', mode: 'light', exactDice: true },
+    },
+    // The seeds come back upper case, because `readSeed` is the one reader of a
+    // colour and the panel and the store therefore agree on one spelling.
+    expect: {
+      builtTheme: { diceSeed: '#3CBFA5', interfaceSeed: '#FF8B68', mode: 'light', exactDice: true },
+    },
+  },
+  {
+    name: 'a built theme with a seed that is not a colour',
+    stored: {
+      version: SETTINGS_VERSION,
+      builtTheme: { diceSeed: 'rebeccapurple', interfaceSeed: '#FF8B68', mode: 'dark' },
+    },
+  },
+  {
+    name: 'a built theme with a mode that does not ship',
+    stored: {
+      version: SETTINGS_VERSION,
+      builtTheme: { diceSeed: '#3CBFA5', interfaceSeed: '#FF8B68', mode: 'sepia' },
+    },
+  },
 ];
 
 /**
@@ -429,6 +472,22 @@ function assertUsable(settings: Settings, caseName: string): void {
     axesChecked += 1;
   }
   expect(axesChecked, `${caseName}: all three theme axes were read`).toBe(3);
+  // A built theme is either absent or complete. Half a theme is not a theme,
+  // and a seed that is not a six-digit hex colour never reaches the screen.
+  const built = settings.builtTheme;
+  if (built !== null) {
+    let seedsChecked = 0;
+    for (const seed of [built.diceSeed, built.interfaceSeed]) {
+      expect(seed, `${caseName}: a stored seed is a six-digit hex colour`).toMatch(
+        /^#[0-9A-F]{6}$/,
+      );
+      seedsChecked += 1;
+    }
+    expect(seedsChecked, `${caseName}: both seeds of the built theme were read`).toBe(2);
+    expect(['dark', 'light'], `${caseName}: the built mode is one of the two`).toContain(
+      built.mode,
+    );
+  }
   expect(Array.isArray(settings.poolPresets), `${caseName}: the presets are a list`).toBe(true);
   expect(
     settings.poolPresets.length,
@@ -533,7 +592,7 @@ describe('migrate', () => {
     expect(CASES.length, 'the table holds one case per enumerated case').toBe(
       ENUMERATED_CASES.length,
     );
-    expect(ENUMERATED_CASES.length, 'the enumeration holds thirty-two cases').toBe(32);
+    expect(ENUMERATED_CASES.length, 'the enumeration holds thirty-six cases').toBe(36);
   });
 
   it('cuts an over-long preset list at the cap and keeps the presets it holds', () => {
@@ -549,7 +608,7 @@ describe('migrate', () => {
 
   it('keeps a stored record this build wrote, so a fallback cannot hide as a pass', () => {
     // Every field differs from the default. A `migrate` that always answered
-    // with the defaults would fail on all ten.
+    // with the defaults would fail on every one of them.
     const stored = {
       version: SETTINGS_VERSION,
       mode: 'step',
@@ -561,6 +620,7 @@ describe('migrate', () => {
       diceThemeId: 'void',
       traySurfaceId: 'ember',
       interfacePaletteId: 'cobalt',
+      builtTheme: { diceSeed: '#3CBFA5', interfaceSeed: '#FF8B68', mode: 'light', exactDice: true },
       poolPresets: [{ name: 'the quiet approach', counts: { attribute: 3, artifact: [8] } }],
       profileOverride: { maxPushes: 3, cost: { perUnit: 2 } },
     };
@@ -574,6 +634,7 @@ describe('migrate', () => {
     expect(stored.diceThemeId).not.toBe(DEFAULT_SETTINGS.diceThemeId);
     expect(stored.traySurfaceId).not.toBe(DEFAULT_SETTINGS.traySurfaceId);
     expect(stored.interfacePaletteId).not.toBe(DEFAULT_SETTINGS.interfacePaletteId);
+    expect(stored.builtTheme).not.toStrictEqual(DEFAULT_SETTINGS.builtTheme);
     expect(stored.poolPresets.length).not.toBe(DEFAULT_SETTINGS.poolPresets.length);
     expect(stored.profileOverride).not.toStrictEqual(DEFAULT_SETTINGS.profileOverride);
   });
@@ -591,6 +652,7 @@ describe('migrate', () => {
       diceThemeId: DEFAULT_SETTINGS.diceThemeId,
       traySurfaceId: DEFAULT_SETTINGS.traySurfaceId,
       interfacePaletteId: DEFAULT_SETTINGS.interfacePaletteId,
+      builtTheme: DEFAULT_SETTINGS.builtTheme,
       poolPresets: DEFAULT_SETTINGS.poolPresets,
       profileOverride: DEFAULT_SETTINGS.profileOverride,
     });

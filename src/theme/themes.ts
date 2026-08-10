@@ -21,9 +21,11 @@
 // What is measured, and where:
 //   * `theme.test.ts` measures every contrast claim over these rows.
 //   * `dice-colors.test.ts` keeps the Unit 3.3 claims over the `ash` dice row.
+//   * `css-vars.test.ts` measures the same claims on the RENDERED screen, over
+//     the roles `src/shell.css` really spends.
 //
-// This unit builds the data half only. The picker and the builder's controls
-// are interface work and wait behind the Unit 2.0 owner gate.
+// The picker, the colour builder's controls and the stylesheet that spends a
+// palette are the open half of this unit, and they land with the second half.
 
 import type { DieType } from '../rules/die';
 import { DIE_TYPE_COLOR } from '../tray/dice-colors';
@@ -56,10 +58,35 @@ export interface InterfacePalette {
   readonly textMuted: string;
   /** A control, a focus ring, a selected state. Not text. */
   readonly accent: string;
-  /** Text drawn on the accent. */
+  /** Text drawn on the accent. It is drawn on a mark as well. */
   readonly onAccent: string;
   /** A readout drawn over the tray surface. */
   readonly onTray: string;
+  /**
+   * A well pressed into the page: the cost row, the chart track, the warning
+   * pad. Body text is drawn on it, so it answers the text floor as well.
+   */
+  readonly sunken: string;
+  /**
+   * The boundary of a control.
+   *
+   * A button, a pool tile and a text field are all told from the page by their
+   * boundary rather than by their ground, so this is a graphical object under
+   * WCAG 2.2 SC 1.4.11 and it holds 3 to 1 against both grounds. It is not a
+   * decoration and it is not text.
+   */
+  readonly line: string;
+  /**
+   * The success mark and the bane mark.
+   *
+   * They do not follow the theme, and that is deliberate: a success is green
+   * and a bane is warm in every palette, so the meaning does not move when the
+   * page does. Shape carries the same meaning — a circle and a triangle — so
+   * neither one rides on hue. The two answer the non-text floor against every
+   * ground they are drawn on, and `onAccent` is the text drawn on them.
+   */
+  readonly markSuccess: string;
+  readonly markBane: string;
 }
 
 /**
@@ -147,7 +174,7 @@ export const TRAY_SURFACES: Readonly<Record<ThemeId, string>> = {
  *
  * Five dark palettes and one light one, so the axis is not a single mood. Each
  * row is built on one hue and a set of lightness targets, and `theme.test.ts`
- * measures all seven contrast pairs of every row.
+ * measures every contrast pair of every row.
  *
  * `onTray` stays light in the light palette too, because the tray stays dark in
  * every combination.
@@ -161,6 +188,10 @@ export const INTERFACE_PALETTES: Readonly<Record<ThemeId, InterfacePalette>> = {
     accent: '#FF8B68', // L* 70
     onAccent: '#261E1B', // L* 12
     onTray: '#F4E5E0', // L* 92
+    sunken: '#1D1714', // L* 8
+    line: '#7B7674', // L* 50
+    markSuccess: '#37C277', // L* 70
+    markBane: '#F4926A', // L* 70
   },
   ash: {
     background: '#1F2021', // L* 12
@@ -170,6 +201,10 @@ export const INTERFACE_PALETTES: Readonly<Record<ThemeId, InterfacePalette>> = {
     accent: '#A1ACC0', // L* 70
     onAccent: '#1F2021', // L* 12
     onTray: '#E7E8EB', // L* 92
+    sunken: '#171718', // L* 8
+    line: '#767778', // L* 50
+    markSuccess: '#37C277', // L* 70
+    markBane: '#F4926A', // L* 70
   },
   verdigris: {
     background: '#182120', // L* 12
@@ -179,6 +214,10 @@ export const INTERFACE_PALETTES: Readonly<Record<ThemeId, InterfacePalette>> = {
     accent: '#3CBFA5', // L* 70
     onAccent: '#182120', // L* 12
     onTray: '#DAECE8', // L* 92
+    sunken: '#121918', // L* 8
+    line: '#737878', // L* 50
+    markSuccess: '#37C277', // L* 70
+    markBane: '#F4926A', // L* 70
   },
   bone: {
     background: '#F4EAD7', // L* 93
@@ -188,6 +227,10 @@ export const INTERFACE_PALETTES: Readonly<Record<ThemeId, InterfacePalette>> = {
     accent: '#6A5734', // L* 38
     onAccent: '#FBF3E5', // L* 96
     onTray: '#F0E7D8', // L* 92
+    sunken: '#DDD4C2', // L* 85
+    line: '#7C766D', // L* 50
+    markSuccess: '#19663D', // L* 38
+    markBane: '#914324', // L* 38
   },
   void: {
     background: '#231D2A', // L* 12
@@ -197,6 +240,10 @@ export const INTERFACE_PALETTES: Readonly<Record<ThemeId, InterfacePalette>> = {
     accent: '#C695FF', // L* 70
     onAccent: '#231D2A', // L* 12
     onTray: '#EEE5F8', // L* 92
+    sunken: '#1A161F', // L* 8
+    line: '#79757D', // L* 50
+    markSuccess: '#37C277', // L* 70
+    markBane: '#F4926A', // L* 70
   },
   cobalt: {
     background: '#1B2027', // L* 12
@@ -206,6 +253,10 @@ export const INTERFACE_PALETTES: Readonly<Record<ThemeId, InterfacePalette>> = {
     accent: '#76ADFF', // L* 70
     onAccent: '#1B2027', // L* 12
     onTray: '#E1E9F5', // L* 92
+    sunken: '#14171D', // L* 8
+    line: '#74787C', // L* 50
+    markSuccess: '#37C277', // L* 70
+    markBane: '#F4926A', // L* 70
   },
 };
 
