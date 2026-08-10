@@ -21,10 +21,13 @@
 //     --capture docs/design/0014-table-push-1440.png
 //
 // `--sheet` needs `--url` and starts its own preview server too. It is the
-// browser half of Units 4.1 and 4.2: it drives the rule set, the artifact curve
-// and the override panel behind the one disclosure, proves that a change of
-// rules clears the table, reloads the page to prove every choice survives, and
-// measures the panel at 360 px. `--capture-shell <dir>` writes four frames.
+// browser half of Units 4.1, 4.2 and 4.3: it drives the rule set, the artifact
+// curve, the override panel and the saved pools behind the one disclosure,
+// proves that a change of rules clears the table, reloads the page to prove
+// every choice survives, and measures the panels at 360 px. The saved pools are
+// saved, recalled, reordered and deleted with real presses, every refusal is
+// reached through the interface, and the list is walked with real Tab and Enter
+// presses. `--capture-shell <dir>` writes six frames.
 // Build first, then run it alone:
 //   npm run build && node scripts/browser.mjs --sheet \
 //     --url http://localhost:4173/clatter/ --capture-shell docs/design
@@ -7245,6 +7248,137 @@ async function diceOnTable(page) {
   return page.evaluate(() => document.querySelectorAll('[data-el^="die-"]').length);
 }
 
+// ---------------------------------------------------------------------------
+// The saved pools — Unit 4.3
+//
+// Decision 11 puts the list behind the one disclosure, so it is read here,
+// inside the sheet this mode already opens. This half judges what only a
+// browser can judge: a name drawn by a real parser, real Tab and Enter presses
+// over the list, hit targets at 360 px, and a list that crosses a real reload.
+//
+// **What this does not judge, and where it is judged instead.** Whether each
+// refusal carries the words its cause asks for is asserted in `src/app.test.tsx`
+// against the record that holds those words, which the built bundle does not
+// export. Here the four routes are driven for real and the four answers are
+// counted and compared against each other.
+// ---------------------------------------------------------------------------
+
+/** Everything the preset panel holds, as a reader and a ruler meet it. */
+async function readPresets(page) {
+  return page.evaluate(() => {
+    const panel = document.querySelector('[data-el="sheet-presets"]');
+    if (panel === null) return null;
+    const controls = [...panel.querySelectorAll('button, input')].map((element) => {
+      const label = element.closest('label');
+      const box = (label ?? element).getBoundingClientRect();
+      return {
+        el: element.dataset.el ?? '',
+        role: element.tagName === 'INPUT' ? 'textbox' : 'button',
+        name: (
+          element.getAttribute('aria-label') ??
+          label?.textContent ??
+          element.textContent ??
+          ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim(),
+        state:
+          element.getAttribute('aria-disabled') ??
+          element.getAttribute('aria-invalid') ??
+          element.getAttribute('aria-current'),
+        disabled: element.disabled === true,
+        row: element.closest('[data-el^="preset-row-"]')?.dataset.name ?? null,
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      };
+    });
+    const rows = [...panel.querySelectorAll('[data-el^="preset-row-"]')].map((row) => {
+      const drawn = row.querySelector('[data-el^="preset-name-"]');
+      return {
+        stored: row.dataset.name ?? '',
+        drawn: drawn === null ? null : drawn.textContent,
+        elements: drawn === null ? -1 : drawn.children.length,
+        nodes: drawn === null ? -1 : drawn.childNodes.length,
+      };
+    });
+    return {
+      rows,
+      controls,
+      note: (panel.querySelector('[data-el="preset-note"]')?.textContent ?? '').trim(),
+      // Every element the markup in a name could have made. The name holds an
+      // `img` and a `b`, so a parsed name shows up here as well as in the row.
+      made: panel.querySelectorAll('img, script, b, iframe, svg').length,
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+      stored: localStorage.getItem('clatter.settings'),
+    };
+  });
+}
+
+/** Let the framework re-render before the next press. */
+async function settleScreen(page) {
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
+}
+
+/**
+ * Fill the name field and press Save.
+ *
+ * The field is filled the way a paste fills it, because a name may hold an
+ * emoji and a key press carries one code unit.
+ *
+ * **The two acts are two tasks, and that is not a convenience.** The framework
+ * batches a change of state, so a press in the same task as the typing reads
+ * the name the field held before it. A player cannot type and press inside one
+ * task; a script can, and a script that did would drive a screen no player ever
+ * meets.
+ */
+async function savePreset(page, name) {
+  await page.evaluate((text) => {
+    const field = document.querySelector('[data-el="preset-name"]');
+    field.value = text;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }, name);
+  await settleScreen(page);
+  await page.click('[data-el="preset-save"]');
+  await settleScreen(page);
+}
+
+/** The value each pool tile prints, by the name section 6 gives it. */
+async function readTiles(page) {
+  return page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll('[data-el^="pool-cell-"]')].map((cell) => [
+        cell.dataset.el,
+        (cell.querySelector('.cell-n')?.textContent ?? '').trim(),
+      ]),
+    ),
+  );
+}
+
+/** Press one tile end, the way a finger does. */
+async function pressTile(page, tile, end, times) {
+  for (let press = 0; press < times; press += 1) {
+    await page.click(`[data-el="pool-cell-${tile}"] .cell-${end}`);
+  }
+}
+
+/** Walk forward with real Tab presses and report where the focus landed. */
+async function tabFrom(page, start, steps) {
+  await page.focus(`[data-el="${start}"]`);
+  const seen = [];
+  for (let step = 0; step < steps; step += 1) {
+    await page.keyboard.press('Tab');
+    seen.push(
+      await page.evaluate(
+        () => document.activeElement?.getAttribute('data-el') ?? document.activeElement?.tagName,
+      ),
+    );
+  }
+  return seen;
+}
+
 async function runSheet(page, options, checks) {
   // The run starts from the defaults, so nothing an earlier run stored decides
   // what this one reads.
@@ -7445,14 +7579,264 @@ async function runSheet(page, options, checks) {
       `never by clipping.`,
   });
 
+  // ---- 6. A saved pool goes in, comes back, and crosses a reload. ----
+  //
+  // The viewport is 360 px from here on, because the phone is the case that
+  // fails first and every press below is a press a phone has to answer.
+  await closeSheet(page);
+  await pressTile(page, 'attribute', 'p', 3);
+  await pressTile(page, 'gear', 'p', 2);
+  await pressTile(page, 'artifact', 'p', 4);
+  const poolA = await readTiles(page);
+  await openSheet(page);
+  await savePreset(page, 'watch A');
+  await closeSheet(page);
+  await pressTile(page, 'attribute', 'm', 2);
+  const poolB = await readTiles(page);
+  await openSheet(page);
+  await savePreset(page, 'watch B');
+  await savePreset(page, 'watch C');
+  const threeSaved = await readPresets(page);
+  await page.click('[data-el="preset-recall-0"]');
+  const recalled = await readTiles(page);
+  const afterRecall = await page.evaluate(() => ({
+    builderOpen: document.querySelector('[data-el="pool-builder"]') !== null,
+    sheetOpen: document.querySelector('[data-el="disclosure-sheet"]') !== null,
+  }));
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="disclosure-toggle"]', { timeout: 30000 });
+  await openSheet(page);
+  const afterReload = await readPresets(page);
+  const savedOrder = threeSaved === null ? [] : threeSaved.rows.map((row) => row.stored);
+  const reloadOrder = afterReload === null ? [] : afterReload.rows.map((row) => row.stored);
+  console.log(
+    `browser: presets saved=[${savedOrder.join(' | ')}] reloaded=[${reloadOrder.join(' | ')}] ` +
+      `pool_a=${JSON.stringify(poolA)} pool_b=${JSON.stringify(poolB)} ` +
+      `recalled=${JSON.stringify(recalled)} builder_open=${afterRecall.builderOpen} ` +
+      `sheet_open=${afterRecall.sheetOpen}`,
+  );
+  checks.push({
+    name: 'sheet.a-saved-pool-recalls-into-the-builder-and-crosses-a-reload',
+    ok:
+      savedOrder.length === 3 &&
+      JSON.stringify(poolA) !== JSON.stringify(poolB) &&
+      JSON.stringify(recalled) === JSON.stringify(poolA) &&
+      afterRecall.builderOpen &&
+      !afterRecall.sheetOpen &&
+      reloadOrder.join('|') === savedOrder.join('|'),
+    detail:
+      `three pools were saved through the field and the list holds ` +
+      `[${savedOrder.join(' | ')}]. The tiles stood at ${JSON.stringify(poolA)} when the first ` +
+      `was saved and at ${JSON.stringify(poolB)} when the recall was pressed, and they read ` +
+      `${JSON.stringify(recalled)} after it. The builder is ` +
+      `${afterRecall.builderOpen ? 'open' : 'CLOSED'} and the sheet is ` +
+      `${afterRecall.sheetOpen ? 'STILL OPEN' : 'closed'}, which is Decision 11. The list read ` +
+      `back as [${reloadOrder.join(' | ')}] after a real reload through the page's own ` +
+      `localStorage.`,
+  });
+
+  // ---- 7. The name is the player's text, and a real parser never sees it. ----
+  const risky = `<img src=x onerror=1><b>bold</b> & 'single' "double" \u{1F3B2}`;
+  await savePreset(page, risky);
+  const drawnNames = await readPresets(page);
+  const riskyRow =
+    drawnNames === null ? undefined : drawnNames.rows.find((r) => r.stored === risky);
+  const riskyControls =
+    drawnNames === null ? [] : drawnNames.controls.filter((each) => each.row === risky);
+  console.log(
+    `browser: presets risky_row=${riskyRow === undefined ? 'MISSING' : 'drawn'} ` +
+      `stored_points=${[...risky].length} ` +
+      `drawn_points=${riskyRow === undefined ? -1 : [...(riskyRow.drawn ?? '')].length} ` +
+      `elements_in_the_name=${riskyRow?.elements ?? -1} nodes=${riskyRow?.nodes ?? -1} ` +
+      `elements_in_the_panel=${drawnNames?.made ?? -1} named_controls=${riskyControls.length}`,
+  );
+  checks.push({
+    name: 'sheet.the-preset-name-is-text-and-a-parser-never-sees-it',
+    ok:
+      riskyRow !== undefined &&
+      riskyRow.drawn === risky &&
+      [...(riskyRow.drawn ?? '')].length === [...risky].length &&
+      riskyRow.elements === 0 &&
+      riskyRow.nodes === 1 &&
+      drawnNames?.made === 0 &&
+      riskyControls.length === 4 &&
+      riskyControls.every((each) => each.name.includes(risky)),
+    detail:
+      `the name holds markup, both kinds of quote, an ampersand and an emoji. The row draws ` +
+      `${[...(riskyRow?.drawn ?? '')].length} code points against the ${[...risky].length} the ` +
+      `store holds, and the drawn characters ` +
+      `${riskyRow?.drawn === risky ? 'are the stored characters' : 'ARE NOT the stored characters'}. ` +
+      `The name holds ${riskyRow?.elements ?? -1} elements and ${riskyRow?.nodes ?? -1} nodes, ` +
+      `and the panel holds ${drawnNames?.made ?? -1} elements the markup could have made. A ` +
+      `check that read the text alone would pass while the markup was parsed, which is why the ` +
+      `element count is here. Constraint 8.`,
+  });
+
+  // ---- 8. Every refusal is reachable through the interface. ----
+  //
+  // Nothing is disabled to prevent a refusal, so both caps are reachable by
+  // hand: the field takes a name over the cap and the save control still
+  // presses at the preset limit.
+  const notes = new Map();
+  const rowCount = async () => (await readPresets(page))?.rows.length ?? -1;
+  // What a save that went through says. Every refusal below is compared against
+  // it, because a control that was disabled to prevent a refusal leaves the
+  // note of the press before it standing, and four different sentences would
+  // read as four refusals when one of them was a success.
+  const savedNote = (await readPresets(page))?.note ?? '';
+  await savePreset(page, '');
+  await settleScreen(page);
+  const emptied = await readPresets(page);
+  notes.set('an empty name', emptied?.note ?? '');
+  const fieldInvalid =
+    emptied?.controls.find((each) => each.el === 'preset-name')?.state ?? 'unread';
+
+  const emoji = '\u{1F3B2}';
+  const beforeCap = await rowCount();
+  await savePreset(page, emoji.repeat(60));
+  const atCapName = (await rowCount()) === beforeCap + 1;
+  await savePreset(page, emoji.repeat(61));
+  const overCapName = (await rowCount()) === beforeCap + 1;
+  notes.set('a name over the cap', (await readPresets(page))?.note ?? '');
+
+  let filled = await rowCount();
+  for (let each = 0; each < 40 && filled < 20; each += 1) {
+    await savePreset(page, `pool ${each}`);
+    filled = await rowCount();
+  }
+  await savePreset(page, 'one too many');
+  const atLimit = await rowCount();
+  notes.set('the preset limit', (await readPresets(page))?.note ?? '');
+
+  // A real double press. The player pressed Delete twice before the list could
+  // be drawn again, so the second press reads a list the first one changed.
+  const beforeDouble = await rowCount();
+  await page.evaluate(() => {
+    const button = document.querySelector('[data-el="preset-delete-0"]');
+    button.click();
+    button.click();
+  });
+  const afterDouble = await rowCount();
+  notes.set('no such preset', (await readPresets(page))?.note ?? '');
+
+  console.log(
+    `browser: presets refusals=${notes.size} distinct=${new Set(notes.values()).size} ` +
+      `empty_field_invalid=${fieldInvalid} at_cap_name_saved=${atCapName} ` +
+      `over_cap_name_refused=${overCapName} filled=${filled} at_limit=${atLimit} ` +
+      `double_press=${beforeDouble}->${afterDouble}`,
+  );
+  checks.push({
+    name: 'sheet.every-refusal-is-reachable-and-answers-in-words',
+    ok:
+      notes.size === 4 &&
+      new Set(notes.values()).size === 4 &&
+      savedNote.length > 0 &&
+      [...notes.values()].every((text) => text.length > 0 && text !== savedNote) &&
+      fieldInvalid === 'true' &&
+      atCapName &&
+      overCapName &&
+      filled === 20 &&
+      atLimit === 20 &&
+      afterDouble === beforeDouble - 1,
+    detail:
+      `four routes, four answers, ${new Set(notes.values()).size} of them different, and ` +
+      `${[...notes.values()].filter((text) => text === savedNote).length} of them the sentence a ` +
+      `save that went through prints ("${savedNote}"): ` +
+      `[${[...notes].map(([route, text]) => `${route}: "${text}"`).join(' | ')}]. The name field ` +
+      `reports aria-invalid=${fieldInvalid} after an empty save. A name of 60 emoji ` +
+      `${atCapName ? 'saved' : 'DID NOT save'} and one of 61 ` +
+      `${overCapName ? 'was refused' : 'WAS SAVED'}, so the cap is proved at the screen in the ` +
+      `code points it is counted in. The list filled to ${filled} one save at a time and stayed ` +
+      `at ${atLimit} when one more was pressed. A double press on Delete took the list from ` +
+      `${beforeDouble} rows to ${afterDouble}, which is the one route to the fourth refusal. ` +
+      `Which words each refusal carries is asserted in src/app.test.tsx against the record that ` +
+      `holds them.`,
+  });
+
+  // Back to a short list, one press at a time, so the walk below is a walk and
+  // not a scroll. The last row goes first, so the four named pools stay.
+  for (let each = 0; each < 40 && (await rowCount()) > 4; each += 1) {
+    await page.evaluate(() => {
+      const rows = document.querySelectorAll('[data-el^="preset-row-"]');
+      rows[rows.length - 1]?.querySelector('[data-el^="preset-delete-"]')?.click();
+    });
+  }
+
+  // ---- 9. The list is operable by keyboard alone, at 360 px. ----
+  const listed = await readPresets(page);
+  const rowControls = listed === null ? [] : listed.controls.filter((each) => each.row !== null);
+  // The expectation is derived from the panel itself: every control a keyboard
+  // can reach, in document order, less the two the ends disable.
+  const wantedWalk = (listed?.controls ?? [])
+    .filter((each) => each.el !== 'preset-name' && !each.disabled)
+    .map((each) => each.el);
+  const walked = await tabFrom(page, 'preset-name', wantedWalk.length);
+  const order = () => readPresets(page).then((held) => (held?.rows ?? []).map((row) => row.stored));
+  const beforeMove = await order();
+  await page.focus('[data-el="preset-up-3"]');
+  await page.keyboard.press('Enter');
+  const afterMove = await order();
+  await page.focus('[data-el="preset-recall-0"]');
+  await page.keyboard.press('Enter');
+  const afterKeyRecall = await page.evaluate(() => ({
+    builderOpen: document.querySelector('[data-el="pool-builder"]') !== null,
+    sheetOpen: document.querySelector('[data-el="disclosure-sheet"]') !== null,
+  }));
+  const unnamedControls = rowControls.filter((each) => each.name.length === 0);
+  const statelessControls = (listed?.controls ?? []).filter((each) => each.state === null);
+  const mislabelled = rowControls.filter((each) => !each.name.includes(each.row ?? ''));
+  const shortTargets = (listed?.controls ?? []).filter(
+    (each) => each.height < HIT_TARGET_FLOOR || each.width < HIT_TARGET_FLOOR,
+  );
+  console.log(
+    `browser: presets walk=[${walked.join(' ')}] wanted=[${wantedWalk.join(' ')}] ` +
+      `controls=${listed?.controls.length ?? -1} unnamed=${unnamedControls.length} ` +
+      `stateless=${statelessControls.length} mislabelled=${mislabelled.length} ` +
+      `short_targets=${shortTargets.length} moved=[${afterMove.join(' | ')}] ` +
+      `key_recall_builder=${afterKeyRecall.builderOpen} key_recall_sheet=${afterKeyRecall.sheetOpen}`,
+  );
+  checks.push({
+    name: 'sheet.the-preset-list-is-operable-by-keyboard-alone',
+    ok:
+      wantedWalk.length > 0 &&
+      walked.join(' ') === wantedWalk.join(' ') &&
+      unnamedControls.length === 0 &&
+      statelessControls.length === 0 &&
+      mislabelled.length === 0 &&
+      shortTargets.length === 0 &&
+      beforeMove.length === 4 &&
+      afterMove.join('|') !== beforeMove.join('|') &&
+      afterMove[2] === beforeMove[3] &&
+      afterMove[3] === beforeMove[2] &&
+      afterKeyRecall.builderOpen &&
+      !afterKeyRecall.sheetOpen,
+    detail:
+      `real Tab presses from the name field reached [${walked.join(' ')}] against the ` +
+      `[${wantedWalk.join(' ')}] the panel itself lists, which is every control a keyboard can ` +
+      `reach less the two the ends of the list disable. ` +
+      `${listed?.controls.length ?? -1} controls carry a role, a name and a state: ` +
+      `${unnamedControls.length} without a name, ${statelessControls.length} without a state, ` +
+      `and ${mislabelled.length} whose name does not hold the name of the pool it acts on. ` +
+      `Enter on the last row's move control took the list from [${beforeMove.join(' | ')}] to ` +
+      `[${afterMove.join(' | ')}], and Enter on a recall control put the pool in the builder ` +
+      `(${afterKeyRecall.builderOpen ? 'open' : 'CLOSED'}) and closed the sheet ` +
+      `(${afterKeyRecall.sheetOpen ? 'STILL OPEN' : 'closed'}). ${shortTargets.length} targets ` +
+      `sit under the ${HIT_TARGET_FLOOR} px floor of WCAG 2.2 SC 2.5.8 at ` +
+      `${listed?.viewportWidth ?? -1} px ` +
+      `[${shortTargets.map((each) => `${each.el}: ${each.width}x${each.height}px`).join('; ')}].`,
+  });
+
   if (options.captureShell !== null) {
-    // Two frames per width: the sheet as it opens, and the override panel. The
-    // sheet scrolls, so a frame of one is not a frame of the other.
+    await openSheet(page);
+    // Three frames per width: the sheet as it opens, the override panel, and
+    // the saved pools. The sheet scrolls, so a frame of one is not a frame of
+    // the other.
     for (const width of [360, 1440]) {
       await page.setViewport({ width, height: width === 360 ? 760 : 900, deviceScaleFactor: 1 });
       for (const [name, target] of [
         ['top', '[data-el="sheet-ruleset"]'],
         ['overrides', '[data-el="overrides-reset"]'],
+        ['presets', '[data-el="sheet-presets"]'],
       ]) {
         await page.evaluate((selector) => {
           document.querySelector(selector)?.scrollIntoView({ block: 'end' });

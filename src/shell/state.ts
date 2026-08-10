@@ -11,7 +11,7 @@
 import type { Die, DieType } from '../rules/die';
 import type { Faces } from '../rules/die';
 import { latestValue } from '../rules/die';
-import type { ArtifactFaces, Builder, DiceSpec, Mode, StepDice } from '../rules/pool';
+import type { ArtifactFaces, Builder, DiceSpec, Mode, PoolCounts, StepDice } from '../rules/pool';
 import {
   applyDifficulty,
   buildPool,
@@ -104,6 +104,12 @@ const ZERO_COUNTS: Counts = Object.freeze({
   bonus: 0,
   stress: 0,
 });
+
+/**
+ * The six tiles, in one list. It is read off a record of the six, so a seventh
+ * dice type reaches every reader below without an edit here.
+ */
+export const COUNT_KEYS: readonly CountKey[] = Object.keys(ZERO_COUNTS) as CountKey[];
 
 /**
  * The profile the application opens under.
@@ -301,11 +307,72 @@ function artifactDice(rating: number): readonly ArtifactFaces[] {
   return ARTIFACT_LADDER[clamp(rating, 0, POOL_CAPS.artifact)] ?? [];
 }
 
+/**
+ * The pool the tiles hold, in the shape the rules core and a saved preset both
+ * take. The artifact tile is a ladder rating on the screen and a list of dice
+ * everywhere else, and this is the one place that turns one into the other.
+ */
+export function poolCountsOf(state: AppState): PoolCounts {
+  return { ...state.counts, artifact: artifactDice(state.counts.artifact) };
+}
+
+/**
+ * The tiles that hold a stored pool, or `null` where the builder cannot hold
+ * it.
+ *
+ * Two stored pools cannot be drawn. A count above the cap of its tile is one,
+ * and an artifact list that is not a rung of `ARTIFACT_LADDER` is the other.
+ * Neither can be written through the interface, because every tile stops at its
+ * own cap and the artifact tile steps the ladder. Both can be written by hand
+ * into the browser's storage, which the migration accepts, because it validates
+ * a pool against the rules core rather than against this screen.
+ *
+ * **A pool the tiles cannot hold is refused rather than trimmed.** Clamping a
+ * count or picking the nearest rung would put a pool in the builder that the
+ * player never saved and never sees a difference from.
+ */
+export function tilesFor(counts: PoolCounts): Counts | null {
+  const artifact = counts.artifact ?? [];
+  const rating = ARTIFACT_LADDER.findIndex(
+    (rung) => rung.length === artifact.length && rung.every((faces, at) => artifact[at] === faces),
+  );
+  if (rating < 0) {
+    return null;
+  }
+  const tiles: Counts = {
+    attribute: counts.attribute ?? 0,
+    skill: counts.skill ?? 0,
+    gear: counts.gear ?? 0,
+    artifact: rating,
+    bonus: counts.bonus ?? 0,
+    stress: counts.stress ?? 0,
+  };
+  return COUNT_KEYS.every((key) => tiles[key] >= 0 && tiles[key] <= POOL_CAPS[key]) ? tiles : null;
+}
+
+/**
+ * Put a recalled pool in the builder.
+ *
+ * The builder opens, because the player has to see the pool that arrived. The
+ * table is not cleared: a pool decides what the NEXT throw takes and prices no
+ * roll already thrown, which is the same rule a press on a tile obeys. Decision
+ * 11 of `docs/design/0012-settled-decisions.md` holds the reasoning.
+ */
+export function withPool(state: AppState, tiles: Counts): AppState {
+  return { ...state, counts: tiles, builderOpen: true };
+}
+
+/** True while the builder holds exactly this pool. */
+export function holdsPool(state: AppState, counts: PoolCounts): boolean {
+  const tiles = tilesFor(counts);
+  return tiles !== null && COUNT_KEYS.every((key) => tiles[key] === state.counts[key]);
+}
+
 /** The builder the core takes, built from what the player has typed. */
 export function builderOf(state: AppState): Builder {
   const artifact = artifactDice(state.counts.artifact);
   if (state.mode === 'pool') {
-    return poolBuilder({ ...state.counts, artifact });
+    return poolBuilder(poolCountsOf(state));
   }
   // The rated pair gives the attribute and the skill die. Gear, artifact, bonus
   // and stress dice are extras the core adds to a step roll unchanged.

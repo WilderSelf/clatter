@@ -137,6 +137,7 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | `sheet-ruleset` | Picks one of the four push profiles. | 4.1 |
 | `sheet-overrides` | Every field of the profile record: the success lock, the per-type bane locks, the push limit, the cost source, the cost unit, the amount per unit, the stress behaviour, and the blockers. Each row that differs from the preset is marked, and `overrides-reset` inside the panel returns to the preset unchanged. | 4.2 |
 | `sheet-mode` | Pool dice or step dice. A switch discards the built pool. | 2.1 |
+| `sheet-presets` | The saved pools. A name field, one save control, and one row per saved pool carrying recall, move up, move down and delete. It draws no control in step mode, because a saved pool holds counts and step mode holds two rated sizes. Decision 11. | 4.3 |
 | `sheet-artifact-curve` | Escalating or flat. | 4.1 |
 | `sheet-theme` | Three axes — surface, accent and dice material — plus the colour builder. | 4.8 |
 | `sheet-history` | Opens the history destination. The log, its statistics and its export live there, not here. | 4.4 to 4.7 |
@@ -146,7 +147,9 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 
 The mode switch sits here on purpose. It destroys the built pool, so it must not sit one tap away
 from the throw. `sheet-ruleset`, `sheet-overrides` and `sheet-artifact-curve` sit here for the same
-reason: each of the three clears the roll on the table, which Decision 10 settles.
+reason: each of the three clears the roll on the table, which Decision 10 settles. `sheet-presets`
+sits here for the first of those two reasons: a recall writes over every tile of the built pool, so
+it belongs beside the mode switch and not beside the throw. Decision 11 records it.
 
 **The sheet scrolls.** `sheet-overrides` draws one row per field of the push-profile record, so the
 sheet is taller than a phone at every width. It carries `max-height` and `overflow-y: auto`, so it

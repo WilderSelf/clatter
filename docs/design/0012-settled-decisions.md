@@ -406,3 +406,71 @@ same change, the new affordance opens over an empty pool, so no mark of the old 
 | Both curves agree about a lock | `src/rules/success.test.ts`, over every artifact face |
 
 ---
+
+## Decision 11 — the saved pools live behind the disclosure, taken by me 2026-08-10
+
+**The saved pool list is `sheet-presets`, a tenth control behind the one disclosure.** It holds a
+name field, one save control, and one row per saved pool. Each row carries recall, move up, move
+down and delete. Section 4 of `docs/design/0002-screen-design.md` lists it against Unit 4.3. I took
+this decision under the delegated interface authority of `CLAUDE.md`.
+
+The question was open. Section 4 listed no pool preset list, and section 3 spends five of its eight
+controls at each rest state, so a tenth control in the builder was affordable by the budget alone.
+The budget was not the deciding reason. Three others were.
+
+### The three reasons
+
+**1. A recall writes over every tile of the built pool.** That is the hazard `sheet-mode` was put
+behind the disclosure for: a control that destroys the built pool must not sit one tap away from the
+throw. A recall is the same class of act. The paragraph under the section 4 table already states the
+rule, and this control obeys it.
+
+**2. The drawn screen is the owner's, and a control in the builder rewrites it.**
+`docs/design/0013-screen-final.html` is the artifact the owner approved at Unit 2.0, and
+`src/shell/drawn-screen.test.ts` holds every later unit against it. A control in the builder would
+change the drawn builder pane, the rest A keyboard walk of section 6, and the counts both
+instruments read out of that section. The sheet is a second surface: it holds no share of the
+control budget, and neither keyboard walk names a `sheet-` control at all.
+
+**3. Saving is rare and building is constant.** The player builds a pool at every throw and saves
+one a few times a campaign. The builder is the tightest part of the screen at 360 px, where it
+already holds two columns and scrolls. A rare act does not buy space from a constant one.
+
+### What this costs, counted rather than claimed
+
+**Section 3 is untouched. Five controls at rest A and five at rest B, against a ceiling of 8.** The
+inventory of section 3 still lists eight controls and `src/app.test.tsx` still counts them, control
+by control, at both rest states. A second check asserts that no element of the preset list is on the
+screen at either rest state until the disclosure is open, so the decision is measured and not
+asserted.
+
+**Section 6 is unchanged, and both instruments say so.** Eleven visits before the throw and
+thirty-five after it. Neither walk names a `sheet-` control, and both read their lists out of the
+design document.
+
+### The three rules the list obeys
+
+**A recall opens the builder and closes the sheet.** The player must see the pool that arrived, and
+the pool bar is where it lands. The status line is a live region and it names the new throw, so the
+recall reaches a screen reader as well.
+
+**A recall does not clear the table.** Decision 10 clears the table on a change of rules, because a
+roll was committed to at a price the rules set. A pool is not a rule: it decides what the NEXT throw
+takes and it prices no roll already thrown. This is the same rule the pool tiles obey today, where a
+press on a tile over an open builder leaves the dice where they lie.
+
+**Step mode draws no control.** A saved pool holds counts, and step mode holds two rated die sizes
+plus the extras. The storage half of Unit 4.3 saves no step pool and its ledger row says why, so the
+panel draws one sentence there and no control. A panel that saved the counts in step mode would
+save a pool the screen was not showing.
+
+### What a refusal does
+
+**A refusal is a message that names its cause, and never a control that went dim.** The four
+refusals the store answers — an empty name, a name over the cap, the preset limit, and no such
+preset — each reach the player as one sentence in a live region inside the panel. No control is
+disabled to prevent a refusal, because a disabled control names nothing and would put both caps out
+of reach of the interface. The two move controls are the one exception: the first row cannot move up
+and the last cannot move down, which is a position and not a refusal.
+
+---
