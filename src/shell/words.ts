@@ -9,6 +9,17 @@
 
 import type { PushCostUnit } from '../rules/push-profile';
 
+/**
+ * What the application is called.
+ *
+ * It sits here because the share card prints it and the shell holds it, and a
+ * name written twice is a name that can differ. **It is the whole of what a
+ * card says about where it came from.** Constraint 1 forbids a publisher name,
+ * a game title, an engine name and a setting term, and it forbids a "not
+ * affiliated with" line as well, because writing one names the publisher.
+ */
+export const APP_NAME = 'Clatter';
+
 /** `1 die`, `3 dice`. One name per thing, and the count in front of it. */
 export function plural(count: number, one: string, many: string): string {
   return count === 1 ? `1 ${one}` : `${count} ${many}`;

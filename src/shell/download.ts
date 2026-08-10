@@ -45,8 +45,79 @@ function pad(value: number): string {
  * of exports reads in the order the campaign ran.
  */
 export function exportFileName(at: Date): string {
+  return `clatter-log-${stamp(at)}.csv`;
+}
+
+/**
+ * What the share card is called.
+ *
+ * The same stamp as the export, so a folder holding both reads in the order the
+ * campaign ran. One formatter, so the two names cannot drift.
+ */
+export function cardFileName(at: Date): string {
+  return `clatter-card-${stamp(at)}.jpg`;
+}
+
+function stamp(at: Date): string {
   return (
-    `clatter-log-${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}-` +
-    `${pad(at.getHours())}${pad(at.getMinutes())}.csv`
+    `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}-` +
+    `${pad(at.getHours())}${pad(at.getMinutes())}`
   );
+}
+
+// ---------------------------------------------------------------------------
+// The share target — Unit 4.9
+//
+// A share target belongs to the BROWSER and is never a service of ours.
+// Constraint 4 keeps this a static site: `navigator.share` hands the file to
+// whatever the platform offers and this application makes no network call.
+//
+// **Its absence is not a failure.** A desktop browser that shares no file
+// simply does not draw the control, and the download is the route there.
+// ---------------------------------------------------------------------------
+
+/** The part of `navigator` a share needs. A test hands over its own. */
+export interface ShareTarget {
+  share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
+  canShare?: (data: { files?: File[] }) => boolean;
+}
+
+/**
+ * True while this browser offers to share this very file.
+ *
+ * Both calls are asked for, because a browser may hold `share` for text and
+ * refuse a file. The file itself is handed to `canShare`, so the answer is
+ * about the bytes on offer rather than about the feature in general.
+ */
+export function canShareFile(target: ShareTarget | undefined, file: File): boolean {
+  if (typeof target?.share !== 'function' || typeof target.canShare !== 'function') return false;
+  try {
+    return target.canShare({ files: [file] }) === true;
+  } catch {
+    // A browser that throws on a shape it does not know offers nothing here.
+    return false;
+  }
+}
+
+/** What a share attempt answered. A cancelled share is not an error. */
+export type ShareOutcome = 'shared' | 'cancelled' | 'refused';
+
+/**
+ * Hand the card to the browser's own share target.
+ *
+ * A player who closes the share sheet raises `AbortError`, which is a choice
+ * and not a fault, so it is answered apart from a refusal.
+ */
+export async function shareFile(
+  target: ShareTarget | undefined,
+  file: File,
+  text: string,
+): Promise<ShareOutcome> {
+  if (!canShareFile(target, file) || target?.share === undefined) return 'refused';
+  try {
+    await target.share({ files: [file], text });
+    return 'shared';
+  } catch (error) {
+    return error instanceof Error && error.name === 'AbortError' ? 'cancelled' : 'refused';
+  }
 }

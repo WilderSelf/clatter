@@ -44,6 +44,14 @@ import {
 } from './shell/presets';
 import { storageLine } from './shell/history';
 import { noticeText, startRenderer } from './shell/renderer';
+import { shareCard } from './shell/share-card';
+import type { makeShareCard } from './shell/share-state';
+import {
+  CARD_READY_TEXT,
+  NO_DOWNLOAD_TEXT,
+  SHARE_REFUSAL_TEXT,
+  CARD_SENT_TEXT,
+} from './shell/share-panel';
 import type { AppState, Counts } from './shell/state';
 import {
   builderOf,
@@ -267,6 +275,7 @@ function mount(
     store?: SettingsStore | null;
     probe?: TrayProbe;
     mount?: TrayMount;
+    makeCard?: typeof makeShareCard;
   } = {},
 ): HTMLElement {
   root = document.createElement('div');
@@ -2453,6 +2462,289 @@ describe('the history destination', () => {
     for (const control of new Set(named)) {
       expect(before.names, `the before-throw walk never names ${control}`).not.toContain(control);
       expect(after.names, `the after-throw walk never names ${control}`).not.toContain(control);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The share card — Unit 4.9
+//
+// The pixels are measured on a graphics card by
+// `node scripts/browser.mjs --share`, and the controls are driven in a real
+// browser by `node scripts/browser.mjs --share-card`. What is measured here is
+// the wiring, over a card handed straight in: jsdom holds no WebGL renderer and
+// no 2d context, so `makeShareCard` is injected exactly as the mount and the
+// probe are.
+//
+// **The panel costs the screen nothing.** Decision 16 puts it behind the one
+// disclosure, so the control inventory of section 3 and both keyboard walks of
+// section 6 are untouched, and the two checks below measure that rather than
+// claim it.
+// ---------------------------------------------------------------------------
+
+/** A card handed straight in, under the state the screen is holding. */
+function cardFor(state: AppState): {
+  readonly card: {
+    url: string;
+    alt: string;
+    filename: string;
+    file: File;
+    summary: NonNullable<ReturnType<typeof shareCard>>;
+  };
+} {
+  const summary = shareCard(state);
+  if (summary === null) throw new Error('the fixture put no dice on the table');
+  const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  return {
+    card: {
+      url: `data:image/jpeg;base64,${btoa(String.fromCharCode(...bytes))}`,
+      alt: summary.alt,
+      filename: 'clatter-card-2026-08-10-0605.jpg',
+      file: new File([bytes], 'clatter-card-2026-08-10-0605.jpg', { type: 'image/jpeg' }),
+      summary,
+    },
+  };
+}
+
+/** Watch what the anchor download hands the browser, as the browser sees it. */
+function watchDownload(): {
+  readonly urls: number;
+  readonly names: string[];
+  readonly blobs: Blob[];
+  restore: () => void;
+} {
+  const held = { urls: 0, names: [] as string[], blobs: [] as Blob[] };
+  const url = globalThis.URL as unknown as {
+    createObjectURL?: (blob: Blob) => string;
+    revokeObjectURL?: (url: string) => void;
+  };
+  const beforeCreate = url.createObjectURL;
+  const beforeRevoke = url.revokeObjectURL;
+  const beforeClick = HTMLAnchorElement.prototype.click;
+  url.createObjectURL = (blob: Blob): string => {
+    held.urls += 1;
+    held.blobs.push(blob);
+    return 'blob:card';
+  };
+  url.revokeObjectURL = (): void => {};
+  HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
+    held.names.push(this.download);
+  };
+  return {
+    get urls(): number {
+      return held.urls;
+    },
+    names: held.names,
+    blobs: held.blobs,
+    restore: (): void => {
+      url.createObjectURL = beforeCreate;
+      url.revokeObjectURL = beforeRevoke;
+      HTMLAnchorElement.prototype.click = beforeClick;
+    },
+  };
+}
+
+describe('the share card behind the disclosure', () => {
+  it('draws no part of itself at either rest state, which is what Decision 16 costs', () => {
+    expect(
+      DESIGN.includes('| `sheet-share` |'),
+      'section 4 lists the panel behind the one disclosure',
+    ).toBe(true);
+    const partsOnScreen = (): string[] =>
+      [...document.querySelectorAll<HTMLElement>('[data-el]')]
+        .map((each) => each.dataset.el ?? '')
+        .filter((name) => name.startsWith('share-') || name === 'sheet-share');
+
+    const thrown = rollNow(
+      builtState({ attribute: 3, skill: 2 }, 'pool-referee-gains-a-point'),
+      seededRandom(8),
+    );
+    mount({ store: fakeStore() });
+    expect(partsOnScreen(), 'rest A holds no part of the panel').toEqual([]);
+    act(() => render(null, root as HTMLElement));
+    mount({ store: fakeStore(), initial: thrown });
+    expect(partsOnScreen(), 'rest B holds no part of the panel').toEqual([]);
+
+    click(element('disclosure-toggle'));
+    expect(element('sheet-share'), 'the panel is behind the one disclosure').not.toBeNull();
+    // One control before a card exists. The two ways out arrive with the card.
+    expect(document.querySelector('[data-el="share-download-button"]')).toBeNull();
+    expect(document.querySelector('[data-el="share-send-button"]')).toBeNull();
+    expect(document.querySelector('[data-el="share-preview"]')).toBeNull();
+  });
+
+  it('refuses an empty table by name, and refuses the flat dice by name', () => {
+    mount({ store: fakeStore() });
+    click(element('disclosure-toggle'));
+    click(element('share-card-button'));
+    expect(element('share-note').textContent).toBe(SHARE_REFUSAL_TEXT.noRoll);
+    expect(document.querySelector('[data-el="share-preview"]')).toBeNull();
+
+    act(() => render(null, root as HTMLElement));
+    // The dice are drawn flat here, because the probe never answers, so the
+    // screen holds no tray and the real `makeShareCard` refuses on that.
+    const thrown = rollNow(
+      builtState({ attribute: 3 }, 'pool-referee-gains-a-point'),
+      seededRandom(5),
+    );
+    mount({ store: fakeStore(), initial: thrown });
+    click(element('disclosure-toggle'));
+    click(element('share-card-button'));
+    expect(element('share-note').textContent).toBe(SHARE_REFUSAL_TEXT.flatDice);
+    expect(document.querySelector('[data-el="share-preview"]')).toBeNull();
+  });
+
+  it('shows the card with alternative text the roll itself produced', () => {
+    const thrown = rollNow(
+      builtState({ attribute: 3, skill: 2, stress: 2 }, 'pool-stress-and-complications'),
+      seededRandom(12),
+    );
+    const made = cardFor(thrown);
+    mount({ store: fakeStore(), initial: thrown, makeCard: () => ({ kind: 'made', ...made }) });
+    click(element('disclosure-toggle'));
+    click(element('share-card-button'));
+
+    const preview = element('share-preview') as HTMLImageElement;
+    expect(preview.tagName).toBe('IMG');
+    expect(preview.getAttribute('src')).toBe(made.card.url);
+    // The oracle is the roll, not the card: `shareCard` is asked again here.
+    const summary = shareCard(thrown);
+    expect(preview.getAttribute('alt')).toBe(summary?.alt);
+    for (const reading of summary?.readings ?? []) {
+      expect(preview.getAttribute('alt'), `the alternative text names ${reading.key}`).toContain(
+        reading.text.charAt(0).toUpperCase() + reading.text.slice(1),
+      );
+    }
+    expect(preview.tabIndex, 'the preview holds no tab stop').toBeLessThan(0);
+    expect(element('share-note').textContent).toBe(CARD_READY_TEXT);
+    expect(element('share-download-button')).not.toBeNull();
+  });
+
+  it('hands the browser the bytes the composition produced, under the card name', () => {
+    const thrown = rollNow(
+      builtState({ attribute: 3, skill: 2 }, 'pool-referee-gains-a-point'),
+      seededRandom(9),
+    );
+    const made = cardFor(thrown);
+    const watch = watchDownload();
+    try {
+      mount({ store: fakeStore(), initial: thrown, makeCard: () => ({ kind: 'made', ...made }) });
+      click(element('disclosure-toggle'));
+      click(element('share-card-button'));
+      click(element('share-download-button'));
+      expect(watch.urls, 'one press hands the browser one object URL').toBe(1);
+      expect(watch.names).toEqual([made.card.filename]);
+      expect(watch.blobs[0], 'the very file the composition made').toBe(made.card.file);
+      expect(element('share-note').textContent).toBe(`The card went to ${made.card.filename}.`);
+    } finally {
+      watch.restore();
+    }
+  });
+
+  it('says so where the browser can save no file at all', () => {
+    const thrown = rollNow(
+      builtState({ attribute: 3 }, 'pool-referee-gains-a-point'),
+      seededRandom(9),
+    );
+    const made = cardFor(thrown);
+    // The browser that holds no object URL at all. It is taken away here
+    // rather than looked for, because the engine this file runs in has one.
+    const url = globalThis.URL as unknown as { createObjectURL?: (blob: Blob) => string };
+    const before = url.createObjectURL;
+    Object.defineProperty(url, 'createObjectURL', { value: undefined, configurable: true });
+    try {
+      mount({ store: fakeStore(), initial: thrown, makeCard: () => ({ kind: 'made', ...made }) });
+      click(element('disclosure-toggle'));
+      click(element('share-card-button'));
+      click(element('share-download-button'));
+      expect(element('share-note').textContent).toBe(NO_DOWNLOAD_TEXT);
+    } finally {
+      Object.defineProperty(url, 'createObjectURL', { value: before, configurable: true });
+    }
+  });
+
+  it('draws the send control only where the browser offers to share this very file', async () => {
+    const thrown = rollNow(
+      builtState({ attribute: 3 }, 'pool-referee-gains-a-point'),
+      seededRandom(9),
+    );
+    const made = cardFor(thrown);
+    mount({ store: fakeStore(), initial: thrown, makeCard: () => ({ kind: 'made', ...made }) });
+    click(element('disclosure-toggle'));
+    click(element('share-card-button'));
+    // jsdom offers no share target, so the control is absent and that absence
+    // is not a failure.
+    expect(document.querySelector('[data-el="share-send-button"]')).toBeNull();
+    act(() => render(null, root as HTMLElement));
+
+    const given: unknown[] = [];
+    const target = navigator as unknown as Record<string, unknown>;
+    target.canShare = (data: { files?: File[] }): boolean => data.files?.[0] === made.card.file;
+    target.share = async (data: unknown): Promise<void> => {
+      given.push(data);
+    };
+    try {
+      mount({ store: fakeStore(), initial: thrown, makeCard: () => ({ kind: 'made', ...made }) });
+      click(element('disclosure-toggle'));
+      click(element('share-card-button'));
+      const send = element('share-send-button');
+      expect(send.getAttribute('aria-disabled')).toBe('false');
+      click(send);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(given, 'the file and the same readings in words').toEqual([
+        { files: [made.card.file], text: made.card.alt },
+      ]);
+      expect(element('share-note').textContent).toBe(CARD_SENT_TEXT);
+    } finally {
+      delete target.canShare;
+      delete target.share;
+    }
+  });
+
+  it('clears the card when the dice change, so no card outlives its roll', () => {
+    const thrown = rollNow(
+      builtState({ attribute: 3, skill: 2 }, 'pool-referee-gains-a-point'),
+      seededRandom(9),
+    );
+    const made = cardFor(thrown);
+    mount({
+      store: fakeStore(),
+      initial: thrown,
+      random: seededRandom(21),
+      makeCard: () => ({ kind: 'made', ...made }),
+    });
+    click(element('disclosure-toggle'));
+    click(element('share-card-button'));
+    expect(element('share-preview')).not.toBeNull();
+    click(element('sheet-close'));
+    click(element('roll-button'));
+    click(element('disclosure-toggle'));
+    expect(
+      document.querySelector('[data-el="share-preview"]'),
+      'a new roll takes the old card away',
+    ).toBeNull();
+    expect(element('share-note').textContent).toBe('');
+  });
+
+  it('leaves the control inventory of section 3 and both walks of section 6 alone', () => {
+    // The inventory check at the top of this file counts the eight controls of
+    // section 3 at both rest states. This one reads the two walks out of the
+    // design and asserts that no control of this unit is named in either.
+    const before = walkList(DESIGN, 'Before');
+    const after = walkList(DESIGN, 'After');
+    expect(before.stated).toBe(before.names.length);
+    expect(after.stated).toBe(after.names.length);
+    for (const name of [
+      'sheet-share',
+      'share-card-button',
+      'share-download-button',
+      'share-send-button',
+      'share-preview',
+    ]) {
+      expect(before.names, `the before-throw walk never names ${name}`).not.toContain(name);
+      expect(after.names, `the after-throw walk never names ${name}`).not.toContain(name);
     }
   });
 });

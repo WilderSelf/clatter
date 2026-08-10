@@ -56,6 +56,18 @@ import {
   PRESET_SAVED_TEXT,
   UNUSABLE_POOL_TEXT,
 } from './shell/presets';
+import { canShareFile, downloadBlob, shareFile } from './shell/download';
+import type { MadeCard, MakeCardOutcome } from './shell/share-state';
+import { makeShareCard } from './shell/share-state';
+import {
+  CARD_READY_TEXT,
+  CARD_SENT_TEXT,
+  NO_DOWNLOAD_TEXT,
+  SHARE_CANCELLED_TEXT,
+  SHARE_REFUSAL_TEXT,
+  SHARE_REFUSED_TEXT,
+  SharePanel,
+} from './shell/share-panel';
 import type { OpenRollLogResult, RollLog, RollLogOptions } from './shell/roll-log';
 import { openRollLog } from './shell/roll-log';
 import type { RendererState } from './shell/renderer';
@@ -110,10 +122,9 @@ import { ThemePanel } from './shell/theme-panel';
 import type { TrayDecision } from './tray/capability';
 import { decideTray, probeCapability } from './tray/capability';
 import { mountTray } from './tray/scene';
+import type { DiceBox } from './tray/vendor/dice-tray.js';
 
 export type { TrayMount, TraySpots } from './shell/table';
-
-export const APP_NAME = 'Clatter';
 
 /**
  * What each artifact curve pays, in the words a player reads.
@@ -720,12 +731,24 @@ interface PresetNote {
 
 const NO_PRESET_NOTE: PresetNote = { text: '', reason: null };
 
+/** Everything `sheet-share` needs, gathered so the sheet takes one prop for it. */
+interface ShareControls {
+  readonly made: MadeCard | null;
+  readonly canSend: boolean;
+  readonly note: string;
+  readonly busy: boolean;
+  readonly onMake: () => void;
+  readonly onDownload: () => void;
+  readonly onSend: () => void;
+}
+
 function Sheet({
   state,
   setState,
   renderer,
   applied,
   presetNote,
+  share,
   storage,
   onSavePreset,
   onRecallPreset,
@@ -742,6 +765,7 @@ function Sheet({
   renderer: RendererState;
   applied: AppliedTheme;
   presetNote: PresetNote;
+  share: ShareControls;
   /** What the browser reports the origin uses, or null where it reports none. */
   storage: { usage: number | null; quota: number | null } | null;
   onSavePreset: (name: string) => boolean;
@@ -908,6 +932,25 @@ function Sheet({
         <p class="sheet-note" data-el="sheet-tray-note">
           {trayNote(renderer.choice)}
         </p>
+        {/* The share card — Unit 4.9.
+
+            Decision 16 of `docs/design/0012-settled-decisions.md` puts it here
+            and section 4 of `docs/design/0002-screen-design.md` lists it. The
+            sheet is a second surface, so the control budget of section 3 and
+            both keyboard walks of section 6 are untouched.
+
+            It sits under the renderer toggle on purpose: a card is a picture
+            of the table, and the refusal a player meets on the flat dice
+            points at the control just above it. */}
+        <SharePanel
+          made={share.made}
+          canSend={share.canSend}
+          note={share.note}
+          busy={share.busy}
+          onMake={share.onMake}
+          onDownload={share.onDownload}
+          onSend={share.onSend}
+        />
         <button
           class="btn"
           type="button"
@@ -963,6 +1006,7 @@ export function App({
   store = localSettingsStore(),
   probe = probeTray,
   mount = mountTray,
+  makeCard = makeShareCard,
   log: logOptions,
 }: {
   random?: RandomSource;
@@ -970,6 +1014,15 @@ export function App({
   store?: SettingsStore | null;
   probe?: TrayProbe;
   mount?: TrayMount;
+  /**
+   * How one share card is made — Unit 4.9.
+   *
+   * It is injected for the same reason the mount and the probe are: a card is
+   * drawn through a real WebGL renderer onto a real canvas, and jsdom holds
+   * neither. `node scripts/browser.mjs --share` measures the pixels, and a
+   * test hands over a card of its own to drive the two ways out of the panel.
+   */
+  makeCard?: typeof makeShareCard;
   /**
    * How the roll log is opened. A test hands over its own database name, its
    * own clock and its own roll names, so a run is repeatable and two runs do
@@ -989,6 +1042,16 @@ export function App({
   // What the last preset operation answered. It is empty until the player
   // presses something in the panel.
   const [presetNote, setPresetNote] = useState<PresetNote>(NO_PRESET_NOTE);
+  // ---- The share card — Unit 4.9 ----
+  //
+  // The tray itself, because a card is one fresh frame drawn through the
+  // renderer and copied in the same task. It is a ref and not a hook state: it
+  // arrives from a mount callback, nothing on the screen is drawn from it, and
+  // a render of the whole application on every mount would buy nothing.
+  const trayBox = useRef<DiceBox | null>(null);
+  const [madeCard, setMadeCard] = useState<MadeCard | null>(null);
+  const [shareNote, setShareNote] = useState('');
+  const [shareBusy, setShareBusy] = useState(false);
   // ---- The roll log — Unit 4.4 ----
   //
   // The history is a separate destination, so `historyOpen` is a route and not
@@ -1106,6 +1169,83 @@ export function App({
     setState((previous) => withPool(previous, tiles));
     setPresetNote(NO_PRESET_NOTE);
     closeSheet();
+  };
+
+  // ---- The share card — Unit 4.9 ----
+  //
+  // **A card belongs to the roll it was made from.** Any change of the dice —
+  // a throw, a push, or a die the player keeps or releases — makes a new roll
+  // of the table, so the card and its preview go and the player makes another.
+  // A card left standing would be saved under readings the table no longer
+  // holds.
+  useEffect(() => {
+    setMadeCard(null);
+    setShareNote('');
+  }, [state.result]);
+
+  /**
+   * Make one card.
+   *
+   * The whole act is `makeShareCard`: it reads the roll, draws one fresh frame
+   * through the tray and lays the summary over it inside the same task. A
+   * refusal is a sentence that names the thing the player has to change.
+   */
+  const runMakeCard = (): void => {
+    setShareBusy(true);
+    setShareNote('');
+    try {
+      const outcome: MakeCardOutcome = makeCard({
+        state,
+        box: onTheTable ? trayBox.current : null,
+        palette: applied.palette,
+        traySurface: applied.traySurfaceColour,
+        at: new Date(),
+      });
+      if (outcome.kind === 'refused') {
+        setMadeCard(null);
+        setShareNote(SHARE_REFUSAL_TEXT[outcome.reason]);
+        return;
+      }
+      setMadeCard(outcome.card);
+      setShareNote(CARD_READY_TEXT);
+    } catch (error) {
+      setMadeCard(null);
+      setShareNote(
+        `The card was not made. ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  /** Save the card. The anchor download of Unit 4.5, over the same bytes. */
+  const runDownloadCard = (): void => {
+    if (madeCard === null) return;
+    const offered = downloadBlob(madeCard.file, madeCard.filename, document);
+    setShareNote(offered ? `The card went to ${madeCard.filename}.` : NO_DOWNLOAD_TEXT);
+  };
+
+  /**
+   * Hand the card to the browser's own share target.
+   *
+   * The control is drawn only where the browser offers to share this very
+   * file, so this runs where a target exists. A player who closes the share
+   * sheet is answered apart from a browser that refused the file.
+   */
+  const runSendCard = (): void => {
+    if (madeCard === null) return;
+    setShareBusy(true);
+    void shareFile(navigator, madeCard.file, madeCard.alt)
+      .then((outcome) => {
+        setShareNote(
+          outcome === 'shared'
+            ? CARD_SENT_TEXT
+            : outcome === 'cancelled'
+              ? SHARE_CANCELLED_TEXT
+              : SHARE_REFUSED_TEXT,
+        );
+      })
+      .finally(() => setShareBusy(false));
   };
 
   // The rules the player chose are written to the same record the renderer
@@ -1309,6 +1449,9 @@ export function App({
               mount={mount}
               onFall={() => apply(fallToFlat)}
               onSpots={setSpots}
+              onBox={(box) => {
+                trayBox.current = box;
+              }}
               colours={applied.diceColours}
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
             />
@@ -1422,6 +1565,17 @@ export function App({
           renderer={renderer}
           applied={applied}
           presetNote={presetNote}
+          share={{
+            made: madeCard,
+            // The browser's own answer about this very file. Where it says no,
+            // the send control is absent, and that absence is not a failure.
+            canSend: madeCard !== null && canShareFile(navigator, madeCard.file),
+            note: shareNote,
+            busy: shareBusy,
+            onMake: runMakeCard,
+            onDownload: runDownloadCard,
+            onSend: runSendCard,
+          }}
           storage={storage}
           onSavePreset={(name) =>
             runPreset(

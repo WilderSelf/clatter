@@ -26,11 +26,27 @@ import type { DiceBox } from './vendor/dice-tray.js';
  */
 export const SHARE_JPEG_QUALITY = 0.9;
 
+/** What the overlay is given: the copy, and the size it may draw over. */
+export interface CaptureSurface {
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface CaptureOptions {
   /** The colour under the dice. The renderer clears to transparent. */
   readonly surface?: string;
   /** 0 to 1. `SHARE_JPEG_QUALITY` unless the caller names another. */
   readonly quality?: number;
+  /**
+   * The summary, drawn over the copied frame.
+   *
+   * **It runs inside this same task**, between the copy and the encode, and it
+   * may not await. A composition drawn after the copy is a different defect
+   * with the same shape as the black frame: the picture under it would be gone
+   * and the panel over it would still look like a card. `drawShareCard` in
+   * `src/shell/share-card.ts` is the one caller and it is synchronous.
+   */
+  readonly overlay?: (context: CanvasRenderingContext2D, size: CaptureSurface) => void;
 }
 
 /**
@@ -41,13 +57,19 @@ export interface CaptureOptions {
  * JPEG carries no alpha, and a card that skipped this step would show the dice
  * on black rather than on the table.
  *
- * Every step below runs in one task. Read the note at the top of this file
- * before you change the order of any of them.
+ * Every step below runs in one task, the summary overlay included. Read the
+ * note at the top of this file before you change the order of any of them.
  */
 export function captureTrayJpeg(box: DiceBox, options: CaptureOptions = {}): string {
   const drawn = box.renderer.domElement as HTMLCanvasElement;
   if (drawn.width < 1 || drawn.height < 1) {
     throw new Error(`captureTrayJpeg: the canvas measures ${drawn.width} by ${drawn.height}`);
+  }
+  // An async overlay draws after this function has returned, so the panel would
+  // land on a canvas the browser has already cleared. The declaration is the
+  // guard, exactly as it is for this function itself.
+  if (options.overlay !== undefined && options.overlay.constructor.name === 'AsyncFunction') {
+    throw new Error('captureTrayJpeg: the overlay is an async function and it may not await');
   }
 
   // 1. One fresh frame, so the drawing buffer holds the scene right now.
@@ -64,6 +86,10 @@ export function captureTrayJpeg(box: DiceBox, options: CaptureOptions = {}): str
   context.fillRect(0, 0, flat.width, flat.height);
   context.drawImage(drawn, 0, 0);
 
-  // 3. Encode. `toDataURL` is synchronous, so the bytes are the frame above.
+  // 3. The summary, over the frame and inside this same task. The overlay is
+  //    synchronous, so the picture under it cannot be cleared before it draws.
+  options.overlay?.(context, { width: flat.width, height: flat.height });
+
+  // 4. Encode. `toDataURL` is synchronous, so the bytes are the frame above.
   return flat.toDataURL('image/jpeg', options.quality ?? SHARE_JPEG_QUALITY);
 }

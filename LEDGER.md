@@ -41,7 +41,7 @@ Status table for each unit. Every unit appends one row after it lands.
 | 4.4 | Roll log | Store half done. Interface half open. Recorded order deviation. | — | **Done:** the IndexedDB store. `src/log/store.ts` holds the 5,000-roll ring buffer, and the insert and the trim run in ONE readwrite transaction. A `LogWriter` queues rolls and `flushOnHide` writes them when the page goes to the background. `persistOnce` asks for persistent storage once per page and `estimateStorage` reads the usage and the quota. Four refusals get four answers: `refused`, `blocked`, `full` and `error`. The `--log-store` harness mode fills the buffer, then writes on top of it from **two** connections at once. **Open:** the settings screen that shows the estimate, the log view, the export button, and the interface note about the seven-day rule on iOS. The unit is not complete. See the notes under this table.
 | 4.5 | CSV export | Export half done. Export button open. Recorded order deviation. | — | **Done:** the full-buffer measurement. `exportCsvInChunks` in `src/log/csv.ts` builds the file a chunk of rolls at a time, and each chunk becomes its own `Blob`, so the heap holds one chunk and never the whole document. `readRollsInPages` in `src/log/store.ts` reads the buffer a page at a time, because `readRolls` rebuilds 5,000 rolls in one task. The `--log-csv` harness mode measures the whole of what an export button does. **Open:** the export button and the download. Both are interface work and wait at `BLOCKED:owner-gate` on Unit 2.0. The unit is not complete. See the notes under this table. |
 | 4.6 | CSV import | Round trip through the real store done. Import control open. Recorded order deviation. | — | **Done:** store, export, import, store, with every field of every roll compared. `appendRolls` takes a `replace` option that empties the log inside the transaction of the insert, which is the call site Unit 4.6 was waiting for. The three decisions the plan settled are now asserted through the real store: an import replaces the log, a duplicate `roll_id` is rejected, and the size cap refuses a file before it is parsed. **Open:** the import control, the file picker and the byte-size check on the file itself, plus the message an invalid import shows, which is Unit 4.10. All of it is interface work and waits at `BLOCKED:owner-gate` on Unit 2.0. The unit is not complete. See the notes under this table. |
-| 4.9 | Share card | Capture half done. Summary, download and share open. Recorded order deviation. | — | **Done:** the capture. `src/tray/capture.ts` draws one fresh frame through the exposed renderer and copies it in the same task. The function is **synchronous on purpose**, because a synchronous function cannot await and an await between the render and the copy is the black-frame defect. No `preserveDrawingBuffer`, and no screenshot library. `scripts/browser.mjs --share` ran on the graphics card with the sandbox off, over a mixed pool of 24 dice at `--throw-seed 5`: luminance variance 383.92 luma levels squared against a floor of 25, and 28,892 distinct pixel values against a floor of more than 1,000, both read off the decoded JPEG. The file measures 93,833 bytes, opens `ffd8ff`, closes `ffd9`, declares 1440 by 900 and decodes to 1440 by 900, against a canvas of 1440 by 900 device pixels. The red-proof `--capture-later` copies the canvas one task after the render, which is the defect itself: variance 0.00, one distinct value, exit 1, and **the file check stayed green** on a valid 36,223-byte JPEG of an empty table. The card is `docs/design/0009-share-card-1440.jpg`. Both chunks are unchanged at 6,953 and 151,876 gzip bytes, because nothing in `src/` imports the module yet. `npm run perf` still reads 203 steps with the scene digest unchanged. Branding gate `files_scanned=94`, `hits=0`, exit 0. **Open:** the summary composition, the download button and the Web Share call. All three are design work and wait at `BLOCKED:owner-gate` on Unit 2.0. **Unit 4.9 is not complete.** See the notes under this table. |
+| 4.9 | Share card. **Unit 4.9 is now complete.** | Done | #18 | The open half lands: the summary composition, the download and the Web Share call. `sheet-share` sits behind the one disclosure, which Decision 16 of `docs/design/0012-settled-decisions.md` settles and section 4 of `docs/design/0002-screen-design.md` lists, so the control budget of section 3 and both keyboard walks of section 6 are untouched: five controls at each rest state against a ceiling of 8, and eleven visits before the throw and thirty-five after it, in both instruments. **The card names the application and nothing else about where it came from.** `src/shell/share-card.test.ts` scans every string a card can hold through the branding gate's own tokeniser and its own hashes, over twelve real rolls, and a positive control proves the scanner answers. The summary sits on an OPAQUE panel of the interface palette, drawn in the upper left where the capture half recorded the frame is empty, and `drawShareCard` runs inside the overlay of `captureTrayJpeg`, between the copy of the frame and the encode, in one task. An async overlay is refused by name. **The two acceptance measures now run over the PHOTOGRAPH and not over the whole card**, because a panel of text carries variance and thousands of distinct values by itself and would pass them on a cleared buffer: `--capture-later` still reads variance 0.00 and 59 distinct values outside the panel while the whole card reads 253.03 and 2,810. The good run reads 309.78 luma levels squared against a floor of 25 and 19,522 distinct values against a floor of 1,000, over 1,123,800 photograph pixels, and the photograph and the panel add back up to the 1,296,000 of the card. Six cards, one per interface palette, were drawn and measured on the graphics card: every panel ground and every run's ink read off the DRAWN pixels, 48 readings, dimmest 5.28 to 1 against the 4.5 to 1 of WCAG 2.2 SC 1.4.3. **A capture found a defect a green suite could not see:** the headline ran off the side of the panel and its last word landed on the photograph, unreadable, while every check stayed green, because a run's BOX fitted and its TEXT did not. The successes and the banes are now two lines, the drawing measures every run against its box and fits it, and the widest card the readings can make is measured as well. The download reuses the anchor of Unit 4.5 and its file is compared BYTE FOR BYTE against the composition: 69,460 of 69,460 bytes, first difference -1. The share target is the browser's own and is drawn only where `navigator.canShare` accepts the file: this host offers none, so the control is absent and the call check prints NOT JUDGED and counts in `skipped=1`. Twenty-one injections were proved red, every one restored by editing the injection back. Initial JavaScript 37,631 to 39,932 gzip bytes and the lazy chunk unchanged at 151,876, both under the budget in `budgets.json`. `npm run perf` reads 203 steps with the scene digest unchanged. Cards at `docs/design/0020-share-card-<palette>-1440.jpg`, six of them, looked at before this row was written. See the notes under this table. |
 | 4.8 | Themes. **Unit 4.8 is now complete.** | Done | #17 | The open half lands: the picker, the colour builder's controls, and the stylesheet that spends a palette. **`src/shell.css` holds no colour of its own.** The role block left `:root`, `src/theme/css-vars.ts` says which palette token fills which role, and `src/app.tsx` writes those properties on the root element in a layout effect, so a change of an axis reaches the whole application at run time and not only at startup. Decision 15 of `docs/design/0012-settled-decisions.md` records it. **Three colour literals are left and all three are the same kind of thing:** black at a fraction of one, spent twice as a shadow and once as a scrim. `css-vars.test.ts` enumerates every literal the file still holds, compares the list against those three, and measures each one to be black and translucent, so a fourth literal cannot join the list by being written into it. **The palette grew four tokens** — `sunken`, `line`, `markSuccess` and `markBane` — and every one is a literal in all six rows, so no resolver derives a colour and a seventh preset is still a seventh row. `line` answers the non-text floor against all three grounds, because a button, a pool tile and a text field are each told from the page by their boundary. The two marks do not follow the theme, and the row says why. `checkPalette` moves from 7 pairs to 21, and the six rows pass all 126. **Three axes reach three places, and every value is read off the rendered result.** `node scripts/browser.mjs --theme` is the new mode and it exits 0 at `checks=10 failures=0 skipped=0` on the graphics card: 6 of 6 page colours read off `.screen`, 6 of 6 tray surfaces read off the element the tray mounts into, 18 flat die bodies against a product of 6 rows by 3 dice types with 18 distinct readings, and 18 more read off the 3D materials through the seam `table.tsx` publishes, with the throw counter held at 2 through all six so the dice were repainted where they lay. **Every contrast claim holds on the rendered screen:** 90 readings against a product of 6 interface palettes by 15 roles, each ink off the element and each ground off the first ancestor that really paints one, lowest 3.06 to 1 on the bone edge of a button, at the WCAG 2.2 floors of 4.5 and 3. **The report reaches the player by name:** 7 findings, 5 from `checkPalette` and 2 from `checkDiceTheme`, computed IN NODE over the same seeds, and the screen names all 7; the page did not move, so the colour is reported and never replaced. **`deriveDiceTheme` gains `exact`, behind `theme-exact-dice`,** because a laddered dice set is readable by construction and `checkDiceTheme` could otherwise never report anything a builder made — the claim had no route to be proved on. **A built theme survives a reload** through the real store, and the record holds the two SEEDS and never the colours. **Keyboard alone reaches and operates the panel:** 26 controls, 0 unnamed, 0 without a state, in 5 groups, and one arrow key moved the page from `rgb(31, 32, 33)` to `rgb(24, 33, 32)`. Section 6 still reads eleven visits before the throw and thirty-five after it, in BOTH instruments. `Settings` gains `builtTheme` at version 8, with a 7 to 8 step, and the migration table runs 36 cases against a 36-item enumeration. Vitest moves from 334 to 353 tests over 35 files. `--shell`, `--sheet`, `--history` and `--blocked-chunk` all stay green. Initial JavaScript moves from 33,449 to 37,631 gzip bytes against the 61,440 in `budgets.json`; the lazy chunk is unchanged at 151,876; the three render counters are unchanged at 841, 842 and 77. Seventeen injections were proved red and every one was restored by editing the injection back. The captures are `docs/design/0019-theme-<row>-1440.png` for all six interface palettes, plus the panel and the builder at 360 px and 1440 px. **Open:** nothing. One pre-existing `--table` failure is reported under the notes and it is not this unit's. |
 | 4.7 | Statistics view | Computation done. Charts open. Recorded order deviation. | — | **Done:** the computation. `summariseLog` in `src/log/statistics.ts` answers the three statistics the plan names: the success rate by pool size, the push outcomes, and how often pushing paid off. **It reads the stored derived values and re-derives none.** It reads `dice[].cells[].successes`, the null cells that say a die did not exist yet, `successes`, `pushCount`, `costType` and `costAmount`, and nothing else. It never reads `cells[].value` and it imports no push profile as a value, so no profile can reach the code to re-price a past roll. **"Pushing paid off" is defined in the code, and the definition travels in the returned record as `paidOffDefinition`:** a push paid off when the roll ends with more successes than it held before the first push. Three definitions were rejected and the reasons are in the module: successes per unit of cost, because the four cost units are different things and do not add together; crossing a target number, because the rules have none; and the last push alone, because a player pushes a roll and not a generation. The hand-built log of 6 entries runs against expectations written out by hand: pool size 3 gives 3 rolls, 2 with a success, 3 successes and a rate of 2/3, pool size 5 gives 3 rolls, 3 with a success, 5 successes and a rate of 1, the pushes give 4 pushed rolls over 5 pushes, 1 better, 2 the same and 1 worse, 6 successes before and 7 after, and a cost of 3 rating points, 3 complication checks, 1 health point and no referee point, and the paid-off rate is 1/4. Three denominators are counted a second way: the rolls of every pool-size row sum to the entries read, the better, same and worse counts sum to the pushed rolls, and the pushes are counted again off the case table. **An empty log cannot pass silently:** the entries read are asserted above zero, and the three degenerate cases answer for themselves — no rolls gives 0 entries, no rows and a null rate, no pushes gives a null rate that is asserted to be neither zero nor a NaN, and one roll gives one row. **Two red-proofs passed, and each named the statistic that shifted.** Re-deriving the cost from the edited profile moved `pushes.costByUnit.ratingPoint` from 17 to 34 over 8 rolls, which is the doubled price the edit set, exit 1. Re-deriving the successes from the stored face turned 5 tests red at once: every pool-size row fell to 0 successes and a rate of 0, the paid-off rate fell from 0.25 to 0, and the artifact roll read 7 successes on the escalating curve against the 4 the entry stored under the flat one. Both injections were restored from a saved copy and the file hash matches. Vitest moves from 176 to 194 tests. Both chunks are unchanged at 7,028 and 151,876 gzip bytes, because nothing in `src/` imports the module yet. **Open:** the charts. They are interface work and wait at `BLOCKED:owner-gate` on Unit 2.0. **Unit 4.7 is not complete.** |
 | 4.3 | Saved pool presets | Store done. List interface open. Recorded order deviation. | — | **Done:** the storage. `Settings` gains `poolPresets` at version 6, over the same injected store `src/settings/settings.ts` already carries. No second store was built. A preset holds a name and a `PoolCounts`, which is what `poolBuilder` takes, so a recalled preset goes straight back into the rules core. **Step mode is not saved:** its pool is one index on the ladder plus the extras, and the unit asks for a named pool. Four operations answer a new record and never throw: `savePoolPreset`, `recallPoolPreset`, `movePoolPreset` and `deletePoolPreset`. A refusal is a record, and there are four: `emptyName`, `nameTooLong`, `atPresetLimit` and `noSuchPreset`. The name is the identity of a preset, so a save under a name the record holds replaces that preset where it stands. **The reorder is asserted over three presets, because a move of one of two is not observable.** The recall is asserted by rolling the recalled pool through `firstRoll`, not by comparing records: 6 dice came back, the artifact die kept its 10 faces, and all 6 threw one generation. **The two caps are asserted separately.** Twenty presets save one at a time and the twenty-first is refused with `atPresetLimit`, while a replacement is still let through. A name of 60 characters saves and one of 61 is refused with `nameTooLong`, and the same pair of assertions runs over 60 and 61 emoji, because the cap is counted in code points. **The name is user text and storage keeps every byte of it.** A name holding markup, both kinds of quote, an ampersand and an emoji round trips through the store and is compared byte for byte in UTF-8 over all 54 of its bytes. Nothing is escaped, stripped or executed here. **The interface must render the name through `textContent`.** That is Constraint 8, it is not closed by this half, and it belongs to the list interface. The migration gains a 5 to 6 step, and the migration table runs 26 cases against a 26-item enumeration, 6 of them new. An over-long stored list is cut at the cap rather than emptied, and that is asserted by name, because a migration that answered with an empty list would pass a bound alone. A stored preset with a bad name, a bad count or a duplicate name is dropped. `scripts/browser.mjs` compared every settings field by identity, which a field holding a list breaks, so it now reads them through `sameSetting`. That helper runs 11 cases in `scripts/browser.test.mjs` under `npm test`, and the identity defect turns them red. Vitest moves from 176 to 194 tests. Both chunks are unchanged at 7,028 and 151,876 gzip bytes. **Open:** the preset list on the screen, the name field, the drag or the buttons that reorder, and the `textContent` rendering. All of it is interface work and waits at `BLOCKED:owner-gate` on Unit 2.0. **Unit 4.3 is not complete.** |
@@ -5376,3 +5376,185 @@ misses, which is the hazard Decision 9 already records.
 - `npm run perf` — `steps_to_rest_fixed_seed_scene measured=203 budget=224`, scene digest matched.
 - Initial JavaScript 37,631 gzip bytes and the lazy 3D chunk 151,876. Both under the budget.
 - Branding gate `files_scanned=136`, `hits=0`, exit 0.
+
+## Unit 4.9 — the open half: the summary, the download and the share target
+
+### What landed
+
+`sheet-share` behind the one disclosure, a card drawn over the captured frame in the interface
+palette, an anchor download over the same bytes, and the browser's own share target where the
+browser offers one. Decision 16 of `docs/design/0012-settled-decisions.md` records every choice, and
+section 4 of `docs/design/0002-screen-design.md` lists the control.
+
+### The trap this unit was written against, and the one that caught it anyway
+
+**A composition drawn after the copy is the black-frame defect wearing a card.** The overlay runs
+inside `captureTrayJpeg`, between the copy of the frame and the encode, so nothing can slip into a
+later task. `captureTrayJpeg` stays synchronous, and it now refuses an overlay that is an async
+function, because such an overlay would draw after the browser had cleared the canvas.
+
+**And the composition broke the two acceptance measures the plan wrote.** A panel of text carries
+luminance variance and thousands of distinct pixel values entirely by itself. Measured over the
+whole card, the black-frame red-proof reads variance 253.03 and 2,810 distinct values — both clear
+of their floors — on a card whose photograph is one flat rectangle. The measures now run over the
+photograph, with the panel taken out by the box the layout names, and the two pixel counts are added
+back up against the size of the card so no region can be dropped or counted twice. The same
+red-proof then reads 0.00 and 59.
+
+    browser: share frame whole_pixels=1296000 whole_variance=253.03 whole_distinct=2810
+             photograph_pixels=1123800 mean_luma=37.72 luma_variance=0.00 distinct_values=59
+    browser: FAIL share.luminance-variance-above-the-floor variance=0.00 ...
+    browser: FAIL share.distinct-pixel-values distinct=59 ...
+
+### The defect only the picture found
+
+The first draft put the successes and the banes on one line. At 1440 by 900 that line ran past the
+side of the panel and its last word landed on the photograph, dark on dark, unreadable. **Every
+check was green.** The run's BOX fitted inside the panel, and the check that reads a run's ink only
+ever looks inside that box, so the ink that escaped it was never read. The capture is what found it.
+
+Three things close it. The successes and the banes are two lines. `drawShareCard` measures every run
+with the real font metrics and fits anything too wide, and it reports what it drew. And
+`share.every-run-is-drawn-inside-the-panel` reads that report, over the six drawn cards and over the
+**widest card the readings can make** — every number at two digits — which fills 78.6 per cent of
+its box at most. Putting the one line back turns it red at
+`fitted_smaller=6 [ember: successes was fitted from 46 px to 36 px; ...]`.
+
+### What the card says, and how Constraint 1 was proved on it
+
+The application name, the successes, the banes, and five readings: the dice count, the kept count,
+the count still in the cup, the stress and the push count. Nothing else about where the card came
+from. `src/shell/share-card.test.ts` reads `scripts/forbidden-hashes.json` and scans all nine
+strings of a card through `tokenise` and `digest` **imported from the gate itself**, so the check
+and `scripts/check-branding.mjs` cannot disagree about what a term is. It runs over twelve rolls,
+108 strings, and the count is asserted.
+
+**A clean verdict alone proves nothing, so the scanner is shown to answer.** A real term may never
+enter this repository, so the positive control hashes a word the card does hold — `kept` — and the
+same function then reports it. An instrument that finds that finds a real term written the same way.
+
+### The contrast claim is the card's own
+
+The card is drawn, not styled, so nothing about it is inherited from Unit 4.8. The summary sits on
+an opaque panel filled with `surface`, drawn in `text` and `textMuted`, bounded by `line`. Text over
+a photograph would answer to whatever the photograph happened to be.
+
+Six cards were drawn on the graphics card, one per interface palette, and every reading is taken off
+the DRAWN pixels: the ground is the commonest colour inside the panel boundary, and each run's ink
+is the pixel of its own box whose luma is furthest from that ground. The panel is opaque, so every
+pixel inside it is a blend of the ground and one ink and the furthest one is the ink itself; a run
+the draw loop skipped comes back as the ground and fails by name. Forty-eight readings, dimmest
+5.28 to 1 against the 4.5 to 1 of WCAG 2.2 SC 1.4.3.
+
+### The oracle is the state, in another engine
+
+`node scripts/browser.mjs --share` builds the card in the page and builds it again in node, from the
+same seed through `src/rules` and `src/shell/state.ts`, and compares all eight runs. Giving the page
+a seed one higher turns it red naming four runs. In the application,
+`node scripts/browser.mjs --share-controls` compares the alternative text against the readings the
+SCREEN printed — the live region for the successes, the banes and the push count, and the two zone
+bands for the kept and the loose dice — over a denominator of six.
+
+### The two ways out
+
+**The download is the anchor of Unit 4.5, over the same bytes.** No second download was written. The
+file the button hands the browser is intercepted at `URL.createObjectURL`, which is the browser's
+own call, and compared byte for byte against the data URL the preview carries, decoded in node:
+69,460 of 69,460 bytes, first difference -1.
+
+**The share target is the browser's own and may be absent.** `share-send-button` is drawn only where
+`navigator.canShare` accepts this very file. This host reports `navigator.share=false`, so the
+control is absent, the check that the two agree is judged, and the check that would judge the call
+prints `NOT JUDGED` with the reason and counts in `skipped=1`. The call itself is proved in jsdom
+against a stubbed target, where the file and the same readings in words are compared against what
+the panel handed over.
+
+### The limit this unit accepts
+
+**A card needs the table.** `captureTrayJpeg` draws one fresh frame through the renderer, so the
+flat dice of Unit 3.7 make no card and the panel says so, naming the switch one row above it. Two
+alternatives were priced and rejected in Decision 16: a card of the summary alone fails the plan's
+own acceptance, because a panel of flat colour holds neither the variance nor the thousand distinct
+values a picture of dice holds; and drawing the flat dice a second time is a second renderer to keep
+true. A platform below the bar therefore makes no card. The plan names the share card as the first
+thing effort is traded from.
+
+**A card belongs to the roll it was made from.** Any change of the dice clears it. Removing that
+effect turns `src/app.test.tsx` red at `a new roll takes the old card away`.
+
+**The opaque panel can cover a die.** The dice land where the physics puts them and the panel is
+drawn over them. Nothing factual is lost — the panel carries every reading of the roll — but a card
+is not a complete picture of the table.
+
+### The twenty-one red-proofs
+
+Nine over the test runner and `node --test`:
+
+1. a reading changed — `seed 1, the kept reading: expected '6 kept' to be '5 kept'`
+2. a reading dropped — `seed 1 draws every reading, in order: expected [ Array(4) ] to deeply equal [ 'dice', 'kept', 'inTheCup', …(2) ]`
+3. a palette ink darkened — `every run of every palette clears the text floor: expected [ 'ash: title reads 1.25 to 1' ] to deeply equal []`
+4. a mark no run asked for — `the fill, the boundary and one call per run: expected 11 to be 10`
+5. the overlay call removed — the drawn order lost `"overlay"`
+6. the async guard removed — `refuses an async overlay ... .toThrow(/async function and it may not await/)`
+7. `canShare` taken on trust — `expected true to be false`
+8. the card left standing over a new roll — `a new roll takes the old card away: expected <img class="share-shot" …> to be null`
+9. the region ignored — `expected: 84 ... 'Missing expected exception.'`
+
+Seven over the driven browser, `--share`:
+
+10. the copy in a later task, which is the defect itself — `share.luminance-variance-above-the-floor variance=0.00`, `share.distinct-pixel-values distinct=59`
+11. a run the draw loop skipped — `wrong=6 [ember: reading-stress marked no pixel of its own box; ...]`
+12. a palette ink too near its ground — `below=7 [void: successes reads 1.48 to 1; ...]`
+13. the panel filled with another token — `wrong=6 [ember: the panel drew rgb(38, 30, 27) against rgb(51, 42, 39); ...]`
+14. the successes and the banes back on one line, which is the defect the capture found — `fitted_smaller=6 [ember: successes was fitted from 46 px to 36 px; ...]`
+15. the page built from another roll — `wrong=4 [successes=4 successes was drawn as successes=6 successes; ...]`
+16. the panel counted out twice — `the photograph is the other 1209900`
+
+Five over the driven browser, `--share-controls`:
+
+17. a way out drawn before a card exists — `the sheet holds 2 control: [share-card-button, share-download-button]`
+18. a reading dropped from the alternative text — `compared=5 of 6 readings ... unsaid=1 [12 dice]`
+19. the download handed other bytes — `The file measures 8 bytes against the 60322 this file decodes IN NODE`
+20. a control taken out of the keyboard order — `reached=1 of 2 controls by real Tab presses alone`
+21. the send control drawn where the browser offers nothing — `canShare({files})=false, and the panel drew the send control: true`
+
+Each injection was confirmed to have landed before the run, and every file was restored by editing
+the injection back rather than by a command that discards the working tree. **Two batches were
+thrown away first:** the runs reported exit 1 with no failed check, because the dev server had been
+started in the wrong directory and the browser met `NS_ERROR_CONNECTION_REFUSED`. A red with no
+named gate is not a red.
+
+### Reported, not fixed
+
+- `.claude/skills/run-clatter/SKILL.md` still carries no `--share` or `--share-controls` mode,
+  because the permission rails deny a write under `.claude/skills`. Both are documented in the
+  header of `scripts/browser.mjs`.
+- Both share modes stay out of `validate`. They need a browser and a graphics card.
+- `docs/design/0009-share-card-1440.jpg` now holds the composed card rather than the bare capture of
+  the first half, so the file the earlier notes point at has moved on.
+
+### The captures, and what they show
+
+Six at 1440 px, one per interface palette: `docs/design/0020-share-card-ember-1440.jpg`, `-ash-`,
+`-verdigris-`, `-bone-`, `-void-` and `-cobalt-`. The panel is in the upper left, the dice spread
+over the lower half, and every line of the summary reads at a glance in all six, the light row
+included. `docs/design/0021-share-panel-1440.png` is the panel inside the application, with the
+preview, the file name on the save control and the note under it.
+
+Every image was looked at, and the first set is what found the overflow above.
+
+### Measurements
+
+| Number | Value |
+|---|---|
+| New tests | 41: 17 in `src/shell/share-card.test.ts`, 9 in `src/shell/download.test.ts`, 5 in `src/shell/share-state.test.ts`, 3 in `src/tray/capture.test.ts`, 7 in `src/app.test.tsx`, 2 in `scripts/browser.test.mjs` |
+| Test total | 395 vitest tests over 38 files, plus 23 node tests |
+| Injections proved red | 21, every one restored by editing the injection back |
+| Controls at rest | 5 at rest A and 5 at rest B, against the ceiling of 8 in section 3 |
+| Keyboard walks | 11 visits before the throw and 35 after it, unchanged, in both instruments |
+| Card readings measured | 48, six palettes times eight runs, off the drawn pixels |
+| Initial JavaScript | 37,631 to 39,932 gzip bytes. Budget in `budgets.json`. |
+| Lazy 3D chunk | 151,876 gzip bytes, unchanged |
+| `npm run perf` | `steps_to_rest_fixed_seed_scene measured=203 budget=224`, scene digest matched, exit 0 |
+| Harness | `--share` 13/0/0, `--share-controls` 8/0/1, `--shell` 8/0/0, `--sheet` 11/0/0, `--theme` 10/0/0, `--table` 9/0/0, `--blocked-chunk` 11/0/0, `--history` 21/0/0 |
+| Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |

@@ -159,6 +159,48 @@ test('an empty image is a failure, not a variance of zero', () => {
   assert.throws(() => measureFrame(new Uint8ClampedArray(0)), /no pixels/);
 });
 
+// The card carries a panel of text over the photograph — Unit 4.9. A panel
+// carries variance and thousands of distinct values by itself, so a measure
+// over the WHOLE card would pass on a cleared drawing buffer. The region form
+// takes the panel out of the count, and these cases pin that it does.
+test('a region takes the panel out of the count, so a cleared photograph still fails', () => {
+  // A 10 by 10 frame of one colour, with a 4 by 4 block of a second colour in
+  // the corner. The block stands in for the panel and the rest for a cleared
+  // photograph.
+  const width = 10;
+  const pixels = [];
+  for (let y = 0; y < 10; y += 1) {
+    for (let x = 0; x < 10; x += 1) {
+      pixels.push(x < 4 && y < 4 ? [255, 255, 255] : [35, 38, 43]);
+    }
+  }
+  const whole = measureFrame(frame(pixels));
+  assert.equal(whole.pixels, 100);
+  assert.equal(whole.distinct, 2, 'the whole frame holds both colours');
+  assert.ok(whole.variance > 1, `the whole frame carries variance: ${whole.variance}`);
+
+  const outside = measureFrame(frame(pixels), {
+    width,
+    exclude: { x: 0, y: 0, w: 4, h: 4 },
+  });
+  assert.equal(outside.pixels, 84, 'the block is 16 of the 100 pixels');
+  assert.equal(outside.distinct, 1, 'the photograph is one colour, which is the defect');
+  assert.ok(outside.variance < 1e-9, `and it carries no variance: ${outside.variance}`);
+  assert.equal(outside.pixels + 16, whole.pixels, 'the two counts add back up');
+});
+
+test('a region needs a row width, and one that excludes everything is a failure', () => {
+  const pixels = Array.from({ length: 16 }, () => [10, 20, 30]);
+  assert.throws(
+    () => measureFrame(frame(pixels), { width: 0, exclude: { x: 0, y: 0, w: 1, h: 1 } }),
+    /row width/,
+  );
+  assert.throws(
+    () => measureFrame(frame(pixels), { width: 4, exclude: { x: 0, y: 0, w: 4, h: 4 } }),
+    /region holds no pixels/,
+  );
+});
+
 /**
  * A structurally valid JPEG of a named size. It carries no scan, because
  * `readJpeg` reads the header and never decodes.
