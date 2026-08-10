@@ -518,3 +518,61 @@ make the summary judgeable.
 section 3, and it is a live region because the number arrives after the sheet is drawn.
 
 ---
+
+## Decision 13 — the import control sits in the summary, and the export writes the whole log, taken by me 2026-08-10
+
+**`import-button` goes in the footer of the history summary. `export-button` goes in the footer of
+the record, where Decision 3 already put it, and the file it writes holds every roll of the log.** I
+took this decision under the delegated interface authority of `CLAUDE.md`. Unit 4.5 builds the
+export and Unit 4.6 the import.
+
+### The import had no home, and there were two
+
+Decision 3 gives the history two views and names the controls of each. Neither list holds an import.
+The plan gives Unit 4.6 a file picker and says nothing about where it stands.
+
+**Rejected: the record footer, beside the export.** The record is one roll. An import replaces the
+whole log, so a control that destroys 5,000 rolls would sit inside a view of one of them, and the
+record would then hold three controls where section 3 names two.
+
+**Rejected: the disclosure sheet, beside `sheet-history`.** Section 4 already says of that row that
+"the log, its statistics and its export live there, not here". An import is the same kind of thing
+as an export, so the same sentence sends it to the destination.
+
+**Taken: the summary footer.** The summary is the view of the whole log, and the whole log is what
+an import replaces. It is also the view an empty log shows, which is the state a player imports
+from. The summary therefore counts three controls, and section 3 says so.
+
+### The picker is not a fourth control
+
+`import-button` opens a hidden `input type="file"`. The input carries `tabindex="-1"` and
+`aria-hidden`, so a keyboard never lands on it and the summary walk stays at three stops. It is
+taken off the screen by clipping rather than by `display: none`, because a browser may refuse a
+scripted click on a control that is not rendered at all.
+
+### The export writes the log, not the roll
+
+Decision 3 says "full statistics for one selected roll. An export control sits here", which fixes
+WHERE the control is and not WHAT it writes. Two things settle what it writes, and neither is a
+preference:
+
+- Unit 4.6 settled that an import REPLACES the log and never merges. A file of one roll, read back,
+  would delete every other roll of the campaign.
+- The plan's own verification step 6 reads: roll fifty times, export, pivot in a spreadsheet,
+  re-import, and confirm the log is unchanged. Only a whole-log file passes that.
+
+The button says so. It prints the roll count of the log it will write, so a player reads what the
+press does before pressing it.
+
+### The size of a file is judged before the file is read
+
+`src/log/import-file.ts` refuses a file over `MAX_IMPORT_BYTES` from `File.size` alone, and never
+calls `text()` on it. `MAX_IMPORT_CHARS` in `src/log/csv.ts` is the second gate, over the text. The
+byte cap is the same number as the character cap and is not a second budget: UTF-8 never spends
+fewer bytes than the string spends UTF-16 code units, so a file inside the byte cap is always inside
+the character cap.
+
+**A full-buffer export nearly fills both.** `LEDGER.md` carries the arithmetic and hands the choice
+to the owner. Nothing here raises a cap.
+
+---

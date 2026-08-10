@@ -60,6 +60,26 @@ export type CsvColumn = (typeof CSV_COLUMNS)[number];
  */
 export const MAX_IMPORT_CHARS = 33_554_432;
 
+/**
+ * The most bytes the import control accepts from a file, before it reads it.
+ *
+ * It is `MAX_IMPORT_CHARS` and not a second number, and the reason is an
+ * inequality rather than a preference. UTF-8 never spends fewer bytes than the
+ * string spends UTF-16 code units: ASCII is one byte per unit, U+0080 to U+07FF
+ * two, U+0800 to U+FFFF three, and an astral character four bytes against two
+ * units. So `chars <= bytes` for every file, and a file inside this cap is
+ * always inside the character cap as well.
+ *
+ * The guard is therefore conservative in the safe direction. A file of
+ * three-byte characters can be refused before it is read while `importCsv`
+ * would have read it, and no file that passes the byte cap can surprise
+ * `importCsv` with its length.
+ *
+ * It lives here rather than in `src/log/import-file.ts` so the cap has one
+ * home, beside the cap it is derived from. `readImportFile` applies it.
+ */
+export const MAX_IMPORT_BYTES = MAX_IMPORT_CHARS;
+
 const EOL = '\r\n';
 
 /**

@@ -32,6 +32,7 @@ import type { LogEntry } from '../log/entry';
 import { createLogEntry } from '../log/entry';
 import type { AppendResult, LogWriter, OpenOptions, StoreNames } from '../log/store';
 import {
+  appendRolls,
   createLogWriter,
   estimateStorage,
   flushOnHide,
@@ -97,6 +98,19 @@ export interface RollLog {
   record(state: AppState): Promise<RecordOutcome>;
   /** Every roll the buffer holds, oldest first, straight out of the store. */
   rolls(): Promise<readonly LogEntry[]>;
+  /**
+   * Put an imported log in place of the stored one — Unit 4.6.
+   *
+   * The clear and the insert run in ONE transaction, which `appendRolls` does
+   * under its `replace` option. Split apart, another tab reads the log between
+   * the two and sees it empty, and the end state cannot tell the two orders
+   * apart because the insert refills the log either way.
+   *
+   * The roll on the table is forgotten, because its key belonged to a log that
+   * is gone: a push after an import opens a new entry rather than rewriting a
+   * key another roll now holds.
+   */
+  replace(imported: readonly LogEntry[]): Promise<AppendResult>;
   /** What the origin uses and what it may use, or null where there is no estimate. */
   storage(): Promise<{ usage: number | null; quota: number | null } | null>;
   /** Stop the flush listener and close the connection. */
@@ -238,6 +252,16 @@ export async function openRollLog(options: RollLogOptions = {}): Promise<OpenRol
     },
     rolls() {
       return inTurn(() => readRollsInPages(db, options));
+    },
+    replace(imported) {
+      return inTurn(async () => {
+        const written = await appendRolls(db, imported, { ...options, replace: true });
+        // The open sequence names a key of the log that has just gone. Dropping
+        // it makes the next throw write a fresh entry rather than a `put` at a
+        // key an imported roll now holds.
+        if (written.kind === 'written') open = null;
+        return written;
+      });
     },
     storage() {
       return estimateStorage();

@@ -104,18 +104,27 @@ the budget, exactly as the disclosure sheet does.
 
 | View | Controls | Count |
 |---|---|---|
-| Summary | `back-button`, `history-list` | 2 |
+| Summary | `back-button`, `history-list`, `import-button` | 3 |
 | Record | `back-button`, `export-button` | 2 |
 
 `history-list` is a composite. It holds one visit per logged roll, so its length follows the log.
 The record holds the transposed matrix — one row per die and one column per generation — and exactly
 one export control, in its footer.
 
+**`import-button` sits in the summary and not in the record.** An import replaces the whole log,
+which Unit 4.6 settled, so it belongs beside the list of the whole log and not beside one roll. It
+opens a file picker that carries no tab stop of its own, so the summary counts three controls and
+not four. Decision 13 records the choice and the two options it was taken between.
+
+**The export writes the whole log too.** The control lives in the record because Decision 3 puts it
+there, and the file it writes is every roll. A file of one roll, read back by an import that
+replaces, would take a campaign away.
+
 **The destination replaces the roll flow while it is open.** It is a route and not an overlay, so
 the roll flow holds no element at all while the history is on the screen, and neither keyboard walk
 of section 6 can change. Decision 12 records the choice and the two options it was taken between.
-Unit 4.4 built the summary and a record SHELL; the transposed matrix and `export-button` arrive with
-Unit 4.5, which is why the record row above lists a control this build does not draw yet.
+Unit 4.4 built the summary and a record SHELL. Unit 4.5 added the transposed matrix and
+`export-button`, and Unit 4.6 added `import-button`.
 
 ### Read-only, and therefore not counted
 
