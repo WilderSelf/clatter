@@ -3764,7 +3764,7 @@ arrow split.
 **The browser walk needs a table the player may push**, because a dead button holds no tab stop and
 the list holds thirty. Under the profile the application rolls, a stress die showing a bane stops
 the push, and ten stress dice show one about five throws in six, so the run throws again until the
-push is live and reports how many throws it took. Five runs took 1, 2, 4, 5 and 16 throws of at most 40.
+push is live and reports how many throws it took. Six runs took 1, 2, 4, 5, 8 and 16 throws of at most 40.
 A run that never reaches a live push fails and names the limit.
 
 Two harness faults were measured and fixed, both in the walk and neither in the application. The
