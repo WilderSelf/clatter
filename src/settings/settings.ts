@@ -21,6 +21,8 @@ import type { PushProfileOverride } from '../rules/push-profile';
 import { profileById, PUSH_PROFILES } from '../rules/push-profile';
 import type { ArtifactCurveId } from '../rules/success';
 import { ARTIFACT_CURVE_IDS } from '../rules/success';
+import type { BuiltTheme } from '../theme/builder';
+import { readSeed } from '../theme/builder';
 import type { ThemeId } from '../theme/themes';
 import { THEME_IDS } from '../theme/themes';
 import { NO_OVERRIDE, sanitiseOverride } from './profile-fields';
@@ -38,12 +40,13 @@ export type { ArtifactCurveId };
  * `flatFallback`. Version 3 is the same record without the two sound fields.
  * Version 4 is the same record without the three theme axes. Version 5 is the
  * same record without the saved pool presets. Version 6 is the same record
- * without the push-profile override.
+ * without the push-profile override. Version 7 is the same record without the
+ * theme a player built.
  * No record below the current version ever reached a user, because nothing has
  * shipped — they exist so the migration chain has steps to run and steps to
  * prove.
  */
-export const SETTINGS_VERSION = 7;
+export const SETTINGS_VERSION = 8;
 
 /**
  * One saved pool, under a name the player wrote.
@@ -111,6 +114,16 @@ export interface Settings {
   readonly traySurfaceId: ThemeId;
   readonly interfacePaletteId: ThemeId;
   /**
+   * The theme the player built, or null while the three shipped rows are in
+   * force.
+   *
+   * It holds the two seeds and the mode, never the colours they produce, so
+   * the colours are derived on every read and cannot drift from the arithmetic
+   * that makes them. It sits beside the three axis fields rather than replacing
+   * them: a player who clears a built theme returns to the rows still chosen.
+   */
+  readonly builtTheme: BuiltTheme | null;
+  /**
    * The saved pools, in the order the player put them in. The order is data, so
    * it is a list and not a map. The name is the identity of a preset.
    */
@@ -146,6 +159,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   diceThemeId: 'ash',
   traySurfaceId: 'ash',
   interfacePaletteId: 'ash',
+  builtTheme: null,
   poolPresets: Object.freeze([]),
   profileOverride: NO_OVERRIDE,
 });
@@ -259,6 +273,28 @@ function poolPresetList(value: unknown): readonly PoolPreset[] {
   return kept;
 }
 
+/**
+ * A stored built theme, or null.
+ *
+ * Both seeds go through `readSeed`, which is the same call the panel makes, so
+ * storage cannot put a colour on the screen that a player could not have typed.
+ * One unusable field drops the whole theme, because half a theme is not a theme
+ * the player built.
+ */
+function builtTheme(value: unknown): BuiltTheme | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const diceSeed = typeof value['diceSeed'] === 'string' ? readSeed(value['diceSeed']) : null;
+  const interfaceSeed =
+    typeof value['interfaceSeed'] === 'string' ? readSeed(value['interfaceSeed']) : null;
+  const mode = value['mode'];
+  if (diceSeed === null || interfaceSeed === null || (mode !== 'dark' && mode !== 'light')) {
+    return null;
+  }
+  return { diceSeed, interfaceSeed, mode, exactDice: value['exactDice'] === true };
+}
+
 function shippingPreset(value: unknown): string {
   return PUSH_PROFILES.some((profile) => profile.id === value)
     ? (value as string)
@@ -289,6 +325,7 @@ const MIGRATIONS: Readonly<Record<number, (stored: StoredRecord) => StoredRecord
   }),
   5: (stored) => ({ ...stored, version: 6, poolPresets: [] }),
   6: (stored) => ({ ...stored, version: 7, profileOverride: {} }),
+  7: (stored) => ({ ...stored, version: 8, builtTheme: null }),
 };
 
 /** Bounds the chain, so a step that forgets to raise the version cannot loop. */
@@ -329,6 +366,7 @@ export function migrate(stored: unknown): Settings {
       THEME_IDS,
       DEFAULT_SETTINGS.interfacePaletteId,
     ),
+    builtTheme: builtTheme(record['builtTheme']),
     poolPresets: poolPresetList(record['poolPresets']),
     // The override is read against the preset the same record names, because a
     // leaf is allowed by the value the preset holds at that leaf. Every rule

@@ -37,6 +37,7 @@ import type { Faces } from '../rules/die';
 import type { PushCostUnit } from '../rules/push-profile';
 import { contrastRatio } from '../theme/contrast';
 import type { InterfacePalette } from '../theme/themes';
+import { PALETTE_ROLES } from '../theme/css-vars';
 import { INTERFACE_PALETTES, THEME_IDS } from '../theme/themes';
 import { History } from './history';
 import type { SeriesId } from './statistics';
@@ -772,28 +773,42 @@ const GROUNDS = {
 /**
  * The interface token each shipped variable stands for.
  *
- * Unit 4.8 built six interface palettes and left the stylesheet that spends one
- * open. This table is the bridge: it says which palette token each shipped role
- * variable will become, so the contrast claim is measured over all six palettes
- * today rather than after the picker lands. A variable with no entry here fails
- * the check rather than going unmeasured.
+ * The open half of Unit 4.8 made this table the real thing rather than a
+ * bridge: `src/theme/css-vars.ts` is what the application writes, and this file
+ * restates the entries the charts spend, so a role repointed at a weaker token
+ * fails here as well as there. A variable with no entry fails the check rather
+ * than going unmeasured.
  */
 const SHIPPED_ANALOGUE: Readonly<Record<string, keyof InterfacePalette>> = {
   '--raised': 'surface',
-  '--sunken': 'background',
+  '--sunken': 'sunken',
   '--ink': 'text',
   '--ink-dim': 'textMuted',
   '--accent': 'accent',
 };
 
-/** The `:root` block of the shipped stylesheet, as a lookup. */
+/**
+ * The colours the shipped build paints today, by role.
+ *
+ * The stylesheet holds none of them, so they are read out of the default
+ * interface palette through the same table the application writes. That is the
+ * palette `DEFAULT_SETTINGS` names, restated here rather than imported, so the
+ * defaults and this file cannot agree by reading one another.
+ */
 function shippedRoot(): Map<string, string> {
-  const block = cssBlock(':root');
+  const palette = INTERFACE_PALETTES.ash;
   const held = new Map<string, string>();
-  for (const found of block.matchAll(/(--[a-z-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)) {
-    held.set(found[1] ?? '', found[2] ?? '');
+  for (const [role, token] of Object.entries(PALETTE_ROLES)) {
+    held.set(role, palette[token]);
   }
-  expect(held.size, 'the stylesheet declares its role colours').toBeGreaterThan(0);
+  expect(held.size, 'the stylesheet spends its role colours').toBeGreaterThan(0);
+  // Every role this file measures is a role the application really writes.
+  for (const role of Object.keys(SHIPPED_ANALOGUE)) {
+    expect(held.has(role), `${role} is a role the application writes`).toBe(true);
+    expect(SHIPPED_ANALOGUE[role], `${role} stands for the token css-vars.ts names`).toBe(
+      PALETTE_ROLES[role],
+    );
+  }
   return held;
 }
 

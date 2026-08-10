@@ -27,7 +27,8 @@ import { prefersReducedMotion } from '../tray/capability';
 import type { MountTrayOptions } from '../tray/scene';
 import type { DieSpot } from '../tray/spots';
 import { dieSpots } from '../tray/spots';
-import { pushPool, throwPool } from '../tray/throw';
+import { paintPool, pushPool, throwPool } from '../tray/throw';
+import type { DiceTheme } from '../theme/themes';
 import type { DiceBox } from '../tray/vendor/dice-tray.js';
 import type { AppState } from './state';
 import { profileOf } from './state';
@@ -116,6 +117,8 @@ export interface TableProps {
   readonly onSpots: (spots: TraySpots) => void;
   /** A click on a die. The screen answers it, exactly as a key press does. */
   readonly onToggle: (id: string) => void;
+  /** The dice axis in force — Unit 4.8. A change of it repaints the pool. */
+  readonly colours: DiceTheme;
 }
 
 /**
@@ -139,6 +142,7 @@ export function Table({
   onFall,
   onSpots,
   onToggle,
+  colours,
 }: TableProps): preact.JSX.Element {
   const container = useRef<HTMLDivElement>(null);
   const box = useRef<DiceBox | null>(null);
@@ -152,6 +156,8 @@ export function Table({
   const toggle = useRef(onToggle);
   const spotted = useRef(onSpots);
   const seam = useRef<TableSeam>({ box: null, ordered: [], throws: 0, busy: false });
+  const painted = useRef(colours);
+  painted.current = colours;
   toggle.current = onToggle;
   spotted.current = onSpots;
 
@@ -179,9 +185,9 @@ export function Table({
           held,
           ordered.current,
           { dice: job.result.dice, rerolled: job.rerolled, stressAdded: job.stressAdded },
-          { skipTumble },
+          { skipTumble, colours: painted.current },
         )
-      : await throwPool(held, job.result, { skipTumble });
+      : await throwPool(held, job.result, { skipTumble, colours: painted.current });
     affordance.current?.update(ordered.current);
     readSpots(held, ordered.current);
     seam.current.throws += 1;
@@ -303,6 +309,16 @@ export function Table({
     affordance.current.update(ordered.current);
   }, [state.result]);
 
+  // A change of the dice axis repaints the dice already on the table — Unit
+  // 4.8. Nothing is thrown again: the bodies stay where they lie, the materials
+  // take the new colours and one frame is drawn, because the library draws no
+  // frame between throws.
+  useEffect(() => {
+    const held = box.current;
+    if (held === null || ordered.current.length === 0) return;
+    paintPool(held, ordered.current, colours);
+  }, [colours]);
+
   // The dice hold their world positions through a resize and the camera does
   // not, so the cells are read again rather than scaled.
   useEffect(() => {
@@ -314,5 +330,17 @@ export function Table({
     return () => window.removeEventListener('resize', again);
   }, []);
 
-  return <div class="table" data-el="dice-table" hidden={!shown} ref={container} />;
+  // The one line drawn ON the tray surface, in the flat renderer alone. The 3D
+  // library measures this container and fills it with a canvas, so it is given
+  // an empty element exactly as before. The note holds no tab stop, so neither
+  // keyboard walk of section 6 changes.
+  return (
+    <div class="table" data-el="dice-table" hidden={!shown} ref={container}>
+      {wanted ? null : (
+        <p class="table-note" data-el="table-note">
+          The dice land here.
+        </p>
+      )}
+    </div>
+  );
 }

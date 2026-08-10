@@ -624,3 +624,63 @@ copy still separates the three push outcomes. The circle keeps the meaning it ha
 this application: it is the good outcome.
 
 ---
+
+---
+
+## Decision 15 — the stylesheet spends a palette and holds no colour, taken by me 2026-08-10
+
+`src/shell.css` holds no colour of its own. The role block left `:root`, and `src/theme/css-vars.ts`
+is now the one place that says which palette token fills which role. `src/app.tsx` writes those
+custom properties on the root element, so a change of a theme axis reaches the whole application at
+run time. I took this decision under the delegated interface authority of `CLAUDE.md`.
+
+### Three literals stay, and all three are the same kind of thing
+
+Black at a fraction of one, spent twice as a shadow and once as a scrim. A shadow is the absence of
+light rather than a colour of the theme, and a scrim has to darken every palette, including the
+light one. `src/theme/css-vars.test.ts` enumerates every colour literal the file still holds,
+compares the list against those three, and measures each one to be black and translucent. A fourth
+literal turns it red, and a literal that is not black cannot join the list by being written into it.
+
+### The palette grew four tokens, and each one is a literal in every row
+
+`sunken`, `line`, `markSuccess` and `markBane`. The stylesheet paints four grounds and two semantic
+marks, and the seven tokens of the data half named neither. Every one of the four is a literal in all
+six rows, so a seventh preset is still a seventh row and no resolver derives a colour.
+
+**`line` is not a decoration.** A button, a pool tile and a text field are each told from the page by
+their boundary and not by their ground, so the boundary is a graphical object under WCAG 2.2 SC
+1.4.11 and it holds 3 to 1 against all three grounds. That is a heavier edge than the drawn screen
+carried, and it is the price of the claim.
+
+**The two marks do not follow the theme.** A success is green and a bane is warm in every palette,
+so the meaning does not move when the page does. Shape carries the same meaning — a circle and a
+triangle — so neither one rides on hue.
+
+### The flat dice take the dice axis, and the stress die loses its material
+
+Every flat die now takes the body colour of its own type, which is what the 3D die has always done.
+The drawn screen gave the stress dice a material of their own because every die was one neutral body
+then. The six types are a lightness ladder, no two rungs closer than 8 CIE L*, so a greyscale copy
+still separates them and colour is still never the only carrier. Section 7 of
+`docs/design/0002-screen-design.md` carries the amendment.
+
+### The builder keeps the player's colour, and reports what that costs
+
+`derivePalette` has always kept the chosen colour as the accent, unchanged. `deriveDiceTheme` gains
+the same promise behind a control, `theme-exact-dice`: off, the six dice are derived around the
+chosen colour and are readable by construction; on, that colour itself goes on the rung nearest its
+lightness and `checkDiceTheme` reports whatever that costs.
+
+**The control exists because a check that cannot fail is not a check.** A laddered dice set is
+readable by construction — every rung sits at a fixed CIE L*, so the ladder step, the black numeral
+and the die against the tray all hold whatever colour arrived. `checkDiceTheme` could therefore
+never report anything about a set the builder made, and the claim that its findings reach the player
+had no route to be proved on. The exact-dice control gives it one, and it gives the player the same
+promise the accent already had.
+
+### A built theme replaces two axes and never the third
+
+The tray surface stays a shipped row. Every surface is dark by construction, and the claim that a die
+body holds 3 to 1 against a surface is measured over those six and over no other colour. A built
+surface would put that claim outside the range it was proved in.

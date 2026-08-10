@@ -13,6 +13,7 @@
 import type { Die, Faces } from '../rules/die';
 import { latestValue } from '../rules/die';
 import type { RollResult } from '../rules/roll';
+import type { DiceTheme } from '../theme/themes';
 import { DIE_TYPE_COLOR } from './dice-colors';
 import type { DiceBox } from './vendor/dice-tray.js';
 
@@ -28,6 +29,15 @@ export interface ThrowOptions {
    * here. This module reads no browser setting of its own.
    */
   readonly skipTumble?: boolean;
+  /**
+   * The body colour of each dice type — Unit 4.8.
+   *
+   * The dice axis is a theme choice, so the caller passes the row in force.
+   * The Unit 3.3 table is the default, which is the `ash` row of
+   * `src/theme/themes.ts`, so a caller that names no theme paints what this
+   * module has always painted.
+   */
+  readonly colours?: DiceTheme;
 }
 
 /**
@@ -106,13 +116,32 @@ export function poolNotation(dice: readonly Die[]): string {
  * renderer multiplies this colour into the face texture, and the base is white,
  * so the die comes out the colour of its type with the numeral still black.
  */
-function colorByType(box: DiceBox, ordered: readonly Die[], from = 0): void {
+function colorByType(
+  box: DiceBox,
+  ordered: readonly Die[],
+  from = 0,
+  colours: DiceTheme = DIE_TYPE_COLOR,
+): void {
   for (const [step, die] of ordered.entries()) {
     const index = from + step;
     const mesh = box.diceList[index];
     if (!mesh) throw new Error(`throwPool: the tray holds no die at index ${index}`);
-    for (const material of mesh.material) material.color.set(DIE_TYPE_COLOR[die.type]);
+    for (const material of mesh.material) material.color.set(colours[die.type]);
   }
+}
+
+/**
+ * Paint a pool already on the table — Unit 4.8.
+ *
+ * A change of the dice axis must reach the dice a player is looking at, and
+ * neither throw is running at that moment. It repaints and draws one frame,
+ * because the library draws a frame at the end of a throw and none at all in
+ * between: without the frame the player keeps the colours of the throw before.
+ * Unit 3.5 found the same defect on the lock marks.
+ */
+export function paintPool(box: DiceBox, ordered: readonly Die[], colours: DiceTheme): void {
+  colorByType(box, ordered, 0, colours);
+  box.renderer.render(box.scene, box.camera);
 }
 
 /**
@@ -130,7 +159,7 @@ export async function throwPool(
   // `roll` spawns every die before it returns its promise, so the dice exist by
   // the next line. Only the first frame of the throw draws them uncoloured.
   const settled = box.roll(poolNotation(ordered));
-  colorByType(box, ordered);
+  colorByType(box, ordered, 0, options.colours);
   if (options.skipTumble) skipTheTumble(box);
   await settled;
   return ordered;
@@ -180,7 +209,7 @@ async function addDice(
     const settled = box.add(`1d${die.faces}@${valueToActOut(die)}`);
     if (options.skipTumble) skipTheTumble(box);
     await settled;
-    colorByType(box, [die], ordered.length + step);
+    colorByType(box, [die], ordered.length + step, options.colours);
   }
 }
 
