@@ -342,3 +342,67 @@ throw is not spread to fix it: spreading it moves `steps_to_rest_fixed_seed_scen
 scene digest in `budgets.json`, which is a budget conversation and not a free change.
 
 ---
+
+## Decision 10 — a change of rules clears the table, taken by me 2026-08-10
+
+**A change of the rule set, of any override, or of the artifact curve clears the roll on the table
+and returns the screen to rest A.** The built pool, the difficulty and the stress counter all stay.
+Only the dice go. I took this decision under the delegated interface authority of `CLAUDE.md`, and
+Units 4.1 and 4.2 build it.
+
+### The reason
+
+The push is the decision this application exists to serve, and key task 5 states how it is served:
+the cost is visible **before** the player commits to the push. A roll on the table was therefore
+committed to at a price that was read under one profile. New rules change that price, which dice the
+table keeps, and which dice a push would throw again. Re-reading a committed roll under rules it was
+never thrown under is the hazard, and it is the same hazard Unit 4.7 closed in the statistics, where
+the code reads the stored derived values and re-derives none.
+
+**Two alternatives were priced and rejected.**
+
+1. **Price the roll again under the new rules.** A die moves from the kept shelf to the throw zone
+   under the player's hand, and the cost row prints a price for a roll nobody threw at that price.
+   This is the hazard itself.
+2. **Keep the old profile alive for the roll on the table, and use the new one from the next throw.**
+   The screen then runs two rule sets at once. The sheet states one and the table obeys the other,
+   and every reader of a profile — the cost row, the two zones, the marks on the 3D dice, the log
+   entry a roll will write — has to know which of the two it is holding. One screen, one rule set.
+
+**The precedent is already in the model.** `specs/0001-rules-model.md` says that a change of mode
+discards the built pool, so no agent invents a conversion. This is the smaller version of the same
+rule: a change of rules discards what the old rules produced, and it keeps what they did not touch.
+
+**An empty table belongs to rest A.** Section 1 of `docs/design/0002-screen-design.md` names two rest
+states, and a collapsed builder over an empty table is neither of them. The builder therefore opens
+again, which is also the state the player needs, because the next thing to do is throw.
+
+### The artifact curve is in the same rule, and here is why it belongs there
+
+The curve changes what an artifact die is **worth**. It does not change whether a die locks: both
+curves pay from a face of six upwards, so `score(die) > 0` reads the same under either one.
+`src/rules/success.test.ts` asserts that over every face of every artifact size, which is what lets
+`lockState` read the die's own default curve while the screen reads the chosen one. The successes on
+the table would still change under the player's hand, so the curve clears the table with the rest.
+
+### How the tray follows
+
+`mountAffordance` in `src/tray/affordance.ts` reads the profile once, when it mounts, because it
+answers every click and draws every mark from it. Unit 3.5 recorded that as a limit and named this
+unit as the one that would meet it.
+
+**The affordance is disposed and mounted again under the profile in force.** The canvas, the scene,
+the physics world and the dice bodies all stay: only the click listener and the marks are rebuilt.
+Nothing of the 3D chunk is fetched again and no context is lost. Because the table is cleared by the
+same change, the new affordance opens over an empty pool, so no mark of the old rules survives it.
+
+### What is checked, and where
+
+| The claim | The instrument |
+|---|---|
+| The table is cleared and the screen is back at rest A | `src/app.test.tsx`, and `node scripts/browser.mjs --sheet` in a real browser |
+| The rules reach the core | `src/app.test.tsx`, with the rules core as the oracle |
+| The tray marks follow the rules now in force | `src/app.test.tsx`, over the tray the application mounts |
+| Both curves agree about a lock | `src/rules/success.test.ts`, over every artifact face |
+
+---
