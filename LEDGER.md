@@ -57,6 +57,7 @@ Status table for each unit. Every unit appends one row after it lands.
 | fix | Rate the step attribute and skill on independent scales | Done | #6 | The step model paired the two die sizes on one list of eight states. That list held eight of the sixteen pairs, so a large attribute beside a small skill was unwritable. It also tied a skill-less roll to a d6 attribute. The reference rates the attribute and the skill on two independent scales, and each rating names its own die size. Store the base pair and store the difficulty as one integer. Compute the rolled sizes from the two through a split table that reads the base pair alone. A round trip and the composition of two modifiers stay true by construction, which is what the eight-state list existed to give, and they now hold where a size clamps as well. The new table enumerates four attribute sizes, five skill states and seven modifiers, counts its own denominator, and asserts the split, the round trip, the composition and the clamp at both ends. The pool bar holds the same six tiles in both modes. In step mode the attribute tile and the skill tile each step their own die size. Branding gate `files_scanned=115`, `hits=0`, exit 0. |
 | 2.3 | Roll again, and deploy the slice | Done | #8 | One tap on the roll button re-throws the built pool. The behaviour was already in place. This unit adds five checks that prove it and records what the difficulty readout is once the builder collapses. `src/app.test.tsx` gained five checks and `src/app.tsx` gained one comment block; no behaviour changed. **The five checks:** the re-throw calls the core and the core is the oracle; the re-throw is a new roll and not a continuation, generations back to one over every die; the stress counter carries in over a case where a push raised it; the difficulty on `roll-button` after a throw is the one the throw took; and the control inventory of section 3 holds at both rest states, 16 cells read out of the design. Each check was proved red by an injection that landed and named its gate. **The difficulty is settled.** Section 3 of `docs/design/0002-screen-design.md` keeps the difficulty control and its preview sentence in rest A alone because the builder collapses on a roll. Section 8 states that no control of rest B can change the difficulty, so what the last throw took and what the next throw will take are one number. The design treats the whole after-throw difficulty readout as the signed value on `roll-button`. **Validation:** `npm run lint` 0, `npm run typecheck` 0, `npm test` 0 over 230 vitest tests and 20 node --test tests, `npm run build` 0. Branding gate `files_scanned=116` `hits=0`. **Deploy:** PR #8 merged `2a4d751`, CI SUCCESS. Six URLs answered 200: the page at 544 bytes, the entry script `assets/index-CITyIdqU.js` at 39,652 bytes, the stylesheet at 9,895 bytes, the web manifest at 425 bytes, the service worker registration at 150 bytes, and the lazy 3D chunk at 596,587 bytes. The hashes match the build, so the live page is this commit. **Bundle:** Initial JavaScript 14,356 gzip bytes and lazy 3D chunk 151,876 gzip bytes, both unchanged because the only source addition is a comment. See the notes under this table. |
 | 3.7 | Capability probe, fallback, context loss — the interface half | Done. The 3D tray still draws no result. | #10 | `src/shell/renderer.ts` is the choice and it is pure: it reads the probe answer and the stored record and answers which renderer draws the dice. `src/app.tsx` runs the probe once at startup, draws flat dice until it answers, and mounts the table only where the probe clears the bar, so a browser below the bar fetches no part of the 3D chunk. Three events fall to flat dice for good and every one records the flag and tells the player once: a probe below the bar, a table that does not mount, and a lost WebGL context. The notice carries `role="status"` and holds no tab stop, so both keyboard walks of section 6 stay at 11 visits and 35. The way back is `sheet-tray-renderer`, a ninth control on the sheet, which carries no share of the control budget of section 3. Decision 8 of `docs/design/0012-settled-decisions.md` records it. **The defect Unit 2.3 reported is fixed:** the die cell is keyed by a throw ordinal in `AppState`, and the old key held the count of the values a die carries, which reads the same before and after a re-throw. **The acceptance:** `node scripts/browser.mjs --blocked-chunk` removes the service worker and Cache Storage, refuses the chunk at the network layer, counts every refused abort, and then walks every rule and every affordance on the flat dice. On the graphics card outside the sandbox it exits 0 at `checks=11 failures=0 skipped=0`, with the probe reading `true`, one chunk request refused, 0 refused aborts, 0 encoded bytes, 0 canvases and the stored flag true. Eight injections were proved red and every one was restored by editing the injection back. Initial JavaScript moves from 14,356 to 16,355 gzip bytes and the lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=118`, `hits=0`, exit 0. **Open:** the 3D tray draws no result yet, for three measured reasons. See the notes under this table. |
+| 3.5 | Locked-dice affordance — the screen half. **Closes Unit 3.5, and puts the 3D tray to work in the application.** | Done | #11 | The 3D tray now draws the result inside the application. Three blockers Unit 3.7 named are closed. **1. The push defect.** `pushPool` in `src/tray/throw.ts` spawns the die a profile adds before the re-throw, through `box.add`, on the value the core decided, and it never throws that die twice. The library appends, so the added die takes the index after every die on the tray and the returned order says so. Two answers to "which die is new" — the set the tray does not hold, and `PushedRoll.stressAdded` — must agree, so a stale order fails by name. **2. The screen half.** Decision 9 of `docs/design/0012-settled-decisions.md`: the die cells are real DOM in both renderers, and over the 3D table they lie on the die each one names, draw no die of their own, and take no pointer. `dice-tray` is still ONE control with a roving tab index, and section 6 still reads 11 visits before the throw and 35 after it in BOTH instruments, with the 3D table running. **3. The click route.** A press with the pointer falls through to the raycast of Unit 3.5, which refuses a rule lock. **A defect the render found and no green suite could:** the library draws one last frame when a throw ends and none at all for a click, so a lock mark added after that frame kept the matrix of the frame before and the player saw the marks of the previous throw standing where the previous dice stood, up to 682 world units away. `drawMarkers` now draws the frame that shows them. `node scripts/browser.mjs --table` is the new mode and it exits 0 at `checks=9 failures=0 skipped=0` on the graphics card: `compared=30 of a pool of 30` up-faces read off the body quaternions against the faces the screen printed, `placed=30 of 30` cells inside 1 px of a centroid the harness projects itself, 23 dice answered a real Enter and 7 refused it, `reached=30 unreachable=0` under a real pointer click, and the push took the table from 30 dice to 31 with `die-st11` spawned and every kept die inside 1 px of where it lay. Nine injections were proved red and every file was restored by editing the injection back. Initial JavaScript 16,355 to 18,944 gzip bytes; the lazy 3D chunk unchanged at 151,876; the three render counters unchanged at 841, 842 and 77. See the notes under this table. |
 
 ## Unit 0.5 — CI, public repository, protection
 
@@ -4089,4 +4090,204 @@ acceptance are all built and proved, and this is the part that waits.
 | `npm run perf` | 203 steps against the recorded bound, scene digest unchanged, exit 0 |
 | Branding gate | `files_scanned=118`, `binary_skipped=47`, `hits=0`, exit 0, `accounted=165` against an independent 165 |
 | Harness | `--blocked-chunk` 11/0/0, `--shell` 8/0/0, `--offline` 8/0/0 |
+| Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |
+
+## Unit 3.5 — the screen half, and the tray in the application
+
+This unit is the main effort reaching the screen. Units 3.0 to 3.4 made the subset re-throw correct
+on the table. Until now the flat dice drew every result in both renderers. They no longer do.
+
+### What landed
+
+- **The push defect is fixed.** `pushPool` spawns the dice a push added, through `box.add`, on the
+  values the core decided. `TrayPush` is the narrow input the tray needs, and `PushedRoll` from the
+  rules core satisfies it, so a caller hands the core's own answer straight over.
+- **`src/shell/table.tsx`** is the call site. It mounts the tray, acts out each roll with
+  `throwPool` and each push with `pushPool`, wires `mountAffordance`, and reads back where every die
+  landed. It decides no rule and reads no random source.
+- **`src/tray/spots.ts`** answers where each die sits on the screen, in CSS pixels.
+- **`src/app.tsx`** draws one cell per die in both renderers. Over the table the cell draws nothing.
+- **`mountAffordance` returns a handle** with `update` and `dispose`, so the screen stays the one
+  authority on the pool and the tray's own copy is overwritten after every change.
+- **`AppState` gains `lastThrow` and `stressAdded`.** A roll and a push are not the same throw and
+  the dice alone cannot tell them apart, because a re-throw of the same pool carries the same ids.
+
+### The decision, and where it is recorded
+
+Decision 9 of `docs/design/0012-settled-decisions.md`, with its four reasons and its two measured
+limits. Section 3 of `docs/design/0002-screen-design.md` now says what `dice-tray` holds in each
+renderer, section 6 says the list holds in both and records the scroll stop the 3D table does not
+earn, and section 7 names the marks and the skipped tumble.
+
+### The defect the render found
+
+A green suite did not prove the render was right, and this is the case that shows it.
+
+The vendored library renders one last frame the instant a throw finishes and then stops, and it
+renders nothing at all for a click. A mark added or moved after that frame therefore kept the world
+matrix the renderer gave it on the frame before, so the player saw the marks of the previous throw
+standing where the previous dice stood. Measured in the running application: up to 682 world units
+from the die the mark named, against a die radius of 90.
+
+**Neither of the two obvious probes can see it.** A raycast updates the world matrix of anything it
+casts against, so a probe that raycasts repairs the fault it came to measure. A pixel read needs a
+render in the same task, and that render repairs it too. Unit 3.5's `--affordance` mode did both,
+which is why the tray half shipped with this defect and passed.
+
+`table.the-lock-marks-are-drawn-on-the-dice-they-name` reads the world matrix itself, which is the
+matrix the renderer last used, and asks whether the mark lies inside its own die's radius. The fix
+is one line: `drawMarkers` draws the frame that shows the marks it just placed.
+
+### The counted denominators
+
+| Check | Denominator |
+|---|---|
+| Every up-face | The pool the screen names. `compared=30 of a pool of 30`, and again `31 of 31` after the push. Each face is read off the body quaternion and compared against the face the screen printed for that die, so the 3D layer is judged against the rules core and never against itself. |
+| Every cell over its die | The same pool. The cell centre is compared against a centroid the harness projects from the camera matrices with its own 4x4 multiply, so the two routes are independent. |
+| The key press | The pool size. The toggled count and the refused count sum to it and both carry a floor above zero. |
+| The pointer route | The pool size. The reached count and the unreachable count sum to it, and the toggled and refused counts sum to the reached. |
+| The die the push added | The screen's own answer. The tray must hold one body per die the screen names, and the added names must be the difference between the two pools. |
+| The lock marks | The dice the screen keeps, at both throws. A mark for a die that is not kept, or a kept die with no mark, fails the count before any distance is read. |
+| The keyboard walk | The 35 names of section 6, read out of the document, in both instruments. |
+
+### The measurements
+
+`node scripts/browser.mjs --table --hardware --url http://localhost:4173/clatter/ --viewport
+1440x900`, on `AMD Radeon RX 6700 XT (radeonsi, navi22, ACO, DRM 3.64, 7.1.7-200.fc44.x86_64)` with
+the sandbox off. There is no WebGL context inside the sandbox, and a run there prints every table
+check as `NOT JUDGED` and counts them in `skipped=`.
+
+```
+browser: table renderer=tray canvases=1 throws=6 of at most 40 settled=true dice=30 kept=7
+  loose=23 tray_bodies=30 acted_out=2
+browser: table keys pool=30 toggled=23 refused=7
+browser: table clicks pool=30 reached=30 unreachable=0 toggled=23 refused=7
+browser: table push settled=true dice=31 tray_bodies=31 added=[die-st11] acted_out=3
+browser: table marks after_throw=7 of 7 kept, after_push=13 of 13 kept, stray=0
+browser: mode=hardware checks=9 failures=0 skipped=0
+```
+
+### Nine red-proofs
+
+Each injection landed, each failure names the gate it broke, and each file was restored by editing
+the injection back. No version-control command touched a byte. The six source files were copied
+outside the repository first and every restored hash matches its copy.
+
+1. **The added die is never spawned.** `addDice` removed from `pushPool`. Under jsdom:
+   `the tray spawned the die the push added, on its own value: expected [] to deeply equal
+   [ '1d6@5' ]`. In the browser: `FAIL table.the-push-put-the-die-it-added-on-the-table ... the
+   tray holds 30 bodies for them ... wrong=1 [die-st11 reads null, the screen says 2]`.
+2. **The tray is never asked to act the throw out.** Under jsdom: `the tray acted the throw out
+   once: expected +0 to be 1`. In the browser: `FAIL table.the-3d-tray-draws-the-result ... It
+   holds 0 bodies against the 30 dice the screen names`, with five more checks red beside it.
+3. **The cells are placed away from the dice.** 20 px added in `dieSpots`. Under jsdom:
+   `die-at1 lies over the die the tray put down: expected [ '120px', ... ]`. In the browser:
+   `FAIL table.every-die-carries-a-cell-over-it ... off=30 [die-at1 sits 20.015 px away; ...]`.
+4. **One die acts out a value the core did not decide.** `poolNotation` adds one to the first die:
+   `FAIL table.up-face-equals-core-value compared=30 of a pool of 30 ... wrong=1 [die-at1 reads 3,
+   the screen says 2]`. The other 29 still compared, so the denominator held while the check failed.
+5. **No frame is drawn for the marks.** The render removed from `drawMarkers`:
+   `FAIL table.the-lock-marks-are-drawn-on-the-dice-they-name ... stray=8 [die-at2 was drawn 682.3
+   away; die-st3 was drawn 644.9 away; ...]`.
+6. **A press answers with the state it was given.** `toggleDie` made a no-op:
+   `FAIL table.every-die-answers-a-key-press 0 answered a real Enter ... faults=23 [die-at2 did not
+   answer the press: aria-pressed stayed false; ...]`.
+7. **The raycast route ignores the click.** The listener returns early:
+   `FAIL table.every-die-is-accounted-for-by-the-pointer-route ... 0 toggled ... faults=29`. **The
+   key press stayed green at 29 toggled**, so the two routes are proved separately.
+8. **A cell over the table holds no tab stop**, which is the whole reason the cells are DOM. The
+   walk reached 4 stops of 35: `expected [ 'edit-pool-button', ...(3) ] to deeply equal
+   [ 'dice-tray', 'die-at2', ...(33) ]`.
+9. **A push is always acted out as a whole throw.** `canActOutPush` forced false:
+   `a push is not a fresh throw of the whole pool: expected 2 to be 1`.
+
+### The probe constants, and which ones moved
+
+**None of them.** The camera, the tray walls and the die size are untouched, so Unit 3.5's
+48-direction shape probe and Unit 3.4's 1 px kept-die bound still measure what they measured.
+`--affordance` reads the same numbers it recorded: `rule=48, choice=20, loose=0` of 48 directions,
+`marks read=8 of 8`, `dimmest_reading=4.91`. `--push` reads `compared=4 of the 4 dice the rules core
+reports as locked`, and `--tray` reads 841 draw calls, 842 triangles and 77 textures.
+
+Two constants are new and both are derived rather than chosen.
+
+- **The 1 px bound of `table.every-die-carries-a-cell-over-it`.** A browser lays out in CSS pixels
+  and rounds, so anything under one pixel is layout noise. The defect it must catch is a cell over
+  the wrong die, which is about 96 px. The bound is far narrower than the defect.
+- **The 200 px floor under `.table`.** A die is a fixed size on the screen whatever the canvas is,
+  because the library builds it at `baseScale` world units and the camera frames twice the element
+  in world units. Measured in the running application: a die is 93 to 99 CSS pixels across, and the
+  tray wall stands one `baseScale` inside the frame, which is 50 CSS pixels a side. An element
+  shorter than one die plus two wall insets holds no die. Re-derive it from `baseScale` and the
+  measured die if either one moves.
+
+### The history matrix is no longer owed as a route
+
+Unit 3.5's note said the keyboard route to a buried die runs through the history matrix of Unit 2.2.
+**It does not any more.** Every die carries its own DOM cell in both renderers, the arrow keys reach
+all of them, and a press on any of them keeps or releases the die. `--table` measures that directly:
+30 of 30 dice answered a real Enter or refused it by rule, with none out of reach.
+
+The history matrix is still owed as a **history view**. Decision 3 moved it into the history record
+and transposed it, Unit 2.2d records the deferral and the two acceptances that travel with it, and
+Unit 4.5 lands it. Nothing about accessibility waits on it.
+
+### The captures, and what they show
+
+`docs/design/0014-table-throw-1440.png` and `docs/design/0014-table-push-1440.png`, both at 1440 by
+900 from the running application. **For the owner, not for the gate.**
+
+The throw frame holds 30 dice spread across the table, all six type colours separable, every numeral
+legible, and seven kept dice each inside a slate cage. The status line reads 8 successes, 2 banes,
+30 dice, stress 10 and push 0, and `Push` prints 24 dice.
+
+The push frame holds 31 dice. Every one of the seven caged dice sits in the same place at the same
+angle with the same face, down to the shadow under it, and six more dice now carry cages of their
+own. The loose dice are elsewhere. `Push` is dead and the cost row reads
+`A stress die shows a bane. No push is left.`, which is the third preset refusing a further push. A
+player reads the frame as: the successes stayed, the rest went back in the cup, and one more stress
+die joined them.
+
+**Reported, not fixed.** Where several kept dice land close together their cages overlap, and the
+eye takes a moment to pair each cage with its die. A cage is a closed shape and is still its own
+boundary, so no die is ambiguous. The mark sits at the die's own centre height while the face the
+camera sees is the top of the die, so a cage near the edge of a wide table reads a few pixels away
+from its die. Both belong to the affordance Unit 3.5 shipped and neither is a defect of this unit.
+
+### Reported, not fixed
+
+- **The dice heap, and no layout stops that.** The library builds a die at a fixed world size and
+  throws every die from one place. Thirty dice of 96 pixels cover about 276,000 square pixels and a
+  phone middle offers far less. The throw is not spread, because spreading it moves
+  `steps_to_rest_fixed_seed_scene` and the pinned scene digest in `budgets.json`.
+- **A buried die has no pointer route.** The run counts the dice the raycast can reach and the dice
+  it cannot, and it fails unless the two sum to the pool. Every run so far read `unreachable=0`,
+  because the click probe walks outwards over the die's own disc rather than aiming at its centre.
+  The key press reaches every die whatever the heap does.
+- **A throw the player outruns is dropped.** A press inside a throw replaces whatever was waiting,
+  so the tray never falls more than one throw behind the screen. A push dropped that way is acted
+  out as a whole throw of the table as it now stands, because a subset the tray cannot map back is
+  not a subset it may guess at.
+- **`window.__clatterTable` is a shipped seam.** A WebGL scene has no other route for an outside
+  instrument, and the acceptance needs one: the up-faces are read off the physics bodies the
+  application mounted. Nothing in the application reads the field and no check writes one.
+- **The shell walk waits for the table.** `--shell` now waits for the tray to come to rest before it
+  puts the sequential focus navigation starting point back. Without the wait the last render of a
+  throw moved that point and the walk of rest B reached one stop of 35. The wait returns at once on
+  flat dice.
+- **The profile is read once, at the mount.** Unit 4.1 lets the player change the ruleset, and the
+  affordance would need a remount for that. Nothing changes it today.
+
+### Measurements
+
+| Number | Value |
+|---|---|
+| New tests | 4, in `src/app.test.tsx` and `src/tray/throw.test.ts` |
+| Test total | 248 to 252 vitest tests over 27 files, plus 20 node tests |
+| Initial JavaScript | 16,355 to 18,944 gzip bytes. Budget in `budgets.json`. |
+| Lazy 3D chunk | 151,876 gzip bytes, unchanged |
+| Service worker | 5,974 gzip bytes over 2 files, reported with no budget |
+| Render counters | 841 draw calls, 842 triangles, 77 textures. Unchanged, all three under the ceilings. |
+| `npm run perf` | 203 steps over 5 runs, spread 0, scene digest unchanged, exit 0 |
+| Harness | `--table` 9/0/0, `--shell` 8/0/0, `--blocked-chunk` 11/0/0, `--offline` 8/0/0, `--tray` 7/0/0, `--pool` 7/0/0, `--push` 7/0/0, `--affordance` 9/0/0, `--reduced-motion` 5/0/0 |
 | Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |
