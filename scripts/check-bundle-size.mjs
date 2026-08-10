@@ -21,6 +21,23 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // gives them. Unit 5.1 added them.
 const SERVICE_WORKER_NAMES = [/^sw\.js$/, /^workbox-[0-9a-f]+\.js$/];
 
+// Every tool this repository runs but never ships — Unit 4.11.
+//
+// The accessibility audit is 3.1 MB of MPL-2.0 JavaScript. Decision 20 of
+// `docs/design/0012-settled-decisions.md` settles taking it, and the reason it
+// is safe to take is exactly that it never leaves the build: the obligations of
+// that licence attach to distributing the covered files. So the claim is
+// checked here rather than stated, on the same artefact the size budgets read.
+//
+// **The marker is calibrated before it is trusted.** Each marker must be found
+// in the tool's own file first. A marker that stopped naming the tool would
+// otherwise report a clean `dist/` for ever, which is the way this check fails
+// quietly. `axe-core` alone would not do: the vendored physics writes `axes:`,
+// and a marker that matches by accident is as bad as one that matches nothing.
+const DEV_ONLY_TOOLS = [
+  { name: 'axe-core', source: 'axe.js', markers: ['axe.version', 'axe-core'] },
+];
+
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, entry.name);
@@ -168,6 +185,50 @@ function main(argv) {
     `bundle-size: service_worker_gzip_bytes measured=${gzipBytes(worker)} files=${worker.length}` +
       ` reported, no budget`,
   );
+
+  // The dev-only tools, and the proof that none of them shipped.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const manifest = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
+  const everyFile = walk(opts.dist);
+  for (const tool of DEV_ONLY_TOOLS) {
+    const pinned = (manifest.devDependencies ?? {})[tool.name];
+    if (pinned === undefined || (manifest.dependencies ?? {})[tool.name] !== undefined) {
+      console.error(
+        `bundle-size: ${tool.name} must sit in devDependencies and nowhere else. ` +
+          `A dependency ships, and this tool must not.`,
+      );
+      return 2;
+    }
+    const source = join(here, '..', 'node_modules', tool.name, tool.source);
+    if (!existsSync(source)) {
+      console.error(`bundle-size: ${tool.name} is not installed, so this check cannot calibrate`);
+      return 2;
+    }
+    const own = readFileSync(source, 'utf8');
+    for (const marker of tool.markers) {
+      if (!own.includes(marker)) {
+        console.error(
+          `bundle-size: the marker ${JSON.stringify(marker)} is no longer in ` +
+            `${tool.name}/${tool.source}, so it names nothing and would pass over a shipped copy`,
+        );
+        return 2;
+      }
+    }
+    const shipped = [];
+    for (const file of everyFile) {
+      const text = readFileSync(file, 'utf8');
+      for (const marker of tool.markers) {
+        if (text.includes(marker)) shipped.push(`${file} holds ${JSON.stringify(marker)}`);
+      }
+    }
+    const toolVerdict = shipped.length === 0 ? 'OK' : 'FAIL';
+    console.log(
+      `bundle-size: ${toolVerdict} dev_only_tool ${tool.name}@${pinned} markers=` +
+        `${tool.markers.length} files_scanned=${everyFile.length} hits=${shipped.length}`,
+    );
+    for (const hit of shipped) console.log(`bundle-size:   ${hit}`);
+    if (shipped.length > 0) failures.push(`${tool.name} reached dist: ${shipped.join(', ')}`);
+  }
 
   console.log(`bundle-size: failures=${failures.length}`);
   return failures.length > 0 ? 1 : 0;

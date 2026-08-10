@@ -193,6 +193,13 @@ reason: each of the three clears the roll on the table, which Decision 10 settle
 sits here for the first of those two reasons: a recall writes over every tile of the built pool, so
 it belongs beside the mode switch and not beside the throw. Decision 11 records it.
 
+**The sheet is a real modal, and Unit 4.11 made it one.** It carries `role="dialog"` and
+`aria-modal="true"`, which tell a screen reader to ignore everything behind it. A keyboard is not
+told anything by that attribute, so the sheet holds the Tab key itself: focus cannot leave the sheet
+by Tab or by Shift and Tab, it wraps at both ends, Escape closes, and closing returns focus to
+`disclosure-toggle`. The sheet carried `aria-modal="true"` with no such hold from Unit 2.1 to Unit
+4.10, and seven units added controls behind it in that time.
+
 **The sheet scrolls.** `sheet-overrides` draws one row per field of the push-profile record, so the
 sheet is taller than a phone at every width. It carries `max-height` and `overflow-y: auto`, so it
 degrades by scrolling and never by clipping, exactly as `.shell-m` does under Decision 6. Measured at
@@ -365,9 +372,16 @@ identified by measure and never by name: the focused element holds no `tabindex`
 `scrollHeight` is greater than its `clientHeight`.
 
 **How the count is reconciled.** The walk reports such a stop under its own name and does not count
-it against the authored list. The authored counts stay eleven and thirty. A run that reports one
-extra stop and eleven authored visits agrees with this document. Unit 4.11 asserts the authored
+it against the authored list. The authored counts stay eleven and thirty-five. A run that reports
+one extra stop and eleven authored visits agrees with this document. Unit 4.11 asserts the authored
 lists and reports the browser's stops beside them.
+
+**Corrected by Unit 4.11, 2026-08-10.** The two sentences above and below read "eleven and thirty"
+until this unit. The list was re-derived at the draw target of 30 dice before Unit 2.2 shipped, and
+the after-throw count went from thirty to thirty-five, but these two sentences kept the old figure.
+No check read them, so both instruments passed over a false statement for eight units. A check now
+reads every sentence of this document that states a walk count, so a third statement cannot drift
+alone.
 
 The stop appears only while the region overflows, so the reading follows the height and the number
 of dice. Measured on 2026-08-09 through `node scripts/browser.mjs --shell`, over the built output in
@@ -381,7 +395,8 @@ list that grows with the pool, so the middle overflows. The 3D table takes the m
 and its walls follow the canvas, so the middle does not overflow and the browser adds no stop.
 Measured on 2026-08-09 through the same command at 800 by 600 with the table running: no stop before
 the throw and none after it, over 30 dice. Both readings stand. Which one a run reports follows the
-renderer the startup probe chose, and neither one changes the authored counts of eleven and thirty.
+renderer the startup probe chose, and neither one changes the authored counts of eleven and
+thirty-five.
 
 ## 7. What the interface units inherit from this unit
 
