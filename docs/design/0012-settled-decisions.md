@@ -1,0 +1,146 @@
+# 0012 — Settled decisions
+
+This document records owner decisions for Unit 2.0 as they land. Each decision holds a date. No later unit may reopen a settled question. Where an earlier draft contradicts a settled decision, this record is the authority.
+
+---
+
+## Decision 1 — pool maximum, settled 2026-08-09
+
+The tray holds **25 dice**.
+
+The pool holds **15 dice**. This sum comes from four sources: an attribute of at most 5, a skill of at most 5, a gear bonus of at most 3, and one applicable bonus of 2. The composition is:
+
+- Attribute: 5
+- Skill: 5
+- Gear: 3
+- Bonus: 2
+- **Total pool: 15**
+
+Stress dice number **10 maximum**. The stress counter caps at 10. One stress point yields one stress die on the tray.
+
+The tray sum is 15 pool plus 10 stress. Every later interface unit measures against this 25-die ceiling.
+
+The approved mock draws 8 dice. It no longer meets the requirement.
+
+Five layout options are drawn at `docs/design/0010-tray-25-option-a.html` through `docs/design/0010-tray-25-option-e.html`. Two renders accompany each option, at 360 px and at 1440 px. Ten renders total are drawn. The measurements and the renders are the record. Do not retype them into prose.
+
+Layout choice among the five options is still open.
+
+---
+
+## Decision 2 — header is status, not navigation, settled 2026-08-09
+
+The header carries status. It never navigates. The owner rejected a header of phase tabs.
+
+### The reasoning
+
+A tab bar promises two things: the player chooses where to go, and the choice holds. An application that moves the selection on its own breaks this promise. A control that moves automatically reads as a progress indicator dressed as a tab.
+
+Navigation may follow a tap. It must not follow a background event.
+
+The push is an action and not a place. The footer already holds a push button. A push tab beside a push button gives one thing two affordances. Choose one.
+
+Building the pool and reading the table are one screen at two times, not two separate destinations. The player enters the screen to build a pool. The screen then shows a table of the roll. The same screen serves both moments.
+
+**The deciding reason.** The push decision needs three pieces at once: the kept dice, the loose dice and the cost. Any shell that puts them on separate tabs separates the decision from its evidence. This application exists to hold all three in view at the same moment. That simultaneity is the purpose.
+
+A tab with nothing behind it before the first roll is a dead affordance.
+
+### What the header carries
+
+- Successes
+- Banes
+- Dice count
+- Stress value
+- Push count
+
+**The header never moves.**
+
+### What is still open
+
+- The middle area of the screen
+- The collapse behaviour of the pool builder
+- The footer
+- The overall shell architecture
+
+---
+
+## Decision 3 — history is a separate destination, settled 2026-08-09
+
+The history is not a peer of the roll flow. The player visits it rarely and never in the middle of a decision.
+
+History holds two views.
+
+**View 1: Summary.** A list of past rolls. Each row holds enough detail to find one roll. The player can choose a roll from this list.
+
+**View 2: Record.** Full statistics for one selected roll. An export control sits here.
+
+### The consequence
+
+The die matrix holds one column per die. At 25 dice it needs 780 pixels of minimum content width. A phone screen offers 300 pixels. The matrix overflows by 480 pixels. **The matrix transposes in the record view.**
+
+Instead of one row per generation and one column per die, the matrix becomes one row per die and one column per generation. Twenty-five rows scroll vertically. A phone scrolls vertically natively. Twenty-five columns do not.
+
+This layout gives the export control from Unit 4.5 its home. The control had been waiting on this gate.
+
+### Open questions
+
+- The layout choice among options A to E (shared with Decision 1).
+- The keyboard order. `docs/design/0002-screen-design.md` section 6 fixes 23 named visits over a pool of seven dice. At 25 dice the count becomes 41. Unit 4.11 asserts that list. The number settles with the layout.
+- **Conflict: unresolved.** If a layout orders the tray by lock state, section 6 says the tray visits the dice in pool order. The two disagree. This conflict remains open for Unit 2.1 or a later unit to resolve.
+
+---
+
+## Decision 4 — the tray layout, settled by the owner 2026-08-09
+
+The owner chose **option C**. The tray is the **kept shelf** and the **throw zone**. The shelf holds every die that stays on the table. The zone holds every die the push throws again. **Pool order holds inside each zone.**
+
+The screen that joins this tray to the settled shell is drawn at `docs/design/0013-screen-final.html`. Thirteen renders sit beside it. That file is the source of truth for every later interface unit.
+
+### What this closes
+
+**The open layout question of Decision 1 is closed.** Options A, B, D and E are rejected. Option C is the layout.
+
+**The conflict Decision 3 named is resolved.** Decision 3 said that a tray ordered by lock state disagrees with section 6 of `docs/design/0002-screen-design.md`, which visits the dice in pool order. Pool order inside each zone resolves it, and here is how. The lock state chooses the zone and nothing else. Inside a zone the dice keep their pool order, so no die moves relative to another die of the same type. The zone boundary is the only place the tray departs from pool order, and that boundary **is** the push decision the player is reading. Section 6 keeps its rule, applied once per zone: the shelf first, then the zone.
+
+**The keyboard order is re-derived, not scaled.** Decision 3 predicted 41 named visits at 25 dice. That prediction came from the earlier structure and is withdrawn. Section 6 of `0002-screen-design.md` now walks the drawn DOM and states two lists with their totals and the state each list holds in. The grand total is the same by coincidence. The split is not.
+
+---
+
+## Decision 5 — six interface decisions, delegated by the owner and taken by me, 2026-08-09
+
+The owner delegated these six. Each holds its reason.
+
+**1. The pool chip is removed after a roll.** Measurement showed that a one-line chip still overflowed. Shortening it did not clear the overflow. Only removal did. The tray takes the whole middle after a roll, and `Edit pool` brings the builder back.
+
+**2. The difficulty rides on the `Roll again` button.** The push cost already rides on the `Push` button, so the modifier travels with the action it modifies. This also avoids an edit to Decision 2, which settled what the header carries. A settled decision stays settled.
+
+**3. `Edit pool` sits on the cost row.** That row already existed, so the control costs no height. The 44 px button sets the row height and the old text padding pays for it.
+
+**4. Every touch target under 24 pixels is gone.** The pool cell minus and plus ends went from 22 pixels wide to 44. The phone builder holds two columns instead of three to buy that room, and it scrolls. A builder is a form, and forms scroll. The seven difficulty notches are the one target under the 44 pixel goal. They stay at 39 pixels wide, measured at 360 px in the drawn file, which clears the 24 pixel floor. Seven 44 pixel notches need more width than the card gives.
+
+**5. The record detail carries one export control.** It sits in the footer of the record. One roll, one export, one place.
+
+**6. The footer respects the safe-area inset.** It reserves `env(safe-area-inset-bottom)`, so its buttons clear a phone gesture bar. The drawn phone frames force the inset and draw the gesture bar inside it, so a render on a machine with no notch still shows the clearance.
+
+---
+
+## Decision 6 — the browser tab scrolls and the installed application does not, settled 2026-08-09
+
+### The measurement
+
+Both readings come from the roll flow of `docs/design/0013-screen-final.html`, with the builder collapsed.
+
+| Height | Case | The middle area | `scrollHeight` | `clientHeight` |
+|---|---|---|---|---|
+| 360 by 760 | the installed application | does not scroll | 556 | 556 |
+| 360 by 660 | a browser tab | scrolls | 553 | 456 |
+
+At both heights the header, the cost row and the `Push` button stay in view, and the kept shelf is visible at rest. **No content is lost at 660.** It is reached by scrolling.
+
+### The reasoning
+
+Shrinking the die is the only change that makes the browser tab fit without scrolling. It would also shrink the die in the installed application, which loses nothing today. The manifest exists to serve the installed case. **The primary case is not paid to rescue the secondary one.** So the die keeps its size and the browser tab scrolls.
+
+`.shell-m` carries `overflow-y: auto`. The layout therefore degrades by scrolling and never by clipping. A screen that does not fit gives the player a scroll, not a lost button.
+

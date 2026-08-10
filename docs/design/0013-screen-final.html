@@ -1,0 +1,1738 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Screen — the settled design</title>
+    <style>
+      /* ------------------------------------------------------------------
+         Tokens, carried from 0010-tray-25-option-c.html. Every colour is named
+         by role, never by hue, so a theme stays a variable set.
+         ------------------------------------------------------------------ */
+      :root {
+        --page: #dedad2;
+        --surface: #f4f1ec;
+        --raised: #fffefb;
+        --sunken: #e5e0d6;
+        --ink: #171614;
+        --ink-dim: #6a655c;
+        --line: #d3cdc1;
+        --accent: #2b4a5b;
+        --accent-ink: #ffffff;
+        --focus: #2b4a5b;
+        --die-face: #fffdf7;
+        --die-edge: #cfc7b7;
+        --die-pip: #171614;
+        /* the stress group differs by material only, never by hue role */
+        --die-face-stress: #efece3;
+        --die-edge-stress: #bdb5a4;
+        --mark-success: #14614b;
+        --mark-bane: #8a4512;
+        --s1: 4px;
+        --s2: 8px;
+        --s3: 12px;
+        --s4: 16px;
+        --s5: 24px;
+        --r: 10px;
+        /* The footer reads this one value. A real device sets it through the
+           environment. A frame with the notch class overrides it, so the effect
+           is visible in a render on a machine that has no notch. */
+        --safe-b: env(safe-area-inset-bottom, 0px);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: var(--s5) var(--s4) 64px;
+        background: #cfcac1;
+        color: var(--ink);
+        font:
+          400 16px/1.5 system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          Cantarell,
+          sans-serif;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .sheet {
+        max-width: 1500px;
+        margin: 0 auto;
+      }
+
+      .page-h {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 0 0 var(--s2);
+      }
+
+      .legend {
+        max-width: 920px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        padding: var(--s4);
+        margin-bottom: var(--s5);
+      }
+
+      .legend p {
+        margin: 0 0 var(--s2);
+        max-width: 68ch;
+      }
+
+      .legend ol {
+        margin: 0;
+        padding-left: 1.3em;
+        max-width: 68ch;
+      }
+
+      .legend li {
+        margin-bottom: var(--s1);
+      }
+
+      .key {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--s3) var(--s5);
+        margin-top: var(--s3);
+        padding-top: var(--s3);
+        border-top: 1px solid var(--line);
+      }
+
+      .key span {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+        font-size: 14px;
+      }
+
+      .pane-h {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #4b463e;
+        margin: var(--s5) 0 var(--s2);
+      }
+
+      .frame-scroll {
+        overflow-x: auto;
+        padding-bottom: var(--s2);
+      }
+
+      .frame {
+        container-type: inline-size;
+        border: 1px solid #b3ac9f;
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: 0 10px 26px rgb(0 0 0 / 16%);
+        background: var(--page);
+      }
+
+      /* Each frame is a device viewport, not a document. The height is fixed,
+         so a screen that does not fit must scroll inside its middle area. */
+      .w360 {
+        width: 360px;
+        height: 760px;
+      }
+      .h660 {
+        height: 660px;
+      }
+      .w768 {
+        width: 768px;
+        height: 1024px;
+      }
+      .w1440 {
+        width: 1440px;
+        height: 900px;
+      }
+
+      /* The mock notch. A desktop browser reports no inset, so the drawing has
+         to supply one. The value is the portrait home-indicator inset. */
+      .notch {
+        --safe-b: 34px;
+      }
+
+      .noscript {
+        margin: 0;
+        padding: var(--s4);
+        font-size: 14px;
+        color: var(--ink-dim);
+      }
+
+      /* Open the file with #360, #768 or #1440 to see that one width alone.
+         Open it with #roll-360 to see one pane at one width. The page chrome
+         goes away, so the picture is the screen and nothing else. A solo frame
+         takes the height of the window, so one hash serves both phone heights. */
+      body.solo {
+        padding: 0;
+      }
+
+      body.solo .page-h,
+      body.solo .legend,
+      body.solo .pane-h {
+        display: none;
+      }
+
+      body.solo .frame-scroll {
+        padding: 0;
+      }
+
+      body.solo .frame {
+        border-radius: 0;
+        border: 0;
+        box-shadow: none;
+        height: 100vh;
+      }
+
+      /* ======================= the shell itself ======================= */
+
+      .screen {
+        height: 100%;
+        background: var(--surface);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-areas: 'head' 'middle' 'foot';
+      }
+
+      .shell-h {
+        grid-area: head;
+        background: var(--raised);
+        border-bottom: 1px solid var(--line);
+      }
+
+      /* Named shell-m, never mid. A class called mid also matched the middle
+         notch of the difficulty track, and grid-area sent that notch into a
+         column of its own. No class in this file is called mid. */
+      .shell-m {
+        grid-area: middle;
+        overflow-y: auto;
+        padding: 10px var(--s4) var(--s3);
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .shell-f {
+        position: relative;
+        grid-area: foot;
+        background: var(--raised);
+        border-top: 1px solid var(--line);
+        padding: var(--s2) var(--s4) calc(var(--s3) + var(--safe-b));
+      }
+
+      /* The home indicator, drawn inside the inset the footer reserved. It
+         exists so a render shows that the buttons clear the system gesture bar. */
+      .notch .shell-f::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        bottom: 9px;
+        width: 118px;
+        height: 5px;
+        border-radius: 3px;
+        background: #b9b2a4;
+        transform: translateX(-50%);
+      }
+
+      /* ---------------- the status line ----------------
+         One line. It never moves and it never changes what it holds. Only the
+         numbers change. It is not navigation, so nothing in it is tappable. */
+
+      .statusline {
+        display: flex;
+        align-items: center;
+        gap: 6px var(--s3);
+        min-height: 40px;
+        padding: 0 var(--s4);
+        white-space: nowrap;
+      }
+
+      .st-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .st-dim {
+        font-size: 13px;
+        font-weight: 400;
+        color: var(--ink-dim);
+      }
+
+      .st-rule {
+        width: 1px;
+        align-self: stretch;
+        margin: 8px 0;
+        background: var(--line);
+      }
+
+      .st-warn {
+        color: var(--mark-bane);
+        font-weight: 600;
+      }
+
+      /* ---------------- the expanded pool builder ----------------
+         A builder is a form, and a form scrolls. Two columns at phone width buy
+         the 44 px minus and plus ends their room. */
+
+      .card {
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        padding: 10px var(--s3) var(--s3);
+      }
+
+      .card-h {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s2);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+        margin: 0 0 var(--s2);
+      }
+
+      .poolbar {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--s2);
+      }
+
+      .cell {
+        position: relative;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 5px 44px 4px;
+        text-align: center;
+        min-height: 54px;
+      }
+
+      .cell-t {
+        display: block;
+        font-size: 11px;
+        color: var(--ink-dim);
+        line-height: 1.2;
+      }
+
+      /* The cap label rides on the number. It must never wrap, because a wrapped
+         cap label made the stress cell taller than its neighbours. */
+      .cell-n {
+        display: block;
+        font-size: 21px;
+        font-weight: 600;
+        line-height: 1.25;
+        white-space: nowrap;
+      }
+
+      .cell-n.zero {
+        color: #a9a296;
+        font-weight: 400;
+      }
+
+      .cell-m,
+      .cell-p {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 44px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        background: none;
+        padding: 0;
+        font: inherit;
+        font-size: 17px;
+        color: var(--ink-dim);
+        cursor: pointer;
+      }
+
+      .cell-m {
+        left: 0;
+      }
+      .cell-p {
+        right: 0;
+      }
+
+      .cell.on {
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent);
+      }
+
+      .cell.cap-hit .cell-n::after {
+        content: ' max';
+        font-size: 10px;
+        font-weight: 400;
+        color: var(--ink-dim);
+      }
+
+      .diff {
+        margin-top: var(--s2);
+        border-top: 1px solid var(--line);
+        padding-top: var(--s2);
+      }
+
+      .diff-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s2);
+        margin-bottom: 4px;
+      }
+
+      .diff-l {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+      }
+
+      /* The step buttons sit on the label row, not on the track. The track then
+         keeps its whole width for the seven notches, and each notch clears the
+         24 px WCAG 2.2 SC 2.5.8 floor while staying under the 44 px comfortable
+         target, which seven notches have no room for on this card. */
+      .diff-step {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+      }
+
+      .diff-b {
+        padding: 0;
+        font-size: 17px;
+        font-weight: 400;
+        color: var(--ink-dim);
+      }
+
+      .diff-v {
+        font-size: 18px;
+        font-weight: 600;
+        min-width: 2ch;
+        text-align: center;
+      }
+
+      .track {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        align-items: stretch;
+        gap: 3px;
+        height: 44px;
+      }
+
+      .tk-n {
+        border: 0;
+        padding: 0;
+        font: inherit;
+        cursor: pointer;
+        background: var(--sunken);
+        border-radius: 3px;
+      }
+
+      .tk-n.centre {
+        background: #d8d2c6;
+      }
+
+      .tk-n.on {
+        background: var(--accent);
+      }
+
+      .diff-p {
+        margin: 4px 0 0;
+        font-size: 13px;
+        color: var(--ink-dim);
+      }
+
+      .ruleset {
+        margin: 0;
+        font-size: 12px;
+        color: var(--ink-dim);
+      }
+
+      /* ---------------- the dice ---------------- */
+
+      .tray {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(var(--slot), 1fr));
+        gap: var(--gap);
+        align-content: start;
+      }
+
+      .slot {
+        display: grid;
+        justify-items: center;
+        gap: 2px;
+        padding: 4px 2px 3px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: none;
+        font: inherit;
+        color: inherit;
+        text-align: center;
+      }
+
+      /* three lock states, told by border and by ground, never by colour alone */
+      .slot.rule {
+        background: var(--sunken);
+        border-color: var(--line);
+      }
+
+      .slot.choice {
+        background: var(--sunken);
+        border-style: dashed;
+        border-color: var(--accent);
+        cursor: pointer;
+      }
+
+      .slot.loose {
+        cursor: pointer;
+      }
+
+      .die {
+        position: relative;
+        width: var(--die);
+        height: var(--die);
+        border-radius: calc(var(--die) / 5);
+        background: var(--die-face);
+        border: 1px solid var(--die-edge);
+        display: grid;
+        place-items: center;
+        background-repeat: no-repeat;
+      }
+
+      /* the stress group differs by material only */
+      .stress .die {
+        background-color: var(--die-face-stress);
+        border-color: var(--die-edge-stress);
+      }
+
+      .slot.loose .die {
+        box-shadow:
+          0 3px 0 var(--die-edge),
+          0 6px 10px rgb(0 0 0 / 14%);
+        transform: rotate(-2.5deg);
+      }
+
+      .slot.rule .die,
+      .slot.choice .die {
+        box-shadow: inset 0 1px 2px rgb(0 0 0 / 10%);
+      }
+
+      .pips {
+        --pip: radial-gradient(circle at 50% 50%, var(--die-pip) 44%, transparent 48%);
+        background-size: 21% 21%;
+      }
+      .f1 {
+        background-image: var(--pip);
+        background-position: 50% 50%;
+      }
+      .f2 {
+        background-image: var(--pip), var(--pip);
+        background-position:
+          26% 26%,
+          74% 74%;
+      }
+      .f3 {
+        background-image: var(--pip), var(--pip), var(--pip);
+        background-position:
+          26% 26%,
+          50% 50%,
+          74% 74%;
+      }
+      .f4 {
+        background-image: var(--pip), var(--pip), var(--pip), var(--pip);
+        background-position:
+          26% 26%,
+          74% 26%,
+          26% 74%,
+          74% 74%;
+      }
+      .f5 {
+        background-image: var(--pip), var(--pip), var(--pip), var(--pip), var(--pip);
+        background-position:
+          26% 26%,
+          74% 26%,
+          50% 50%,
+          26% 74%,
+          74% 74%;
+      }
+      .f6 {
+        background-image: var(--pip), var(--pip), var(--pip), var(--pip), var(--pip), var(--pip);
+        background-position:
+          26% 22%,
+          74% 22%,
+          26% 50%,
+          74% 50%,
+          26% 78%,
+          74% 78%;
+      }
+
+      .mark {
+        display: inline-block;
+        width: 13px;
+        height: 13px;
+        flex: none;
+      }
+
+      .mark.s {
+        background: var(--mark-success);
+        border-radius: 50%;
+      }
+
+      .mark.b {
+        background: var(--mark-bane);
+        clip-path: polygon(50% 0, 100% 100%, 0 100%);
+      }
+
+      .badge {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 18px;
+        height: 18px;
+        display: grid;
+        place-items: center;
+        font-size: 10px;
+        font-weight: 700;
+        color: #fff;
+      }
+
+      .badge.s {
+        background: var(--mark-success);
+        border-radius: 50%;
+      }
+
+      .badge.b {
+        background: var(--mark-bane);
+        clip-path: polygon(50% 0, 100% 100%, 0 100%);
+        padding-top: 6px;
+        font-size: 0;
+      }
+
+      /* The caption keeps the identity at every width. The state word is
+         dropped while the die is small, because the frame already says it. */
+      .cap {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+        font-size: 10px;
+        color: var(--ink-dim);
+        line-height: 1.2;
+        white-space: nowrap;
+      }
+
+      .cap b {
+        font-size: 10px;
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .cap em {
+        display: none;
+        font-style: normal;
+      }
+
+      .band-h {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--s2);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+        margin: 0 0 6px;
+      }
+
+      .band-h span {
+        letter-spacing: 0;
+        text-transform: none;
+        font-weight: 400;
+      }
+
+      /* Option C carried over: the shelf holds every locked die, the zone holds
+         what the push throws again. Pool order is kept inside each zone. */
+      .zones {
+        display: grid;
+        gap: 10px;
+      }
+      .shelf {
+        background: var(--sunken);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: var(--s2);
+      }
+      .throwzone {
+        border: 2px dashed var(--accent);
+        border-radius: 8px;
+        padding: var(--s2);
+        background: color-mix(in srgb, var(--accent) 5%, transparent);
+      }
+      .shelf .slot.rule,
+      .shelf .slot.choice {
+        background: var(--raised);
+      }
+      .tray {
+        --die: 46px;
+        --slot: 50px;
+        --gap: 6px;
+      }
+
+      /* ---------------- the action bar ----------------
+         The cost row carries the push cost and the Edit pool control. It is a
+         row the screen already had, so Edit pool costs no new vertical pixels.
+         The 44 px button sets the row height and the old text padding pays for
+         it. */
+
+      .costrow {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+        margin: 0 0 6px;
+        background: var(--sunken);
+        border-radius: 8px;
+        padding: 4px var(--s2) 4px var(--s3);
+      }
+
+      .cost-t {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+        font-size: 13px;
+        color: var(--ink);
+      }
+
+      .cost-t b {
+        font-weight: 600;
+      }
+
+      .bar {
+        display: grid;
+        grid-template-columns: auto 1.15fr 1fr;
+        gap: var(--s2);
+      }
+
+      /* The record footer holds one control, not three. Back moved to the
+         header, next to the title it returns from. */
+      .bar.one {
+        grid-template-columns: 1fr;
+      }
+
+      .btn {
+        min-height: 50px;
+        border-radius: var(--r);
+        border: 1px solid var(--line);
+        background: var(--raised);
+        color: var(--ink);
+        font: inherit;
+        font-weight: 600;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 0 var(--s2);
+      }
+
+      /* The modifier travels with the action it modifies. Roll again carries the
+         difficulty, Push carries the dice and the stress. Same pattern, both. */
+      .btn small {
+        display: block;
+        font-weight: 400;
+        font-size: 10px;
+        white-space: nowrap;
+      }
+
+      .btn.ghost {
+        color: var(--ink-dim);
+        font-weight: 400;
+      }
+
+      .btn.go {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-ink);
+      }
+
+      .btn.go small {
+        opacity: 0.85;
+      }
+
+      .btn.focused {
+        outline: 3px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      /* ---------------- the history destination ---------------- */
+
+      .dest-h {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+        padding: var(--s1) var(--s3);
+        min-height: 56px;
+      }
+
+      .dest-t {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0;
+        flex: 1;
+        line-height: 1.2;
+      }
+
+      .dest-t small {
+        display: block;
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--ink-dim);
+      }
+
+      .icon-btn {
+        min-height: 44px;
+        min-width: 44px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--raised);
+        color: var(--ink);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0 var(--s3);
+      }
+
+      .hlist {
+        display: grid;
+        gap: 6px;
+      }
+
+      .hrow {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 2px var(--s2);
+        align-items: center;
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px var(--s3);
+        min-height: 60px;
+        text-align: left;
+        font: inherit;
+        cursor: pointer;
+        color: var(--ink);
+      }
+
+      .hrow.is-on {
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent);
+      }
+
+      .h-when {
+        grid-column: 1;
+        grid-row: 1;
+        font-size: 13px;
+        color: var(--ink-dim);
+      }
+
+      .h-res {
+        grid-column: 1;
+        grid-row: 2;
+        display: flex;
+        align-items: center;
+        gap: var(--s3);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .h-res span {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .h-pool {
+        grid-column: 2;
+        grid-row: 1;
+        text-align: right;
+        font-size: 13px;
+        color: var(--ink-dim);
+      }
+
+      .h-push {
+        grid-column: 2;
+        grid-row: 2;
+        text-align: right;
+        font-size: 13px;
+        color: var(--ink-dim);
+      }
+
+      /* ---------------- the history detail ---------------- */
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+      }
+
+      .stat {
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 5px var(--s2) 6px;
+      }
+
+      .stat b {
+        display: block;
+        font-size: 17px;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+
+      .stat span {
+        display: block;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+      }
+
+      .matrix {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--raised);
+      }
+
+      .mrow {
+        display: grid;
+        grid-template-columns: 62px repeat(3, 1fr);
+        align-items: center;
+        border-top: 1px solid var(--line);
+        min-height: 34px;
+      }
+
+      .mrow:first-child {
+        border-top: 0;
+        min-height: 28px;
+        background: var(--sunken);
+        border-radius: 8px 8px 0 0;
+      }
+
+      .mrow:first-child > * {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+        justify-content: center;
+      }
+
+      .mrow:first-child .mlab {
+        justify-content: flex-start;
+      }
+
+      .mlab {
+        display: flex;
+        align-items: center;
+        font-size: 12px;
+        font-weight: 600;
+        padding-left: var(--s2);
+      }
+
+      .mcell {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        padding: 3px 4px;
+        font-size: 11px;
+        color: var(--ink-dim);
+      }
+
+      .mcell .die {
+        --die: 22px;
+      }
+
+      .mcell.rest {
+        color: #b0a99d;
+      }
+
+      /* ---------------- wider containers ---------------- */
+
+      @container (min-width: 600px) {
+        .shell-m {
+          padding: var(--s4) var(--s5);
+          gap: var(--s3);
+        }
+        .shell-f {
+          padding: var(--s3) var(--s5) calc(var(--s4) + var(--safe-b));
+        }
+        .statusline,
+        .dest-h {
+          padding-left: var(--s5);
+          padding-right: var(--s5);
+        }
+        .poolbar {
+          grid-template-columns: repeat(3, 1fr);
+        }
+        .bar {
+          grid-template-columns: auto 200px 260px;
+          justify-content: end;
+        }
+        .bar.one {
+          grid-template-columns: 260px;
+        }
+        .btn {
+          padding: 0 var(--s3);
+        }
+        .btn small {
+          font-size: 11px;
+        }
+        .tray {
+          --die: 58px;
+          --slot: 62px;
+          --gap: var(--s2);
+        }
+        .stats {
+          grid-template-columns: repeat(4, 1fr);
+        }
+        .mrow {
+          grid-template-columns: 96px repeat(3, 1fr);
+          min-height: 40px;
+        }
+        .mcell .die {
+          --die: 28px;
+        }
+      }
+
+      @container (min-width: 1100px) {
+        .shell-m,
+        .shell-f,
+        .statusline,
+        .dest-h {
+          padding-left: calc((100cqw - 1180px) / 2);
+          padding-right: calc((100cqw - 1180px) / 2);
+        }
+        .poolbar {
+          grid-template-columns: repeat(6, 1fr);
+        }
+        .zones {
+          gap: var(--s4);
+        }
+        .tray {
+          --die: 84px;
+          --slot: 90px;
+          --gap: var(--s3);
+        }
+        .cap {
+          font-size: 11px;
+        }
+        .cap b {
+          font-size: 12px;
+        }
+        .cap em {
+          display: inline;
+        }
+        .cell {
+          min-height: 70px;
+        }
+        .mrow {
+          grid-template-columns: 120px repeat(3, 1fr);
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="sheet">
+      <h1 class="page-h">Screen — the settled design</h1>
+
+      <div class="legend">
+        <p>
+          This drawing joins the option C tray to the option G shell and applies six owner
+          decisions. The faces, the lock mix and the pool order inside each zone are the ones every
+          earlier option drew, so the drawings stay comparable.
+        </p>
+        <ol>
+          <li>The pool chip is gone after a roll. The tray takes the whole middle.</li>
+          <li>The difficulty rides on the Roll again button, beside the dice count.</li>
+          <li>
+            Edit pool sits on the cost row, which the screen already had. It reopens the builder.
+          </li>
+          <li>
+            Every minus and plus end is 44 px wide. The builder holds two columns at phone width and
+            scrolls, because a builder is a form.
+          </li>
+          <li>One export control lives in the record detail, in the footer.</li>
+          <li>
+            The footer reserves <code>env(safe-area-inset-bottom)</code>. The phone frames force a
+            34 px inset and draw a home indicator inside it.
+          </li>
+        </ol>
+        <p>
+          Each frame is a device viewport with a fixed height, so a screen that does not fit must
+          scroll inside its middle area. The phone is drawn twice: 760 px tall for standalone mode,
+          and 660 px tall for a browser tab, which loses about 100 px to browser chrome.
+        </p>
+        <div class="key">
+          <span><i class="mark s"></i> a circle is a success</span>
+          <span><i class="mark b"></i> a triangle is a bane</span>
+          <span>a solid frame is kept by the rule, a dashed frame is one you keep</span>
+          <span>a lifted die goes in the cup on the next push</span>
+          <span>a darker face is a stress die</span>
+        </div>
+      </div>
+
+      <!-- ============================ pane: roll ============================ -->
+      <section class="pane" data-pane="roll">
+        <h2 class="pane-h">Roll flow — after one push, no pool chip</h2>
+        <div class="frame-scroll">
+          <div class="frame w360 notch" data-w="360">
+            <div class="screen">
+              <header class="shell-h" data-el="shell-header">
+                <div class="statusline" data-el="status-line">
+                  <span class="st-item"><i class="mark s"></i>6</span>
+                  <span class="st-item"><i class="mark b"></i>4</span>
+                  <i class="st-rule"></i>
+                  <span class="st-item st-dim">25 dice</span>
+                  <span class="st-item st-dim"><span class="st-warn">stress 10</span></span>
+                  <span class="st-item st-dim">push 1</span>
+                </div>
+              </header>
+
+              <main class="shell-m" data-el="shell-mid">
+                <div class="zones">
+                  <div class="shelf" data-el="kept-shelf">
+                    <p class="band-h">Kept <span>13 dice — these stay on the table</span></p>
+                    <div class="tray" data-el="dice-tray">
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>At1</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule">
+                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                        <span class="cap"><b>At3</b><em>kept</em></span>
+                      </div>
+                      <button class="slot choice" data-el="die-at4">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>At4</b><em>yours</em></span>
+                      </button>
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>Sk1</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>Sk3</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule">
+                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                        <span class="cap"><b>Sk4</b><em>kept</em></span>
+                      </div>
+                      <button class="slot choice" data-el="die-ge1">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>Ge1</b><em>yours</em></span>
+                      </button>
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>Ge2</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>Bo2</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule stress">
+                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                        <span class="cap"><b>St1</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule stress">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>St3</b><em>kept</em></span>
+                      </div>
+                      <button class="slot choice stress" data-el="die-st5">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>St5</b><em>yours</em></span>
+                      </button>
+                      <div class="slot rule stress">
+                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                        <span class="cap"><b>St7</b><em>kept</em></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="throwzone" data-el="throw-zone">
+                    <p class="band-h">In the cup <span>12 dice — the push throws these</span></p>
+                    <div class="tray">
+                      <button class="slot loose" data-el="die-at2">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>At2</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-at5">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>At5</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-sk2">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>Sk2</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-sk5">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>Sk5</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-ge3">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>Ge3</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-bo1">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>Bo1</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st2">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>St2</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st4">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>St4</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st6">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>St6</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st8">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>St8</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st9">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>St9</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st10">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>St10</b><em>back</em></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </main>
+
+              <div class="shell-f" data-el="shell-footer">
+                <div class="costrow" data-el="cost-row">
+                  <p class="cost-t">
+                    Push again — throw <b>12</b> dice. A complication check is due.
+                  </p>
+                  <button class="icon-btn" data-el="edit-pool-button">Edit pool</button>
+                </div>
+                <div class="bar">
+                  <button class="btn ghost" data-el="disclosure-toggle">More</button>
+                  <button class="btn" data-el="roll-button">
+                    Roll again<small>25 dice, difficulty 0</small>
+                  </button>
+                  <button class="btn go focused" data-el="push-button">
+                    Push<small>12 dice, stress 10</small>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w360 h660 notch" data-w="360h660">
+            <noscript
+              ><p class="noscript">This height is drawn by cloning the 760 px screen.</p></noscript
+            >
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w768" data-w="768">
+            <noscript
+              ><p class="noscript">This width is drawn by cloning the 360 px screen.</p></noscript
+            >
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w1440" data-w="1440">
+            <noscript
+              ><p class="noscript">This width is drawn by cloning the 360 px screen.</p></noscript
+            >
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================== pane: builder =========================== -->
+      <section class="pane" data-pane="builder">
+        <h2 class="pane-h">The builder open — Edit pool tapped, the middle scrolls</h2>
+        <div class="frame-scroll">
+          <div class="frame w360 notch" data-w="360">
+            <div class="screen">
+              <header class="shell-h" data-el="shell-header">
+                <div class="statusline" data-el="status-line">
+                  <span class="st-item"><i class="mark s"></i>6</span>
+                  <span class="st-item"><i class="mark b"></i>4</span>
+                  <i class="st-rule"></i>
+                  <span class="st-item st-dim">25 dice</span>
+                  <span class="st-item st-dim"><span class="st-warn">stress 10</span></span>
+                  <span class="st-item st-dim">push 1</span>
+                </div>
+              </header>
+
+              <main class="shell-m" data-el="shell-mid">
+                <section class="card" data-el="pool-builder">
+                  <h2 class="card-h">
+                    The throw
+                    <button class="icon-btn" data-el="collapse-button">Done</button>
+                  </h2>
+                  <div class="poolbar" data-el="pool-bar">
+                    <div class="cell on cap-hit" data-el="pool-cell-attribute">
+                      <button class="cell-m" aria-label="one attribute die fewer">−</button>
+                      <span class="cell-t">attribute</span>
+                      <span class="cell-n">5</span>
+                      <button class="cell-p" aria-label="one attribute die more">+</button>
+                    </div>
+                    <div class="cell on cap-hit" data-el="pool-cell-skill">
+                      <button class="cell-m" aria-label="one skill die fewer">−</button>
+                      <span class="cell-t">skill</span>
+                      <span class="cell-n">5</span>
+                      <button class="cell-p" aria-label="one skill die more">+</button>
+                    </div>
+                    <div class="cell on cap-hit" data-el="pool-cell-gear">
+                      <button class="cell-m" aria-label="one gear die fewer">−</button>
+                      <span class="cell-t">gear</span>
+                      <span class="cell-n">3</span>
+                      <button class="cell-p" aria-label="one gear die more">+</button>
+                    </div>
+                    <div class="cell" data-el="pool-cell-artifact">
+                      <button class="cell-m" aria-label="one artifact die fewer">−</button>
+                      <span class="cell-t">artifact</span>
+                      <span class="cell-n zero">none</span>
+                      <button class="cell-p" aria-label="one artifact die more">+</button>
+                    </div>
+                    <div class="cell on" data-el="pool-cell-bonus">
+                      <button class="cell-m" aria-label="one bonus die fewer">−</button>
+                      <span class="cell-t">bonus</span>
+                      <span class="cell-n">2</span>
+                      <button class="cell-p" aria-label="one bonus die more">+</button>
+                    </div>
+                    <div class="cell on cap-hit" data-el="pool-cell-stress">
+                      <button class="cell-m" aria-label="one stress die fewer">−</button>
+                      <span class="cell-t">stress</span>
+                      <span class="cell-n">10</span>
+                      <button class="cell-p" aria-label="one stress die more">+</button>
+                    </div>
+                  </div>
+                  <div class="diff" data-el="difficulty">
+                    <div class="diff-top">
+                      <span class="diff-l">Difficulty</span>
+                      <span class="diff-step">
+                        <button class="icon-btn diff-b" aria-label="one step easier">−</button>
+                        <span class="diff-v">0</span>
+                        <button class="icon-btn diff-b" aria-label="one step harder">+</button>
+                      </span>
+                    </div>
+                    <div class="track" data-el="difficulty-track">
+                      <button class="tk-n" aria-label="minus three"></button>
+                      <button class="tk-n" aria-label="minus two"></button>
+                      <button class="tk-n" aria-label="minus one"></button>
+                      <button class="tk-n on centre" aria-label="zero"></button>
+                      <button class="tk-n" aria-label="plus one"></button>
+                      <button class="tk-n" aria-label="plus two"></button>
+                      <button class="tk-n" aria-label="plus three"></button>
+                    </div>
+                    <p class="diff-p">The next roll takes no dice away and adds none.</p>
+                  </div>
+                </section>
+
+                <div class="zones">
+                  <div class="shelf" data-el="kept-shelf">
+                    <p class="band-h">Kept <span>13 dice — these stay on the table</span></p>
+                    <div class="tray" data-el="dice-tray">
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>At1</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule">
+                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                        <span class="cap"><b>At3</b><em>kept</em></span>
+                      </div>
+                      <button class="slot choice" data-el="die-at4">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>At4</b><em>yours</em></span>
+                      </button>
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>Sk1</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>Sk3</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule">
+                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                        <span class="cap"><b>Sk4</b><em>kept</em></span>
+                      </div>
+                      <button class="slot choice" data-el="die-ge1">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>Ge1</b><em>yours</em></span>
+                      </button>
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>Ge2</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>Bo2</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule stress">
+                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                        <span class="cap"><b>St1</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule stress">
+                        <div class="die pips f6"><span class="badge s">1</span></div>
+                        <span class="cap"><b>St3</b><em>kept</em></span>
+                      </div>
+                      <button class="slot choice stress" data-el="die-st5">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>St5</b><em>yours</em></span>
+                      </button>
+                      <div class="slot rule stress">
+                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                        <span class="cap"><b>St7</b><em>kept</em></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="throwzone" data-el="throw-zone">
+                    <p class="band-h">In the cup <span>12 dice — the push throws these</span></p>
+                    <div class="tray">
+                      <button class="slot loose" data-el="die-at2">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>At2</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-at5">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>At5</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-sk2">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>Sk2</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-sk5">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>Sk5</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-ge3">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>Ge3</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-bo1">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>Bo1</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st2">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>St2</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st4">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>St4</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st6">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>St6</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st8">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>St8</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st9">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>St9</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st10">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>St10</b><em>back</em></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </main>
+
+              <div class="shell-f" data-el="shell-footer">
+                <div class="costrow" data-el="cost-row">
+                  <p class="cost-t">
+                    Push again — throw <b>12</b> dice. A complication check is due.
+                  </p>
+                  <button class="icon-btn" data-el="edit-pool-button">Edit pool</button>
+                </div>
+                <div class="bar">
+                  <button class="btn ghost" data-el="disclosure-toggle">More</button>
+                  <button class="btn" data-el="roll-button">
+                    Roll again<small>25 dice, difficulty 0</small>
+                  </button>
+                  <button class="btn go focused" data-el="push-button">
+                    Push<small>12 dice, stress 10</small>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w768" data-w="768">
+            <noscript
+              ><p class="noscript">This width is drawn by cloning the 360 px screen.</p></noscript
+            >
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w1440" data-w="1440">
+            <noscript
+              ><p class="noscript">This width is drawn by cloning the 360 px screen.</p></noscript
+            >
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================== pane: history =========================== -->
+      <section class="pane" data-pane="history">
+        <h2 class="pane-h">History summary — a separate destination</h2>
+        <div class="frame-scroll">
+          <div class="frame w360 notch" data-w="360">
+            <div class="screen">
+              <header class="shell-h" data-el="shell-header">
+                <div class="dest-h">
+                  <button class="icon-btn" data-el="back-button">Back</button>
+                  <h2 class="dest-t">History<small>14 rolls kept</small></h2>
+                </div>
+              </header>
+
+              <main class="shell-m" data-el="shell-mid">
+                <div class="hlist" data-el="history-list"></div>
+              </main>
+
+              <div class="shell-f" data-el="shell-footer">
+                <p class="ruleset">
+                  The roll flow is not here. Back returns to the table with the dice as they were.
+                  Choose a roll to read its record, where the export control lives.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w768" data-w="768">
+            <noscript
+              ><p class="noscript">This width is drawn by cloning the 360 px screen.</p></noscript
+            >
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w1440" data-w="1440">
+            <noscript
+              ><p class="noscript">This width is drawn by cloning the 360 px screen.</p></noscript
+            >
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================== pane: detail =========================== -->
+      <section class="pane" data-pane="detail">
+        <h2 class="pane-h">History detail — one record, the matrix transposed</h2>
+        <div class="frame-scroll">
+          <div class="frame w360 notch" data-w="360">
+            <div class="screen">
+              <header class="shell-h" data-el="shell-header">
+                <div class="dest-h">
+                  <button class="icon-btn" data-el="back-button">Back</button>
+                  <h2 class="dest-t">
+                    Yesterday 21:07<small>pool, stress dice and complications</small>
+                  </h2>
+                </div>
+              </header>
+
+              <main class="shell-m" data-el="shell-mid">
+                <div class="stats" data-el="detail-stats">
+                  <div class="stat"><b>9</b><span>successes</span></div>
+                  <div class="stat"><b>6</b><span>banes</span></div>
+                  <div class="stat"><b>25</b><span>dice</span></div>
+                  <div class="stat"><b>2</b><span>pushes</span></div>
+                  <div class="stat"><b>15</b><span>pool dice</span></div>
+                  <div class="stat"><b>10</b><span>stress dice</span></div>
+                  <div class="stat"><b>0</b><span>difficulty</span></div>
+                  <div class="stat"><b>55</b><span>dice thrown</span></div>
+                  <div class="stat"><b>3</b><span>kept by you</span></div>
+                  <div class="stat"><b>1</b><span>complication</span></div>
+                </div>
+
+                <p class="band-h">
+                  Every die <span>one row per die, one column per generation</span>
+                </p>
+                <div class="matrix" data-el="die-matrix"></div>
+                <p class="diff-p">
+                  A dot means the die was locked already and did not throw again.
+                </p>
+              </main>
+
+              <div class="shell-f" data-el="shell-footer">
+                <div class="bar one">
+                  <button class="btn" data-el="export-button">Export this roll as CSV</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w768" data-w="768">
+            <noscript
+              ><p class="noscript">This width is drawn by cloning the 360 px screen.</p></noscript
+            >
+          </div>
+        </div>
+        <div class="frame-scroll">
+          <div class="frame w1440" data-w="1440">
+            <noscript
+              ><p class="noscript">This width is drawn by cloning the 360 px screen.</p></noscript
+            >
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      // ---------------------------------------------------------------
+      // The log. Eight rows for the summary, one of them opened in the
+      // detail pane. Nothing here is a rule, it is drawn data only.
+      // ---------------------------------------------------------------
+      const LOG = [
+        { when: 'Today 21:41', dice: 25, s: 6, b: 4, push: 1, open: false },
+        { when: 'Today 21:22', dice: 12, s: 3, b: 1, push: 0, open: false },
+        { when: 'Today 20:58', dice: 8, s: 1, b: 2, push: 2, open: false },
+        { when: 'Today 20:14', dice: 16, s: 4, b: 0, push: 1, open: false },
+        { when: 'Yesterday 21:07', dice: 25, s: 9, b: 6, push: 2, open: true },
+        { when: 'Yesterday 20:35', dice: 6, s: 0, b: 1, push: 0, open: false },
+        { when: 'Yesterday 20:02', dice: 14, s: 5, b: 3, push: 1, open: false },
+        { when: '4 August 22:19', dice: 10, s: 2, b: 2, push: 1, open: false },
+      ];
+
+      // One row per die. The faces a die showed, generation by generation. A die
+      // stops when it locks, so a short list means an early lock.
+      const DICE = [
+        ['At1', [6], 'rule'],
+        ['At2', [3, 4, 6], 'rule'],
+        ['At3', [1], 'rule'],
+        ['At4', [2, 5], 'choice'],
+        ['At5', [4, 3, 2], 'loose'],
+        ['Sk1', [6], 'rule'],
+        ['Sk2', [2, 6], 'rule'],
+        ['Sk3', [5, 4, 6], 'rule'],
+        ['Sk4', [1], 'rule'],
+        ['Sk5', [3, 2, 4], 'loose'],
+        ['Ge1', [5, 5], 'choice'],
+        ['Ge2', [4, 6], 'rule'],
+        ['Ge3', [2, 3, 3], 'loose'],
+        ['Bo1', [3, 4, 1], 'rule'],
+        ['Bo2', [6], 'rule'],
+        ['St1', [1], 'rule'],
+        ['St2', [4, 2, 5], 'loose'],
+        ['St3', [2, 6], 'rule'],
+        ['St4', [3, 3, 4], 'loose'],
+        ['St5', [5, 5, 5], 'choice'],
+        ['St6', [2, 4, 2], 'loose'],
+        ['St7', [1], 'rule'],
+        ['St8', [4, 1], 'rule'],
+        ['St9', [3, 4, 3], 'loose'],
+        ['St10', [2, 2, 6], 'rule'],
+      ];
+
+      const GENERATIONS = ['Throw', 'Push 1', 'Push 2'];
+
+      function drawHistory(list) {
+        list.innerHTML = '';
+        for (const row of LOG) {
+          const el = document.createElement('button');
+          el.className = 'hrow' + (row.open ? ' is-on' : '');
+          el.innerHTML =
+            `<span class="h-when">${row.when}</span>` +
+            `<span class="h-pool">${row.dice} dice</span>` +
+            `<span class="h-res"><span><i class="mark s"></i>${row.s}</span>` +
+            `<span><i class="mark b"></i>${row.b}</span></span>` +
+            `<span class="h-push">${row.push === 0 ? 'no push' : 'pushed ' + row.push + '×'}</span>`;
+          list.appendChild(el);
+        }
+      }
+
+      function drawMatrix(box) {
+        box.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'mrow';
+        head.innerHTML =
+          '<span class="mlab">Die</span>' +
+          GENERATIONS.map((g) => `<span class="mcell">${g}</span>`).join('');
+        box.appendChild(head);
+
+        for (const [label, faces, lock] of DICE) {
+          const row = document.createElement('div');
+          row.className = 'mrow';
+          const stress = label.startsWith('St') ? ' stress' : '';
+          let html = `<span class="mlab">${label}</span>`;
+          for (let g = 0; g < GENERATIONS.length; g += 1) {
+            if (g >= faces.length) {
+              html += '<span class="mcell rest">·</span>';
+              continue;
+            }
+            const last = g === faces.length - 1;
+            const face = faces[g];
+            let extra = '';
+            if (last && lock === 'rule') {
+              if (face === 6) extra = '<i class="mark s"></i>';
+              if (face === 1) extra = '<i class="mark b"></i>';
+            }
+            if (last && lock === 'choice') extra = '<span>kept</span>';
+            html += `<span class="mcell${stress}"><span class="die pips f${face}"></span>${extra}</span>`;
+          }
+          row.innerHTML = html;
+          box.appendChild(row);
+        }
+      }
+
+      for (const list of document.querySelectorAll('[data-el="history-list"]')) drawHistory(list);
+      for (const box of document.querySelectorAll('[data-el="die-matrix"]')) drawMatrix(box);
+
+      // Every other frame is the same screen at another size, so it is a clone.
+      for (const pane of document.querySelectorAll('.pane')) {
+        const source = pane.querySelector('[data-w="360"] .screen');
+        for (const frame of pane.querySelectorAll('.frame')) {
+          if (frame.dataset.w === '360') continue;
+          frame.appendChild(source.cloneNode(true));
+        }
+      }
+
+      // A hash of #360, #768 or #1440 draws that size alone, with no chrome.
+      // A hash of #roll-360 draws one pane at one size, which is what a
+      // screenshot needs. A solo frame takes the height of the window, so the
+      // same hash serves both phone heights.
+      const hash = location.hash.slice(1);
+      if (hash) {
+        document.body.classList.add('solo');
+        const parts = hash.split('-');
+        const width = parts.pop();
+        const pane = parts.join('-');
+        for (const section of document.querySelectorAll('.pane')) {
+          if (pane && section.dataset.pane !== pane) {
+            section.hidden = true;
+            continue;
+          }
+          for (const scroller of section.querySelectorAll('.frame-scroll')) {
+            if (!scroller.querySelector(`[data-w="${width}"]`)) scroller.hidden = true;
+          }
+        }
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    // vite.config.ts reads dist/ from the build host, so it needs the Node
+    // declarations. Naming them here keeps the global scope to what this
+    // repository asked for, rather than to whatever @types a dependency drags
+    // in. The major tracks the Node that runs the build.
+    "types": ["node"]
+  },
+  "include": ["src", "vite.config.ts"],
+  // src/tray/vendor holds a copy of a third-party library. It is not ours to
+  // type, so it is not a root file here, and skipLibCheck leaves its
+  // declarations unchecked. It stays inside the branding gate and the
+  // bundle-size gate, which are the checks it can fail.
+  "exclude": ["src/tray/vendor"]
+}

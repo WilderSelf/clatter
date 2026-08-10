@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The branding gate reads commit messages, so it needs the history.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # The gate scans the repository description and topics from a file.
+      # gh is installed on the runner and GITHUB_TOKEN authenticates it.
+      - name: Read the repository metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${{ github.repository }}" > "${RUNNER_TEMP}/repo-metadata.json"
+
+      # Runs after the build, so dist/ is scanned as well as the tracked tree.
+      # check-branding-count.sh wraps the gate and fails when the gate scanned
+      # fewer files than git ls-files plus find dist -type f.
+      #
+      # CLATTER_BRANDING_SKIP_EXT is a test-only variable that makes the gate
+      # under-report. It must never be set here. Setting it would blind the
+      # file-count denominator.
+      - name: Branding gate over four surfaces
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          META: ${{ runner.temp }}/repo-metadata.json
+        run: |
+          set -eu
+          if [ -n "${BASE_SHA}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            # A pull request scans the commits of the branch, not the whole history.
+            sh scripts/check-branding-count.sh --base "${BASE_SHA}" --metadata-file "${META}"
+          else
+            # A push has no pull-request base. The commits surface needs a range,
+            # and the first push holds one commit with no parent, so the message
+            # of HEAD is scanned as a file instead.
+            git show -s --format=%B HEAD > "${RUNNER_TEMP}/head-message.txt"
+            sh scripts/check-branding-count.sh \
+              --surface tracked,dist,metadata \
+              --metadata-file "${META}" \
+              --file "${RUNNER_TEMP}/head-message.txt"
+          fi
+
+      - name: Bundle size against budgets.json
+        run: node scripts/check-bundle-size.mjs
+
+      # The steps-to-rest gate. It runs the tray physics on the CPU with no
+      # renderer, so it cannot flake on a GPU or on a shared runner. It stays
+      # out of the validate list, because a validation attempt is capped and a
+      # perf run must never spend one.
+      #
+      # --slow is a test-only flag that shrinks the timestep and makes the same
+      # throw take more steps. It must never be set here. Setting it would turn
+      # the gate red for a reason nobody changed.
+      - name: Steps to rest against budgets.json
+        run: npm run perf

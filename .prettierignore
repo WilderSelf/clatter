@@ -1,0 +1,5 @@
+node_modules/
+dist/
+src/tray/vendor/
+scripts/forbidden-hashes.json
+*.md

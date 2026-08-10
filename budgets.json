@@ -1,0 +1,12 @@
+{
+  "initial_js_gzip_bytes": 61440,
+  "lazy_3d_chunk_gzip_bytes": 204800,
+  "steps_to_rest_fixed_seed_scene": 224,
+  "steps_to_rest_scene_sha256": "0e60e573bdab61c3f6b7bd28536eb208ac3f06641338b662527053e6bb3bda81",
+  "render_counters_after_one_frame_twelve_die_scene": {
+    "draw_calls": 968,
+    "triangles": 969,
+    "textures": 89
+  },
+  "notes": "Every budget is a byte count or a plain count. A byte budget states its unit in the key name (gzip bytes). A null budget is not yet measured. A check that reads a null budget must fail loudly, not skip. Do not invent a number for a null budget. steps_to_rest_fixed_seed_scene is recorded at Unit 3.8, which states the measurement it holds 10 per cent over. steps_to_rest_scene_sha256 is not a budget. It fingerprints the scene that step count was measured against, and scripts/perf.mjs fails by name when the two disagree, because a bound recorded against one scene says nothing about another. render_counters_after_one_frame_twelve_die_scene is recorded at Unit 3.2."
+}
