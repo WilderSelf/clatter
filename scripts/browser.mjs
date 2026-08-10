@@ -5406,10 +5406,15 @@ async function runOffline(page, options, checks, server) {
   let trayStatus;
   try {
     await page.click('[data-el="roll-button"]');
+    // Three ends, because Unit 3.7 gave the table a third. The tray mounts, or
+    // the mount fails and the table says so, or the renderer choice settles on
+    // flat dice and the table is never asked for at all. Without the third the
+    // wait ran to its own timeout on every machine with no WebGL context.
     await page.waitForFunction(
       () =>
         document.querySelector('canvas') !== null ||
-        document.querySelector('[data-el="dice-table"] .table-note') !== null,
+        document.querySelector('[data-el="dice-table"] .table-note') !== null ||
+        document.querySelector('.screen[data-renderer="flat"]') !== null,
       { timeout: 60000 },
     );
   } catch {
@@ -5449,16 +5454,51 @@ async function runOffline(page, options, checks, server) {
     (line) => chunkUrl !== null && line.startsWith(`${chunkUrl} `),
   );
 
+  // The bytes themselves, asked for by the page with the origin stopped.
+  //
+  // Unit 3.7 moved this reading. The check used to count the requests the
+  // application itself made through the table, and the application now asks for
+  // the chunk only where `decideTray` clears the bar. A browser with no WebGL
+  // context never asks, so the old reading measured the graphics card and
+  // called it a precache failure — which is the exact fault the mount check
+  // beside it was split out to avoid. This asks for the chunk directly, so the
+  // claim is about the service worker alone and holds on every machine. The
+  // application's own request count is reported beside it.
+  const answered = await page.evaluate(async (chunk) => {
+    if (chunk === null) return { ok: false, reason: 'the precache names no 3D chunk' };
+    try {
+      const response = await fetch(chunk);
+      const body = await response.arrayBuffer();
+      return { ok: response.ok, status: response.status, bytes: body.byteLength };
+    } catch (error) {
+      return { ok: false, reason: String(error) };
+    }
+  }, chunkUrl);
+  const renderer = await page
+    .evaluate(() => document.querySelector('.screen')?.dataset.renderer ?? null)
+    .catch(() => null);
+  console.log(
+    `browser: offline chunk=${chunkUrl} status=${answered.status ?? answered.reason} ` +
+      `bytes=${answered.bytes ?? 0} app_requests=${tray.fetched} renderer=${renderer}`,
+  );
+
   checks.push({
     name: 'offline.the-lazy-3d-chunk-is-precached',
-    ok: chunkUrl !== null && tray.fetched > 0 && chunkFailures.length === 0,
+    ok:
+      chunkUrl !== null &&
+      answered.ok === true &&
+      (answered.bytes ?? 0) > 0 &&
+      chunkFailures.length === 0,
     detail:
-      `the tray button asked for the lazy 3D chunk with the origin stopped, and the ` +
-      `precache answered. The chunk is ${JSON.stringify(chunkUrl)}, the page holds ` +
-      `${tray.fetched} resource timing entries naming it, and ${chunkFailures.length} of its ` +
-      `requests failed. Both numbers are needed: a chunk nobody asked for fails no request ` +
-      `either. This is the precache decision of this unit, so a player who visited once ` +
-      `keeps the dice.` +
+      `the page asked for the lazy 3D chunk with the origin stopped, and the precache ` +
+      `answered with bytes. The chunk is ${JSON.stringify(chunkUrl)}, the answer read ` +
+      `status ${answered.status ?? JSON.stringify(answered.reason)} over ` +
+      `${answered.bytes ?? 0} bytes, and ${chunkFailures.length} of its requests failed. All ` +
+      `three are needed: a request nobody made fails nothing either, and an answer of zero ` +
+      `bytes is not the chunk. This is the precache decision of this unit, so a player who ` +
+      `visited once keeps the dice. The application itself asked for it ${tray.fetched} ` +
+      `times, which is reported and not judged: it asks only where the renderer choice of ` +
+      `Unit 3.7 clears the bar, and this run reads renderer=${renderer}.` +
       (chunkFailures.length ? ` [${chunkFailures.join('; ')}]` : ''),
   });
 
@@ -5468,8 +5508,8 @@ async function runOffline(page, options, checks, server) {
     ok: trayStatus === OFFLINE_TRAY_READY && tray.canvases > 0,
     detail: tray.webgl
       ? `the tray mounted from the precached chunk with the origin stopped. The status line ` +
-        `reads ${JSON.stringify(trayStatus)} and the page holds ${tray.canvases} canvas ` +
-        `elements.`
+        `reads ${JSON.stringify(trayStatus)}, the page holds ${tray.canvases} canvas ` +
+        `elements, and the renderer choice of Unit 3.7 reads ${renderer}.`
       : `NOT JUDGED, and nothing here says the tray mounts. This browser gives no WebGL ` +
         `context, so the tray cannot mount whatever the precache holds, and it fails the ` +
         `same way with the network up: measured on this host on 2026-08-09. The status line ` +
@@ -5981,6 +6021,531 @@ async function runShell(page, options, checks) {
 }
 
 // ---------------------------------------------------------------------------
+// The blocked chunk — Unit 3.7
+//
+// The plan's acceptance for this unit: with the 3D chunk blocked at the network
+// layer, every rule and every affordance still works.
+//
+// The run has to prove the chunk did not arrive, and the proof cannot be the
+// absence of an error. Two stores can answer a blocked request and both are
+// closed here by measurement rather than by assumption:
+//
+//   * **The precache.** Unit 5.1 puts the lazy 3D chunk in Cache Storage, and a
+//     service worker answers a request the network refused. Firefox also
+//     refuses `request.abort()` once the worker owns the request, so an abort
+//     with a `.catch` on it hides the refusal. The worker is unregistered, the
+//     caches are deleted, both readings are taken before and after, and every
+//     refused abort is counted rather than swallowed.
+//   * **The HTTP cache.** It goes into bypass at the driver.
+//
+// The second half of the run is the acceptance itself: the flat dice draw the
+// throw, the keyboard walks the thirty-five visits of section 6, the push keeps
+// the kept dice, every die answers a press, and every throw shakes.
+// ---------------------------------------------------------------------------
+
+/** The lazy 3D chunk, by the name the build gives it. */
+const TRAY_CHUNK = /\/dice-tray-[^/]+\.js$/;
+
+/**
+ * The service worker and its registration script.
+ *
+ * They are blocked with the chunk, because a worker that installs during the
+ * run precaches the chunk again and answers for it. Blocking them is what makes
+ * "no store can answer" a measurement instead of a hope.
+ */
+const WORKER_FILES = /\/(sw\.js|registerSW\.js|workbox-[0-9a-f]+\.js)$/;
+
+/** How the shake is drawn. `src/shell.css` names both animations. */
+const SHAKE_ANIMATIONS = /^die-shake/;
+
+async function readTrayNames(page) {
+  return page.evaluate(() => {
+    const slots = (name) =>
+      [...document.querySelectorAll(`[data-el="${name}"] .slot`)].map((slot) => slot.dataset.el);
+    const screen = document.querySelector('.screen');
+    return {
+      tray: slots('dice-tray'),
+      kept: slots('kept-shelf'),
+      loose: slots('throw-zone'),
+      renderer: screen ? screen.dataset.renderer : null,
+      faces: Object.fromEntries(
+        [...document.querySelectorAll('[data-el^="die-"]')].map((slot) => [
+          slot.dataset.el,
+          /shows (\d+)\./.exec(slot.getAttribute('aria-label') || '')?.[1] ?? null,
+        ]),
+      ),
+      pressed: Object.fromEntries(
+        [...document.querySelectorAll('[data-el^="die-"]')].map((slot) => [
+          slot.dataset.el,
+          slot.getAttribute('aria-pressed'),
+        ]),
+      ),
+      spoken: (
+        document.querySelector('[data-el="status-line"] .sr-only')?.textContent ?? ''
+      ).trim(),
+      cost: (document.querySelector('[data-el="cost-row"] .cost-t')?.textContent ?? '').trim(),
+      pushDisabled: document.querySelector('[data-el="push-button"]')?.disabled ?? null,
+    };
+  });
+}
+
+async function runBlockedChunk(page, options, checks, server) {
+  // ---- 1. Let the worker install, then take every store away. ----
+  const cleared = await withTimeout(
+    page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) {
+        return { ready: false, reason: 'this browser has no navigator.serviceWorker' };
+      }
+      await navigator.serviceWorker.ready;
+      const held = await navigator.serviceWorker.getRegistrations();
+      const names = await caches.keys();
+      const before = {
+        registrations: held.length,
+        caches: names.length,
+        entries: (
+          await Promise.all(
+            names.map(async (name) => (await (await caches.open(name)).keys()).length),
+          )
+        ).reduce((total, each) => total + each, 0),
+      };
+      for (const registration of held) await registration.unregister();
+      for (const name of names) await caches.delete(name);
+      try {
+        localStorage.clear();
+      } catch {
+        // A browser that refuses storage refuses the read as well, and the
+        // application answers the defaults there.
+      }
+      return {
+        ready: true,
+        before,
+        registrations: (await navigator.serviceWorker.getRegistrations()).length,
+        caches: (await caches.keys()).length,
+      };
+    }),
+    30000,
+    'no service worker took control of the page within 30 seconds, so this run could not ' +
+      'prove it had removed one. --blocked-chunk needs a preview server over the built output.',
+  );
+  if (cleared.timedOut || !cleared.ready) {
+    checks.push({
+      name: 'blocked-chunk.no-store-can-answer-the-chunk',
+      ok: false,
+      detail: cleared.timedOut ?? cleared.reason,
+    });
+    return;
+  }
+  console.log(
+    `browser: blocked-chunk before registrations=${cleared.before.registrations} ` +
+      `caches=${cleared.before.caches} entries=${cleared.before.entries} ` +
+      `after registrations=${cleared.registrations} caches=${cleared.caches}`,
+  );
+
+  // ---- 2. Refuse the chunk at the network layer, and count every refusal. ----
+  await page.setCacheEnabled(false);
+  await page.setRequestInterception(true);
+  const asked = [];
+  const abortRefusals = [];
+  const failedRequests = [];
+  page.on('request', (request) => {
+    const url = request.url();
+    if (TRAY_CHUNK.test(url) || WORKER_FILES.test(url)) {
+      asked.push(url);
+      request.abort().catch(() => abortRefusals.push(url));
+      return;
+    }
+    request.continue().catch(() => {
+      // A request the driver could not resume is reported by `requestfailed`.
+    });
+  });
+  page.on('requestfailed', (request) => {
+    const failure = request.failure();
+    failedRequests.push(`${request.url()} ${failure ? failure.errorText : 'failed'}`);
+  });
+
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(
+    () => (document.querySelector('.screen')?.dataset.trayDecision ?? 'pending') !== 'pending',
+    { timeout: 30000 },
+  );
+  const decision = await page.evaluate(
+    () => document.querySelector('.screen')?.dataset.trayDecision ?? null,
+  );
+
+  // ---- 3. Ask for the table, which is what asks for the chunk. ----
+  //
+  // `Done` collapses the builder and shows the table. The screen imports the
+  // chunk there, and only where `decideTray` cleared the bar.
+  try {
+    await page.click('[data-el="collapse-button"]');
+    await page.waitForFunction(
+      () => document.querySelector('.screen[data-renderer="flat"]') !== null,
+      { timeout: 30000 },
+    );
+  } catch {
+    // The readings below report what happened either way.
+  }
+  const fell = await page.evaluate(() => {
+    const note = document.querySelector('[data-el="flat-fallback-note"]');
+    const entries = performance
+      .getEntriesByType('resource')
+      .filter((entry) => /\/dice-tray-[^/]+\.js$/.test(entry.name));
+    return {
+      renderer: document.querySelector('.screen')?.dataset.renderer ?? null,
+      canvases: document.querySelectorAll('canvas').length,
+      notices: document.querySelectorAll('[data-el="flat-fallback-note"]').length,
+      notice: (note?.textContent ?? '').trim(),
+      role: note?.getAttribute('role') ?? null,
+      stored: localStorage.getItem('clatter.settings'),
+      controller: navigator.serviceWorker.controller
+        ? navigator.serviceWorker.controller.scriptURL
+        : null,
+      chunkEntries: entries.length,
+      chunkBytes: entries.reduce((total, entry) => total + (entry.encodedBodySize || 0), 0),
+    };
+  });
+  const cachesLeft = await page.evaluate(async () => (await caches.keys()).length);
+  const chunkAsked = asked.filter((url) => TRAY_CHUNK.test(url));
+  const chunkAbortRefusals = abortRefusals.filter((url) => TRAY_CHUNK.test(url));
+  const storedFall = (() => {
+    try {
+      return fell.stored === null ? null : JSON.parse(fell.stored).flatFallback;
+    } catch {
+      return 'unreadable';
+    }
+  })();
+  console.log(
+    `browser: blocked-chunk decision=${decision} renderer=${fell.renderer} ` +
+      `canvases=${fell.canvases} chunk_requests=${chunkAsked.length} ` +
+      `refused_aborts=${abortRefusals.length} chunk_entries=${fell.chunkEntries} ` +
+      `chunk_bytes=${fell.chunkBytes} caches=${cachesLeft} controller=${fell.controller} ` +
+      `stored_flat_fallback=${storedFall} notice=${JSON.stringify(fell.notice)}`,
+  );
+
+  checks.push({
+    name: 'blocked-chunk.no-store-can-answer-the-chunk',
+    ok:
+      cleared.before.caches > 0 &&
+      cleared.before.entries > 0 &&
+      cleared.registrations === 0 &&
+      cleared.caches === 0 &&
+      cachesLeft === 0 &&
+      fell.controller === null &&
+      abortRefusals.length === 0,
+    detail:
+      `the first visit installed ${cleared.before.registrations} worker over ` +
+      `${cleared.before.caches} caches holding ${cleared.before.entries} entries, and this run ` +
+      `removed both: ${cleared.registrations} registrations and ${cleared.caches} caches were ` +
+      `left, ${cachesLeft} caches remain after the reload, and the page reports a controller ` +
+      `of ${fell.controller}. ${abortRefusals.length} aborts were refused by the browser. ` +
+      `Every number is needed. A precache that was never built proves nothing, and Firefox ` +
+      `refuses an abort once a worker owns the request, so a refused abort is a request some ` +
+      `other store could still have answered.` +
+      (abortRefusals.length ? ` [${abortRefusals.join('; ')}]` : ''),
+  });
+
+  checks.push({
+    name: 'blocked-chunk.the-chunk-was-refused',
+    skipped: decision !== 'true',
+    ok: chunkAsked.length > 0 && chunkAbortRefusals.length === 0 && fell.chunkBytes === 0,
+    detail:
+      decision === 'true'
+        ? `the screen decided the table could run, asked for the lazy 3D chunk ` +
+          `${chunkAsked.length} times, and every request was refused at the network layer. ` +
+          `${chunkAbortRefusals.length} of those aborts were refused by the browser, and the ` +
+          `page holds ${fell.chunkEntries} resource timing entries naming the chunk, carrying ` +
+          `${fell.chunkBytes} encoded bytes between them. A request count above zero is the ` +
+          `positive reading: it proves this run exercised the fall rather than a screen that ` +
+          `never asked.`
+        : `NOT JUDGED. The startup probe answered ${decision}, so the screen drew flat dice ` +
+          `from the first paint and never asked for the chunk at all. There is no refusal to ` +
+          `read on this machine, and nothing here says the block works. The sandbox hides ` +
+          `/dev/dri and Firefox then reports no WebGL context, so run this outside the ` +
+          `sandbox to judge it.`,
+  });
+
+  checks.push({
+    name: 'blocked-chunk.the-tray-did-not-mount',
+    ok: fell.canvases === 0 && fell.renderer === 'flat',
+    detail:
+      `the table holds ${fell.canvases} canvas elements and the screen reads ` +
+      `renderer=${fell.renderer}, with the startup probe reading ${decision}. A canvas is ` +
+      `what the tray mounts into, so zero canvases and a flat renderer are the two ` +
+      `directions of the same claim.`,
+  });
+
+  checks.push({
+    name: 'blocked-chunk.the-fall-is-recorded-and-said-once',
+    ok:
+      fell.notices === 1 && fell.notice.length > 0 && fell.role === 'status' && storedFall === true,
+    detail:
+      `the screen holds ${fell.notices} notice elements, the one it holds reads ` +
+      `${JSON.stringify(fell.notice)} with role=${JSON.stringify(fell.role)}, and the stored ` +
+      `settings record reads flatFallback=${storedFall}. The fall is permanent, so it is in ` +
+      `the record, and the notice carries a role a reader treats as a live region.`,
+  });
+
+  // ---- 4. The acceptance: every rule and every affordance, on flat dice. ----
+  const design = readFileSync(join(here, '..', 'docs', 'design', '0002-screen-design.md'), 'utf8');
+  const after = beforeThrowVisits(design, 'After');
+  const dieNames = after.names.filter((name) => name.startsWith('die-'));
+
+  await page.click('[data-el="edit-pool-button"]');
+  const built = await page.evaluate(
+    async (plan) => {
+      let clicks = 0;
+      for (const [type, count] of plan.tiles) {
+        const end = document.querySelector(`[data-el="pool-cell-${type}"] .cell-p`);
+        if (end === null) continue;
+        for (let taken = 0; taken < count; taken += 1) {
+          end.click();
+          clicks += 1;
+        }
+      }
+      const notch = document.querySelectorAll('[data-el="difficulty-track"] .tk-n')[plan.notch];
+      if (notch !== undefined) {
+        notch.click();
+        clicks += 1;
+      }
+      await new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+      return clicks;
+    },
+    { tiles: SHELL_DRAWN_POOL, notch: SHELL_DRAWN_DIFFICULTY },
+  );
+
+  // The push blocker is a field of the profile: a stress die showing a bane
+  // stops every further push, and ten stress dice show one about five throws in
+  // six. The walk needs a live push, because a dead button holds no tab stop
+  // and the section 6 list holds one.
+  const thrown = await page.evaluate(async (limit) => {
+    const frame = () =>
+      new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+    const pushButton = () => document.querySelector('[data-el="push-button"]');
+    let taken = 0;
+    do {
+      document.querySelector('[data-el="roll-button"]').click();
+      await frame();
+      taken += 1;
+    } while (taken < limit && pushButton() !== null && pushButton().disabled);
+    return taken;
+  }, 40);
+  const table = await readTrayNames(page);
+  console.log(
+    `browser: blocked-chunk built_clicks=${built} throws=${thrown} dice=${table.tray.length} ` +
+      `kept=${table.kept.length} loose=${table.loose.length} ` +
+      `push_disabled=${table.pushDisabled} cost=${JSON.stringify(table.cost)}`,
+  );
+
+  checks.push({
+    name: 'blocked-chunk.the-flat-dice-drew-the-throw',
+    ok:
+      table.renderer === 'flat' &&
+      table.tray.length === dieNames.length &&
+      table.kept.length + table.loose.length === dieNames.length &&
+      String(table.tray) === String([...table.kept, ...table.loose]) &&
+      String([...table.tray].sort()) === String([...dieNames].sort()) &&
+      table.spoken.includes(`The table holds ${dieNames.length} dice`) &&
+      table.pushDisabled === false,
+    detail:
+      `with the chunk blocked, the throw put ${table.tray.length} dice on the table against ` +
+      `the ${dieNames.length} section 6 names, ${table.kept.length} on the shelf and ` +
+      `${table.loose.length} in the zone. The shelf comes first, the names are the same set ` +
+      `as the document's, the live region reads ${JSON.stringify(table.spoken)}, and the push ` +
+      `button is live after ${thrown} throws.`,
+  });
+
+  // The keyboard order, walked with real keys. The starting point goes back to
+  // the top first: it stays where the last focused element was, and the throw
+  // above left it on the roll button.
+  await page.evaluate(() => {
+    const head = document.querySelector('[data-el="shell-header"]');
+    head.setAttribute('tabindex', '-1');
+    head.focus();
+    head.removeAttribute('tabindex');
+  });
+  const walked = await walkShell(page, after.stated + 8);
+  const namedVisits = walked.filter((visit) => !visit.implicit);
+  const walkNames = namedVisits.map((visit) => visit.name);
+  const implicit = walked.filter((visit) => visit.implicit).map((visit) => visit.name);
+  const positions = (by) =>
+    namedVisits.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
+  const wanted = [after.names[0], ...table.tray, ...after.names.slice(after.names.length - 4)];
+  console.log(`browser: blocked-chunk walked=[${walkNames.join(', ')}]`);
+  checks.push({
+    name: 'blocked-chunk.the-keyboard-order-after-the-throw',
+    ok:
+      walkNames.length === after.stated &&
+      walkNames.every((name, index) => name === wanted[index]) &&
+      String(positions('tab')) === String(after.tab) &&
+      String(positions('arrow')) === String(after.arrow),
+    detail:
+      `real Tab and arrow presses reached ${walkNames.length} authored visits against the ` +
+      `${after.stated} section 6 names, with the 3D chunk blocked. Walked ` +
+      `[${walkNames.join(', ')}]. Wanted [${wanted.join(', ')}]. Tab reached ` +
+      `[${positions('tab')}] against [${after.tab}] and the arrows reached ` +
+      `[${positions('arrow')}] against [${after.arrow}]. The browser added ${implicit.length} ` +
+      `scroll stops of its own, reported and not counted.`,
+  });
+
+  // The push. The kept dice keep their faces and the loose dice come back
+  // changed, which is the rule this application exists for.
+  const beforePush = table;
+  await page.click('[data-el="push-button"]');
+  await page.evaluate(
+    () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+  );
+  const afterPush = await readTrayNames(page);
+  const keptSame = beforePush.kept.filter(
+    (name) =>
+      afterPush.faces[name] !== undefined && afterPush.faces[name] === beforePush.faces[name],
+  );
+  const looseMoved = beforePush.loose.filter(
+    (name) =>
+      afterPush.faces[name] !== undefined && afterPush.faces[name] !== beforePush.faces[name],
+  );
+  console.log(
+    `browser: blocked-chunk push kept=${beforePush.kept.length} kept_same=${keptSame.length} ` +
+      `loose=${beforePush.loose.length} loose_moved=${looseMoved.length} ` +
+      `dice_after=${afterPush.tray.length}`,
+  );
+  checks.push({
+    name: 'blocked-chunk.the-push-keeps-the-kept-dice',
+    ok:
+      beforePush.kept.length > 0 &&
+      keptSame.length === beforePush.kept.length &&
+      looseMoved.length > 0 &&
+      afterPush.tray.length >= beforePush.tray.length,
+    detail:
+      `the push re-threw the loose dice alone. ${keptSame.length} of the ` +
+      `${beforePush.kept.length} kept dice hold the face they held, and ${looseMoved.length} ` +
+      `of the ${beforePush.loose.length} loose dice came back with another one. The kept ` +
+      `count is the denominator and it has a floor above zero, so a table with nothing kept ` +
+      `cannot pass. The table now holds ${afterPush.tray.length} dice, because this profile ` +
+      `adds one stress die before every re-throw.`,
+  });
+
+  // The shake, on a re-throw. Unit 2.3 reported that a die which stayed in its
+  // zone kept its element and never played the animation again. The instrument
+  // is the browser's own animation event, and the first re-throw proves the
+  // instrument responds at all before the second one is judged.
+  const shakes = [];
+  for (const round of [1, 2]) {
+    const measured = await page.evaluate(async () => {
+      const seen = [];
+      const listener = (event) => {
+        const slot = event.target.closest('[data-el^="die-"]');
+        if (slot) seen.push(`${event.animationName} ${slot.dataset.el}`);
+      };
+      document.addEventListener('animationstart', listener, true);
+      document.querySelector('[data-el="roll-button"]').click();
+      await new Promise((settle) => setTimeout(settle, 400));
+      document.removeEventListener('animationstart', listener, true);
+      return {
+        seen,
+        dice: [...document.querySelectorAll('[data-el^="die-"]')].map((slot) => slot.dataset.el),
+      };
+    });
+    const shaken = new Set(
+      measured.seen
+        .filter((line) => SHAKE_ANIMATIONS.test(line.split(' ')[0]))
+        .map((line) => line.split(' ')[1]),
+    );
+    shakes.push({ round, shaken, dice: measured.dice });
+    console.log(
+      `browser: blocked-chunk re-throw ${round} shook ${shaken.size} of ${measured.dice.length} dice`,
+    );
+  }
+  const [first, second] = shakes;
+  const missed = second.dice.filter((name) => !second.shaken.has(name));
+  checks.push({
+    name: 'blocked-chunk.every-re-throw-shakes-every-die',
+    skipped: first.shaken.size === 0,
+    ok: second.shaken.size === second.dice.length && missed.length === 0,
+    detail:
+      first.shaken.size === 0
+        ? `NOT JUDGED. The first re-throw shook 0 of ${first.dice.length} dice, so this ` +
+          `browser plays no CSS animation at all and the instrument cannot answer. A reduced ` +
+          `motion setting turns the shake into a cut, which is what the application must do, ` +
+          `and it reads the same way here.`
+        : `the first re-throw shook ${first.shaken.size} of ${first.dice.length} dice, which ` +
+          `proves the instrument answers, and the second shook ${second.shaken.size} of ` +
+          `${second.dice.length}. The denominator is every die on the table, because a ` +
+          `re-throw is a fresh roll of the whole pool. A die that stays in the zone it was ` +
+          `already in is the case Unit 2.3 reported, and it is only visible in a count over ` +
+          `the whole table.` +
+          (missed.length ? ` These dice never shook: [${missed.join(', ')}]` : ''),
+  });
+
+  // Every die answers a press, or refuses it because the rules hold it. The
+  // denominator is the pool, and the two counts sum to it.
+  const pressed = await page.evaluate(async () => {
+    const names = [...document.querySelectorAll('[data-el^="die-"]')].map(
+      (slot) => slot.dataset.el,
+    );
+    const frame = () =>
+      new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+    let toggled = 0;
+    let refused = 0;
+    const wrong = [];
+    for (const name of names) {
+      const slot = document.querySelector(`[data-el="${name}"]`);
+      if (slot === null) {
+        wrong.push(`${name} left the table`);
+        continue;
+      }
+      const before = slot.getAttribute('aria-pressed');
+      const role = slot.getAttribute('role');
+      slot.click();
+      await frame();
+      const now = document.querySelector(`[data-el="${name}"]`);
+      const answer = now === null ? null : now.getAttribute('aria-pressed');
+      if (role === 'img') {
+        if (before !== null || answer !== null)
+          wrong.push(`${name} is held by the rules but carries aria-pressed`);
+        refused += 1;
+        continue;
+      }
+      if (answer === before) {
+        wrong.push(`${name} did not answer the press: aria-pressed stayed ${answer}`);
+        continue;
+      }
+      toggled += 1;
+      // Put it back, so the sweep leaves the table as it found it.
+      document.querySelector(`[data-el="${name}"]`)?.click();
+      await frame();
+    }
+    return { names, toggled, refused, wrong };
+  });
+  console.log(
+    `browser: blocked-chunk press pool=${pressed.names.length} toggled=${pressed.toggled} ` +
+      `refused=${pressed.refused}`,
+  );
+  checks.push({
+    name: 'blocked-chunk.every-die-answers-a-press',
+    ok:
+      pressed.names.length > 0 &&
+      pressed.wrong.length === 0 &&
+      pressed.toggled + pressed.refused === pressed.names.length &&
+      pressed.refused > 0 &&
+      pressed.toggled > 0,
+    detail:
+      `every one of the ${pressed.names.length} dice on the table was pressed. ` +
+      `${pressed.toggled} answered by changing aria-pressed and ${pressed.refused} refused ` +
+      `because the rules hold them, and the two sum to the pool. Both counts carry a floor ` +
+      `above zero, so a table where nothing is pressable cannot pass.` +
+      (pressed.wrong.length ? ` [${pressed.wrong.join('; ')}]` : ''),
+  });
+
+  // Nothing reached the network in the whole run except what the block let
+  // through, so the failed requests are reported by name for a reader.
+  console.log(
+    `browser: blocked-chunk failed_requests=${failedRequests.length} ` +
+      `[${failedRequests.join('; ')}]`,
+  );
+  stopPreviewServer(server);
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing and the run
 // ---------------------------------------------------------------------------
 
@@ -6018,6 +6583,7 @@ function parseArgs(argv) {
     share: false,
     offline: false,
     shell: false,
+    blockedChunk: false,
     captureShell: null,
     captureLater: false,
     longTaskMs: 0,
@@ -6059,6 +6625,7 @@ function parseArgs(argv) {
     else if (arg === '--share') options.share = true;
     else if (arg === '--offline') options.offline = true;
     else if (arg === '--shell') options.shell = true;
+    else if (arg === '--blocked-chunk') options.blockedChunk = true;
     else if (arg === '--capture-shell') options.captureShell = next();
     else if (arg === '--capture-later') options.captureLater = true;
     else if (arg === '--long-task-ms') options.longTaskMs = Number(next());
@@ -6114,13 +6681,14 @@ function parseArgs(argv) {
     ['--share', options.share],
     ['--offline', options.offline],
     ['--shell', options.shell],
+    ['--blocked-chunk', options.blockedChunk],
   ];
   const named = MODES.filter(([, on]) => on).map(([flag]) => flag);
   if (named.length > 0 && options.url === null) {
     throw new Error(
       `${named[0]} needs --url, and the url must be ` +
         `${
-          options.offline || options.shell
+          options.offline || options.shell || options.blockedChunk
             ? 'a preview server over the built output'
             : 'a Vite dev server'
         }`,
@@ -6165,7 +6733,7 @@ async function run(options) {
   // a url that somebody else is serving.
   let server = null;
   try {
-    if (options.offline || options.shell) {
+    if (options.offline || options.shell || options.blockedChunk) {
       server = await startPreviewServer(options.url, join(here, '..'));
     }
     if (
@@ -6244,6 +6812,8 @@ async function run(options) {
       await runOffline(page, options, checks, server);
     } else if (options.shell) {
       await runShell(page, options, checks);
+    } else if (options.blockedChunk) {
+      await runBlockedChunk(page, options, checks, server);
     } else if (!options.url) {
       await selfTestCentroid(page, checks);
       await selfTestUpFace(page, checks);

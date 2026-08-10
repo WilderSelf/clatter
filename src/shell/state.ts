@@ -121,6 +121,17 @@ export interface AppState {
   readonly result: RollResult | null;
   /** The dice the last throw moved. Those dice shake and no other does. */
   readonly thrown: readonly string[];
+  /**
+   * How many throws this pool has taken. It counts a roll and a push alike.
+   *
+   * The screen keys a die cell by its id and this number, so a throw that
+   * lands a die in the zone it already sat in still rebuilds the cell and the
+   * shake plays again. Unit 2.3 reported the defect this field closes: the key
+   * held the count of the values a die carries, and a re-throw is a fresh roll
+   * whose dice carry one value each, so the key of a die that stayed was
+   * identical before and after and the element was reused.
+   */
+  readonly throwOrdinal: number;
 }
 
 export function emptyState(mode: Mode): AppState {
@@ -134,6 +145,7 @@ export function emptyState(mode: Mode): AppState {
     profileId: DEFAULT_PROFILE_ID,
     result: null,
     thrown: [],
+    throwOrdinal: 0,
   };
 }
 
@@ -461,7 +473,13 @@ export function rollNow(state: AppState, random: RandomSource): AppState {
     state.counts.stress,
   );
   if (outcome.kind === 'automaticFailure') {
-    return { ...state, builderOpen: false, result: null, thrown: [] };
+    return {
+      ...state,
+      builderOpen: false,
+      result: null,
+      thrown: [],
+      throwOrdinal: state.throwOrdinal + 1,
+    };
   }
   const result: RollResult = { dice: outcome.dice, stressAfter: outcome.stressAfter };
   return {
@@ -469,6 +487,7 @@ export function rollNow(state: AppState, random: RandomSource): AppState {
     builderOpen: false,
     result,
     thrown: result.dice.map((die) => die.id),
+    throwOrdinal: state.throwOrdinal + 1,
   };
 }
 
@@ -499,6 +518,7 @@ export function pushNow(state: AppState, random: RandomSource): AppState {
     ...state,
     result: { dice: pushed.dice, stressAfter: pushed.stressAfter },
     thrown: pushed.rerolled,
+    throwOrdinal: state.throwOrdinal + 1,
     counts: {
       ...state.counts,
       stress: Math.min(POOL_CAPS.stress, pushed.stressAfter),

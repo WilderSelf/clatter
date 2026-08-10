@@ -124,6 +124,8 @@ through the table semantics.
 - The dice count and the difficulty printed on `roll-button`.
 - The re-throw count and the stress printed on `push-button`.
 - The record statistics and the transposed matrix.
+- `flat-fallback-note`, the one-time notice that the dice fell to flat dice. It is a live region and
+  it holds no tab stop, so neither keyboard walk of section 6 changes. Unit 3.7 added it.
 
 ## 4. Behind the one disclosure
 
@@ -139,6 +141,7 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | `sheet-theme` | Three axes — surface, accent and dice material — plus the colour builder. | 4.8 |
 | `sheet-history` | Opens the history destination. The log, its statistics and its export live there, not here. | 4.4 to 4.7 |
 | `sheet-stress-reset` | Sets the stress counter back to zero. | 2.1 |
+| `sheet-tray-renderer` | Rolls the dice on the table, or draws them flat. It clears a permanent fall to flat dice. | 3.7 |
 | `sheet-close` | Closes the sheet and returns focus to `disclosure-toggle`. | 2.1 |
 
 The mode switch sits here on purpose. It destroys the built pool, so it must not sit one tap away

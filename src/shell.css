@@ -659,6 +659,21 @@ body {
   color: var(--ink-dim);
 }
 
+/* The fall to flat dice, said once. The element is in the document from the
+   first paint so a reader is already watching the region, and it carries no
+   text until the fall. An empty one takes no height, so the drawn screen is
+   unchanged while the table runs. Unit 3.7. */
+.fall-note {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
+.fall-note:empty {
+  display: none;
+}
+
 /* ---------------- the action bar ---------------- */
 
 .costrow {
