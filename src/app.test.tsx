@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from './app';
 import type { Die } from './rules/die';
 import { appendValue, latestValue } from './rules/die';
-import { buildPool, poolBuilder } from './rules/pool';
+import { applyDifficulty, buildPool, firstRoll, poolBuilder } from './rules/pool';
 import { generations, previewPush, push } from './rules/push';
 import type { PushProfile } from './rules/push-profile';
 import { isLocked, PUSH_PROFILES } from './rules/push-profile';
@@ -26,8 +26,18 @@ import type { RandomSource } from './rules/random';
 import { seededRandom } from './rules/seeded-random';
 import type { RollResult } from './rules/roll';
 import { roll } from './rules/roll';
-import type { AppState } from './shell/state';
-import { dieElement, emptyState, readout, throwDice, worstCaseState } from './shell/state';
+import type { AppState, Counts } from './shell/state';
+import {
+  builderOf,
+  dieElement,
+  emptyState,
+  pushNow,
+  readout,
+  rollNow,
+  signedDifficulty,
+  throwDice,
+  worstCaseState,
+} from './shell/state';
 
 // A jsdom test is transformed for the web, so `import.meta.url` is not a file
 // URL here. The working directory is the root Vitest was configured from.
@@ -405,6 +415,24 @@ function tableState(result: RollResult, profileId: string, stress = 0): AppState
   };
 }
 
+/**
+ * A state whose tiles hold a pool, at rest B with nothing thrown yet.
+ *
+ * A re-throw builds the pool again from the tiles, so a fixture that sets a
+ * result without setting the tiles would re-throw nothing. `tableState` above
+ * serves the checks that only read a table.
+ */
+function builtState(counts: Partial<Counts>, profileId: string, difficulty = 0): AppState {
+  const base = emptyState('pool');
+  return {
+    ...base,
+    counts: { ...base.counts, ...counts },
+    profileId,
+    difficulty,
+    builderOpen: false,
+  };
+}
+
 /** One generation of chosen values, so a fixture states its faces itself. */
 function showing(dice: readonly Die[], values: readonly number[]): RollResult {
   if (dice.length !== values.length) {
@@ -638,6 +666,275 @@ describe('a push', () => {
     expect(after).toEqual(wanted);
     expect(generations(oracle.dice)).toBe(2);
     expect(element('status-line').textContent).toContain('push 1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The re-throw — Unit 2.3
+// ---------------------------------------------------------------------------
+
+/** Every die on the table by `data-el`, against the face the core gave it. */
+function facesOf(dice: readonly Die[]): Map<string, number> {
+  return new Map(dice.map((die) => [dieElement(die), latestValue(die) as number]));
+}
+
+describe('a re-throw', () => {
+  it('asks the core for a fresh roll of the same pool, and the core is the oracle', () => {
+    const only = profile('pool-banes-damage-ratings');
+    // The tiles carry the pool, so the re-throw builds the same one again. The
+    // difficulty rides with it and adds its bonus dice on every throw.
+    const opening = builtState({ attribute: 3, skill: 2, gear: 2 }, only.id, 2);
+    const first = rollNow(opening, seededRandom(8));
+    if (first.result === null) throw new Error('the fixture rolled nothing');
+
+    // The oracle. The core is asked outside the screen, over the same builder,
+    // the same difficulty and the same seeded source the screen is given, so no
+    // face is written down here.
+    const oracle = firstRoll(
+      applyDifficulty(builderOf(first), first.difficulty),
+      seededRandom(11),
+      first.counts.stress,
+    );
+    if (oracle.kind !== 'rolled') throw new Error('the core built no roll for the oracle');
+    const wanted = facesOf(oracle.dice);
+    expect(wanted.size, 'the oracle rolled the whole pool').toBe(
+      buildPool(applyDifficulty(builderOf(first), first.difficulty)).length,
+    );
+
+    mount({ random: seededRandom(11), initial: first });
+    const before = facesOnTable();
+    expect(before.size, 'the first roll is on the table').toBe(first.result.dice.length);
+
+    click(element('roll-button'));
+
+    const after = facesOnTable();
+    expect(after.size, 'the re-throw put the whole pool back on the table').toBe(wanted.size);
+    expect(after, 'every face is the face the core gave it').toEqual(wanted);
+
+    // The press is load-bearing. A table the re-throw never touched would equal
+    // the one before it, and this check would pass without a throw at all.
+    const moved = [...before].filter(([name, face]) => wanted.get(name) !== face);
+    expect(moved.length, 'the table the re-throw replaced was a different table').toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('starts a new roll and discards the roll before it', () => {
+    const only = profile('pool-banes-damage-ratings');
+    const opening = builtState({ attribute: 3, skill: 2, gear: 2, stress: 1 }, only.id);
+    const first = rollNow(opening, seededRandom(8));
+    const pushed = pushNow(first, seededRandom(11));
+    if (pushed.result === null) throw new Error('the fixture rolled nothing');
+    expect(generations(pushed.result.dice), 'the fixture holds a pushed roll').toBe(2);
+    const carried = pushed.result.dice.filter((die) => isLocked(die, only));
+    expect(
+      carried.length,
+      'the pushed roll keeps dice, which a continuation would carry over',
+    ).toBeGreaterThan(0);
+
+    // The state the shell holds after the press, and the pool it must hold.
+    const again = rollNow(pushed, seededRandom(5));
+    if (again.result === null) throw new Error('the re-throw rolled nothing');
+    const size = buildPool(builderOf(pushed)).length;
+    expect(again.result.dice.length, 'the new roll is the whole pool').toBe(size);
+    expect(generations(again.result.dice), 'the generation count is back at one').toBe(1);
+    expect(
+      again.result.dice.filter((die) => die.values.length === 1).length,
+      'every die of the pool carries one generation and no more',
+    ).toBe(size);
+
+    // Then the screen, which reads the same generation count through the push
+    // readout of the status line.
+    mount({ random: seededRandom(5), initial: pushed });
+    expect(element('status-line').textContent, 'the table opens on a pushed roll').toContain(
+      'push 1',
+    );
+
+    click(element('roll-button'));
+
+    expect(element('status-line').textContent, 'the re-throw is a first roll again').toContain(
+      'push 0',
+    );
+    const after = facesOnTable();
+    expect(after.size, 'no die of the old roll stayed behind').toBe(size);
+    expect(after, 'every face is the new roll, not the old one').toEqual(
+      facesOf(again.result.dice),
+    );
+  });
+
+  it('carries in the stress counter the roll before it ended with', () => {
+    // The third preset raises stress by one before every re-throw, so a push is
+    // what makes the counter move and makes this assertion able to fail.
+    const stress = profile('pool-stress-and-complications');
+    const opening = builtState({ attribute: 2, stress: 1 }, stress.id);
+    const first = rollNow(opening, seededRandom(3));
+    if (first.result === null) throw new Error('the fixture rolled nothing');
+    expect(first.result.stressAfter, 'a first roll hands the counter straight back').toBe(1);
+    expect(previewPush(first.result, stress).kind, 'the fixture may be pushed').toBe('available');
+
+    const pushed = pushNow(first, seededRandom(3));
+    if (pushed.result === null) throw new Error('the push rolled nothing');
+    expect(pushed.counts.stress, 'the push raised the counter').toBe(2);
+    expect(pushed.counts.stress, 'the counter moved, so a stale reading fails').toBeGreaterThan(
+      opening.counts.stress,
+    );
+
+    // The oracle again: the core, given the counter the push left.
+    const oracle = firstRoll(
+      applyDifficulty(builderOf(pushed), pushed.difficulty),
+      seededRandom(5),
+      pushed.counts.stress,
+    );
+    if (oracle.kind !== 'rolled') throw new Error('the core built no roll for the oracle');
+
+    // The counter a roll took in is what it hands back, so `stressAfter` is
+    // where the carried value is read.
+    const again = rollNow(pushed, seededRandom(5));
+    if (again.result === null) throw new Error('the re-throw rolled nothing');
+    expect(again.result.stressAfter, 'the re-throw took the counter the push left').toBe(
+      pushed.counts.stress,
+    );
+    expect(again.result.stressAfter, 'and the core agrees').toBe(oracle.stressAfter);
+    expect(
+      again.result.dice.filter((die) => die.type === 'stress').length,
+      'the counter is the number of stress dice, so the raised counter is on the table',
+    ).toBe(pushed.counts.stress);
+
+    mount({ random: seededRandom(5), initial: pushed });
+    click(element('roll-button'));
+    expect(facesOnTable(), 'the table is the roll the core made from that counter').toEqual(
+      facesOf(oracle.dice),
+    );
+    expect(element('status-line').textContent, 'the status line reads the same counter').toContain(
+      `stress ${pushed.counts.stress}`,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What the screen shows at each rest state, and the difficulty after a throw
+// ---------------------------------------------------------------------------
+
+/**
+ * The control inventory of section 3, read out of the document.
+ *
+ * The table states which of the eight controls is visible at rest A and at rest
+ * B, and it states the two totals under them. Both are read here and neither is
+ * restated, so the screen is compared against the document and the document is
+ * compared against itself.
+ */
+function controlInventory(markdown: string): {
+  readonly rows: readonly { readonly name: string; readonly a: boolean; readonly b: boolean }[];
+  readonly totals: readonly [number, number];
+} {
+  const from = markdown.indexOf('## 3. Control inventory');
+  const to = markdown.indexOf('## 4. ');
+  if (from < 0 || to <= from) throw new Error('the design holds no control inventory');
+  const section = markdown.slice(from, to);
+  const rows = [
+    ...section.matchAll(/^\| (\d+) \| `([a-z-]+)` \|[^|]*\| (yes|no) \| (yes|no) \|/gm),
+  ];
+  rows.forEach(([, index], place) => {
+    if (Number(index) !== place + 1) throw new Error(`the inventory jumps at row ${String(index)}`);
+  });
+  const stated = /\*\*Controls at rest\*\* \| \*\*(\d+)\*\* \| \*\*(\d+)\*\* \|/.exec(section);
+  if (stated === null) throw new Error('the inventory no longer states its two totals');
+  return {
+    rows: rows.map(([, , name, a, b]) => ({ name: name ?? '', a: a === 'yes', b: b === 'yes' })),
+    totals: [Number(stated[1]), Number(stated[2])],
+  };
+}
+
+describe('the control inventory of section 3', () => {
+  it('holds at both rest states, control by control', () => {
+    const inventory = controlInventory(DESIGN);
+    expect(inventory.rows.length, 'the inventory holds the eight controls').toBe(8);
+    expect(
+      [inventory.rows.filter((row) => row.a).length, inventory.rows.filter((row) => row.b).length],
+      'the yes marks are as many as the two totals under them',
+    ).toEqual([...inventory.totals]);
+
+    // Rest A: the builder is open and the table is empty. Rest B: a roll is on
+    // the table and the builder is collapsed.
+    const only = profile('pool-banes-damage-ratings');
+    const thrown = rollNow(
+      builtState({ attribute: 3, skill: 2, gear: 2 }, only.id),
+      seededRandom(8),
+    );
+    const shown = (): Set<string> =>
+      new Set(
+        [...document.querySelectorAll<HTMLElement>('[data-el]')].map(
+          (each) => each.dataset.el ?? '',
+        ),
+      );
+
+    mount();
+    const restA = shown();
+    act(() => render(null, root as HTMLElement));
+    mount({ initial: thrown });
+    const restB = shown();
+
+    // Sixteen cells, each one read from the document and answered by the
+    // screen. `difficulty` is the cell this unit settles: the builder collapses
+    // on a roll, so the control and its preview line leave rest B, and the
+    // difficulty readout of rest B is the one printed on `roll-button`.
+    const wanted = inventory.rows.flatMap((row) => [
+      `${row.name} at rest A: ${String(row.a)}`,
+      `${row.name} at rest B: ${String(row.b)}`,
+    ]);
+    const measured = inventory.rows.flatMap((row) => [
+      `${row.name} at rest A: ${String(restA.has(row.name))}`,
+      `${row.name} at rest B: ${String(restB.has(row.name))}`,
+    ]);
+    expect(measured.length, 'every row is read at both rest states').toBe(16);
+    expect(measured, 'each control is on the screen at the rest states the document marks').toEqual(
+      wanted,
+    );
+  });
+});
+
+describe('the difficulty on the roll button', () => {
+  it('prints the difficulty the throw takes, and prints the same one after it', () => {
+    // The claim is the document's. Section 3 lists the dice count and the
+    // difficulty on `roll-button` among the read-only readings, and it keeps
+    // `roll-button` at both rest states while `difficulty` leaves rest B with
+    // the builder. Section 8 states the consequence: the bonus dice a
+    // difficulty adds are already on the table, because the throw that filled
+    // it took the same difficulty.
+    expect(
+      DESIGN.includes('The dice count and the difficulty printed on `roll-button`.'),
+      'section 3 still prints the difficulty on the roll button',
+    ).toBe(true);
+
+    const note = (): string =>
+      (element('roll-button').querySelector('small')?.textContent ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    mount();
+    click(element('pool-cell-attribute').querySelector('.cell-p') as Element);
+    click(element('pool-cell-attribute').querySelector('.cell-p') as Element);
+    click(element('difficulty-track').querySelectorAll('.tk-n')[6] as Element);
+    const asked = note();
+    expect(asked, 'the button carries the count and the difficulty').toBe(
+      `5 dice, difficulty ${signedDifficulty(3)}`,
+    );
+
+    click(element('roll-button'));
+
+    // The builder is collapsed, so neither the difficulty control nor its
+    // preview sentence is on the screen. The button is the whole readout.
+    expect(document.querySelector('[data-el="difficulty"]')).toBeNull();
+    expect(document.querySelector('.diff-p')).toBeNull();
+    expect(element('roll-button').textContent).toContain('Roll again');
+    expect(note(), 'the difficulty after the throw is the one the throw took').toBe(asked);
+    const counted = Number(/^(\d+) dice/.exec(asked)?.[1]);
+    expect(facesOnTable().size, 'the throw took the dice the button counted').toBe(counted);
+
+    // And again, because a re-throw changes nothing the builder holds.
+    click(element('roll-button'));
+    expect(note(), 'a re-throw takes the same difficulty').toBe(asked);
+    expect(facesOnTable().size, 'and the same dice').toBe(counted);
   });
 });
 

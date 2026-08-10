@@ -690,6 +690,21 @@ export function App({
           >
             More
           </button>
+          {/* One tap throws the built pool, before a throw and after one.
+              After a throw the same tap re-throws the same pool at the same
+              difficulty, and `rollNow` asks the core for a first roll, so the
+              re-throw starts a roll rather than another generation of the old
+              one. The stress counter lives in `counts.stress` and travels with
+              it, which is why a push that raised it raises the next throw too.
+
+              **This is the whole difficulty readout of rest B.** The builder
+              collapses on a roll, so section 3 of
+              `docs/design/0002-screen-design.md` drops `difficulty` and its
+              preview sentence from that state and keeps the dice count and the
+              difficulty printed here. The value cannot change while the builder
+              is collapsed, so what the next throw will take and what the last
+              throw took are the same number. Section 8 states that as the
+              reason the bonus dice of a +3 are already on the table. */}
           <button
             class={state.result === null ? 'btn go' : 'btn'}
             type="button"
