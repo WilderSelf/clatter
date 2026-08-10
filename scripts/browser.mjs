@@ -71,8 +71,18 @@
 //                            [--throw-seed <n>] [--budgets <path>]
 //
 // `--throw-seed` pins the seed the vendored tray throws from. Every run prints
-// the seed it used, so a red run repeats exactly. A run that names no seed
-// draws a fresh one, because a fixed default would stop sampling new throws.
+// the seed it used. A run that names no seed draws a fresh one, because a fixed
+// default would stop sampling new throws.
+//
+// **The seed pins the tray and not the rules.** It replaces `Math.random`,
+// which is what the vendored library draws its throw vectors from. Constraint 7
+// makes the rules core draw from `crypto.getRandomValues` instead, and the seed
+// does not reach that. A mode that builds its own fixture — `--tray`, `--pool`,
+// `--push`, `--affordance` — therefore repeats exactly from its seed. `--table`
+// drives the application, whose pool the rules core rolls, so two runs at one
+// seed land the same throw vectors over different values. Measured on
+// 2026-08-10: two `--table` runs at seed 2107814439 read 20 and 24 dice the
+// player may release. Name a seed to repeat the tray, not to repeat the roll.
 //
 // Two run modes:
 //   ordinary   the default. It reports the renderer and does not judge it.
@@ -2045,58 +2055,195 @@ async function readMarks(page, surface) {
 }
 
 /**
- * A screen point that belongs to each die, walked outwards from its projected
- * centre until `dieAt` in `src/tray/affordance.ts` answers with that die.
+ * Where a pointer may be aimed at one die, as source, so both the `--table`
+ * mode and the `--affordance` mode copy one implementation into the page.
  *
- * A die with no such point is **wholly buried** — Unit 3.5 measured one seed of
- * forty where that happened — and it is reported as unreachable rather than
- * clicked at a pixel that belongs to its neighbour.
+ * **A pointer addresses whole pixels and nothing finer.** The driver rounds
+ * every pointer coordinate to a whole number — `Math.round` in
+ * `node_modules/puppeteer-core/lib/puppeteer/bidi/Input.js` — and the WebDriver
+ * BiDi wire format carries whole numbers. A probe that aims between two pixels
+ * therefore proves a point no pointer can ever send an event to.
+ *
+ * That is not a small difference at the edge of a heap. Measured on 2026-08-10
+ * over 32 throws of the drawn 30-die pool: an outward ring walk from a die's
+ * centre returns the FIRST point that belongs to the die, and where a neighbour
+ * covers the centre that first point lies on the boundary between the two by
+ * construction. Rounding then carried the click across that boundary, and the
+ * neighbour took the press. Two throws of the 32 lost a die that way, and the
+ * dice that were lost held 1,415 and 1,820 whole pixels of their own surface, so
+ * neither was hidden and neither was hard to reach. The aim was the fault.
+ *
+ * **The construction, rather than a rule per pixel.** This scans the whole
+ * pixels the die's projected disc covers, keeps the ones where the die is the
+ * frontmost body, and answers the one furthest from any pixel that is not. The
+ * answer is a whole pixel, so the driver's rounding changes nothing, and it is
+ * the point deepest inside what the player can see, which is where a finger
+ * aims. A die with no such pixel is answered as unreachable and named.
+ *
+ * `frontmost` is this file's own raycast, built once over the whole scan. The
+ * per-click helper rebuilds its owner map on every call, which is the right
+ * shape for one click and the wrong shape for a quarter of a million of them.
  */
-async function findClickPoints(page) {
-  return page.evaluate(() => {
-    const box = window.__clatterTray;
-    const { dieAt } = window.__clatterAffordance.module;
-    const rect = box.container.getBoundingClientRect();
-    const DIVISOR = 12;
-    const REACH = 0.9;
-    return box.diceList.map((die, index) => {
-      const centre = box.getScreenPosition(die.position);
-      if (!centre) return { index, point: null, reason: 'the camera does not project its centre' };
-      if (!die.geometry.boundingSphere) die.geometry.computeBoundingSphere();
-      const worldRadius = die.geometry.boundingSphere.radius * die.scale.x;
-      const p = die.position;
-      const edge = box.getScreenPosition({ x: p.x + worldRadius, y: p.y, z: p.z });
-      const screenRadius = edge ? Math.hypot(edge.x - centre.x, edge.y - centre.y) : 0;
-      if (!(screenRadius > 0)) {
-        return { index, point: null, reason: 'the die projects to no area at all' };
-      }
-      const span = Math.floor(REACH * DIVISOR);
-      const points = [];
-      for (let iy = -span; iy <= span; iy += 1) {
-        for (let ix = -span; ix <= span; ix += 1) {
-          const away = Math.hypot(ix, iy);
-          if (away > REACH * DIVISOR) continue;
-          points.push({
-            dx: (ix * screenRadius) / DIVISOR,
-            dy: (iy * screenRadius) / DIVISOR,
-            away,
-          });
+const AIM_HELPER = `
+window.__clatterAim = function (box, count, nameOf) {
+  const rect = box.container.getBoundingClientRect();
+  const owner = new Map();
+  box.diceList.forEach((die, index) => die.traverse((node) => owner.set(node, index)));
+  const frontmost = (x, y) => {
+    box.raycaster.setFromCamera(
+      {
+        x: ((x - rect.left) / rect.width) * 2 - 1,
+        y: -((y - rect.top) / rect.height) * 2 + 1,
+      },
+      box.camera,
+    );
+    const hit = box.raycaster.intersectObjects(box.diceList)[0];
+    if (!hit) return null;
+    const found = owner.get(hit.object);
+    return found === undefined ? null : found;
+  };
+  const miss = (index, reason) => ({
+    index,
+    name: nameOf(index),
+    x: null,
+    y: null,
+    own: 0,
+    scanned: 0,
+    margin: 0,
+    reason,
+  });
+  const aims = [];
+  for (let index = 0; index < count; index += 1) {
+    const die = box.diceList[index];
+    if (die === undefined) {
+      aims.push(miss(index, 'the tray holds no body for it'));
+      continue;
+    }
+    const centre = box.getScreenPosition(die.position);
+    if (centre === undefined || centre === null) {
+      aims.push(miss(index, 'the camera projects no centre for it'));
+      continue;
+    }
+    if (!die.geometry.boundingSphere) die.geometry.computeBoundingSphere();
+    const worldRadius = (die.geometry.boundingSphere ? die.geometry.boundingSphere.radius : 0) * die.scale.x;
+    const p = die.position;
+    const edge = box.getScreenPosition({ x: p.x + worldRadius, y: p.y, z: p.z });
+    const radius = edge === undefined || edge === null ? 0 : Math.hypot(edge.x - centre.x, edge.y - centre.y);
+    if (!(radius > 0)) {
+      aims.push(miss(index, 'it projects to no area at all'));
+      continue;
+    }
+    /* The bounding sphere contains the die, so its projected disc contains the
+       silhouette and the scan can miss no pixel of it. */
+    const cx = rect.left + centre.x;
+    const cy = rect.top + centre.y;
+    const x0 = Math.ceil(cx - radius);
+    const y0 = Math.ceil(cy - radius);
+    const w = Math.floor(cx + radius) - x0 + 1;
+    const h = Math.floor(cy + radius) - y0 + 1;
+    if (w <= 0 || h <= 0) {
+      aims.push(miss(index, 'it covers no whole pixel at all'));
+      continue;
+    }
+    /* far stands for "not yet measured". The two passes below bring every
+       owned pixel down to its Chebyshev distance from the nearest pixel this
+       die does not own. A pixel outside the scan counts as not owned, so no
+       margin reaches past the edge of what was measured. */
+    const far = w + h;
+    const depth = new Int32Array(w * h);
+    let own = 0;
+    let scanned = 0;
+    for (let iy = 0; iy < h; iy += 1) {
+      for (let ix = 0; ix < w; ix += 1) {
+        const x = x0 + ix;
+        const y = y0 + iy;
+        if (Math.hypot(x - cx, y - cy) > radius) continue;
+        scanned += 1;
+        if (frontmost(x, y) === index) {
+          depth[iy * w + ix] = far;
+          own += 1;
         }
       }
-      points.sort((one, two) => one.away - two.away);
-      let tried = 0;
-      for (const point of points) {
-        const x = rect.left + centre.x + point.dx;
-        const y = rect.top + centre.y + point.dy;
-        tried += 1;
-        if (dieAt(box, x, y) === index) return { index, point: { x, y }, tried };
+    }
+    const at = (ix, iy) => (ix < 0 || iy < 0 || ix >= w || iy >= h ? 0 : depth[iy * w + ix]);
+    for (let iy = 0; iy < h; iy += 1) {
+      for (let ix = 0; ix < w; ix += 1) {
+        const here = depth[iy * w + ix];
+        if (here === 0) continue;
+        depth[iy * w + ix] = Math.min(
+          here,
+          at(ix - 1, iy) + 1,
+          at(ix, iy - 1) + 1,
+          at(ix - 1, iy - 1) + 1,
+          at(ix + 1, iy - 1) + 1,
+        );
       }
-      return {
+    }
+    for (let iy = h - 1; iy >= 0; iy -= 1) {
+      for (let ix = w - 1; ix >= 0; ix -= 1) {
+        const here = depth[iy * w + ix];
+        if (here === 0) continue;
+        depth[iy * w + ix] = Math.min(
+          here,
+          at(ix + 1, iy) + 1,
+          at(ix, iy + 1) + 1,
+          at(ix + 1, iy + 1) + 1,
+          at(ix - 1, iy + 1) + 1,
+        );
+      }
+    }
+    let margin = 0;
+    let bestX = null;
+    let bestY = null;
+    for (let iy = 0; iy < h; iy += 1) {
+      for (let ix = 0; ix < w; ix += 1) {
+        if (depth[iy * w + ix] > margin) {
+          margin = depth[iy * w + ix];
+          bestX = x0 + ix;
+          bestY = y0 + iy;
+        }
+      }
+    }
+    if (bestX === null) {
+      const gone = miss(
         index,
-        point: null,
-        reason: `no pixel of its own surface is frontmost, over ${tried} points out to ${REACH} of its projected radius`,
-      };
-    });
+        'no whole pixel of its own surface is frontmost, over ' + scanned + ' scanned',
+      );
+      gone.scanned = scanned;
+      aims.push(gone);
+      continue;
+    }
+    aims.push({ index, name: nameOf(index), x: bestX, y: bestY, own, scanned, margin, reason: null });
+  }
+  return aims;
+};
+`;
+
+/**
+ * The whole pixel a pointer may be aimed at, for each die of the tray scene.
+ *
+ * It is `window.__clatterAim`, which `--table` uses over the application's own
+ * tray. One implementation answers both modes, because both drive the same
+ * driver and the driver rounds every pointer coordinate to a whole pixel.
+ *
+ * A die with no whole pixel of its own is **wholly buried** — Unit 3.5 measured
+ * one seed of forty where that happened — and it is reported as unreachable
+ * rather than clicked at a pixel that belongs to its neighbour.
+ */
+async function findClickPoints(page) {
+  await page.evaluate(AIM_HELPER);
+  return page.evaluate(() => {
+    const box = window.__clatterTray;
+    return window
+      .__clatterAim(box, box.diceList.length, (index) => String(index))
+      .map((aim) => ({
+        index: aim.index,
+        point: aim.x === null ? null : { x: aim.x, y: aim.y },
+        own: aim.own,
+        scanned: aim.scanned,
+        margin: aim.margin,
+        reason: aim.reason,
+      }));
   });
 }
 
@@ -7659,10 +7806,6 @@ async function runBlockedChunk(page, options, checks, server) {
 /** How far a cell may sit from the die it names, in CSS pixels. */
 const CELL_OVER_DIE_PX = 1;
 
-/** Steps out from a die's projected centre when the run hunts for a click point. */
-const CLICK_PROBE_RINGS = 6;
-const CLICK_PROBE_ANGLES = 12;
-
 /** The pool the run builds: every tile at its cap, and the difficulty at +3. */
 const TABLE_POOL = SHELL_DRAWN_POOL;
 const TABLE_DIFFICULTY = SHELL_DRAWN_DIFFICULTY;
@@ -7869,6 +8012,7 @@ async function runTable(page, options, checks) {
       'table.up-face-equals-core-value',
       'table.every-die-carries-a-cell-over-it',
       'table.every-die-answers-a-key-press',
+      'table.every-aim-is-a-whole-pixel-the-pointer-can-address',
       'table.every-die-is-accounted-for-by-the-pointer-route',
       'table.the-push-put-the-die-it-added-on-the-table',
       'table.the-lock-marks-are-drawn-on-the-dice-they-name',
@@ -7958,24 +8102,70 @@ async function runTable(page, options, checks) {
       `${pressed.faults.length === 0 ? '' : ` [${pressed.faults.join('; ')}]`}`,
   );
 
-  // ---- One real click on every die the camera can reach ----
-  const clicks = await clickEveryDie(page, rolled.tray);
+  // ---- Where a pointer may be aimed at each die ----
+  const aims = await aimEveryDie(page);
+  const aimed = aims.filter((aim) => aim.x !== null);
+  const notWhole = aimed.filter((aim) => !Number.isInteger(aim.x) || !Number.isInteger(aim.y));
+  const tightest = [...aimed].sort((one, two) => one.margin - two.margin);
+  const smallest = [...aimed].sort((one, two) => one.own - two.own);
+  console.log(
+    `browser: table aims aimed=${aimed.length} of ${aims.length} whole=${aimed.length - notWhole.length} ` +
+      `thinnest_margin=${tightest.length === 0 ? 'none' : `${tightest[0].margin} px (${tightest[0].name})`} ` +
+      `smallest_own_surface=${smallest.length === 0 ? 'none' : `${smallest[0].own} px (${smallest[0].name})`}`,
+  );
+
+  // **The aim must be a point the pointer can address.** The driver rounds
+  // every pointer coordinate to a whole pixel, so an aim between two pixels
+  // proves a point no press can ever land on, and the press lands on whatever
+  // owns the pixel next door. That is the defect this check was written for.
+  judge(
+    'table.every-aim-is-a-whole-pixel-the-pointer-can-address',
+    notWhole.length === 0 && aimed.length === before.dice.length && before.dice.length > 0,
+    `whole=${aimed.length - notWhole.length} of the ${aimed.length} dice this run aimed at, ` +
+      `against the pool of ${before.dice.length}. A pointer addresses whole pixels and nothing ` +
+      `finer, so an aim between two of them proves a point no press can reach. Each aim is the ` +
+      `whole pixel furthest inside the die's own frontmost surface, and the thinnest margin of ` +
+      `this run is ${tightest.length === 0 ? 'none' : `${tightest[0].margin} px on ${tightest[0].name}`}. ` +
+      `fractional=${notWhole.length}` +
+      `${notWhole.length === 0 ? '' : ` [${notWhole.map((aim) => `${aim.name} at (${aim.x}, ${aim.y})`).join('; ')}]`}`,
+  );
+
+  // ---- One real click on every die ----
+  const clicks = await clickEveryDie(page, rolled.tray, aims);
+  // The dice the rules hold, counted a second way and before any click: the
+  // screen draws a rule lock as an image and everything else as a button, so a
+  // cell with no `aria-pressed` is a die no press may move. This is the
+  // denominator the refusals are judged against, and the key route above
+  // counted the same two numbers through a different instrument.
+  const ruleHeld = Object.values(rolled.pressed).filter((state) => state === null).length;
+  const pressable = before.dice.length - ruleHeld;
   console.log(
     `browser: table clicks pool=${clicks.pool} reached=${clicks.reached} ` +
-      `unreachable=${clicks.unreachable} toggled=${clicks.toggled} refused=${clicks.refused}`,
+      `unreachable=${clicks.unreachable} toggled=${clicks.toggled} refused=${clicks.refused} ` +
+      `rule_held=${ruleHeld} pressable=${pressable}`,
   );
   judge(
     'table.every-die-is-accounted-for-by-the-pointer-route',
     clicks.reached + clicks.unreachable === clicks.pool &&
+      clicks.unreachable === 0 &&
       clicks.toggled + clicks.refused === clicks.reached &&
-      clicks.toggled > 0 &&
+      clicks.refused === ruleHeld &&
+      clicks.toggled === pressable &&
+      clicks.refused === pressed.refused &&
+      clicks.toggled === pressed.toggled &&
+      ruleHeld > 0 &&
+      pressable > 0 &&
       clicks.faults.length === 0,
-    `a real pointer click at a point the raycast proves is that die's own front surface. ` +
+    `a real pointer click at the whole pixel deepest inside each die's own front surface. ` +
       `reached=${clicks.reached} and unreachable=${clicks.unreachable} sum to the pool of ` +
-      `${clicks.pool}. Of the reached, ${clicks.toggled} toggled and ${clicks.refused} were ` +
-      `refused by a rule lock. **A buried die has no pointer route**, by design: a player who ` +
-      `cannot see a die cannot aim at it, and the key press above reaches every die. ` +
-      `faults=${clicks.faults.length}` +
+      `${clicks.pool}, and **unreachable must be zero**: a die a neighbour hides is not a die ` +
+      `the rule holds, and the interface may not answer the two the same way. Of the reached, ` +
+      `toggled=${clicks.toggled} against the ${pressable} dice the screen draws as buttons and ` +
+      `refused=${clicks.refused} against the ${ruleHeld} it draws as images because the rules ` +
+      `hold them. The key route read the same split as ${pressed.toggled} and ` +
+      `${pressed.refused}, through a different instrument. The smallest own surface of this run ` +
+      `is ${smallest.length === 0 ? 'none' : `${smallest[0].own} whole pixels on ${smallest[0].name}`}, ` +
+      `reported and not gated. faults=${clicks.faults.length}` +
       `${clicks.faults.length === 0 ? '' : ` [${clicks.faults.join('; ')}]`}`,
   );
 
@@ -8117,61 +8307,60 @@ async function pressEveryDie(page, names) {
   return { pool: names.length, toggled, refused, faults };
 }
 
-/** One real pointer click on every die the camera can reach. */
-async function clickEveryDie(page, names) {
+/** Where a pointer may be aimed at each die of the application's tray. */
+async function aimEveryDie(page) {
+  await page.evaluate(AIM_HELPER);
+  return page.evaluate(() => {
+    const seam = window.__clatterTable;
+    return window.__clatterAim(seam.box, seam.ordered.length, (index) =>
+      window.__table.elementOf(seam.ordered[index] ? seam.ordered[index].id : '-'),
+    );
+  });
+}
+
+/**
+ * One real pointer click on every die, at the whole pixel each aim names.
+ *
+ * `aims` comes from `aimEveryDie`. A die with no aim is unreachable and is
+ * counted rather than clicked at a pixel that belongs to its neighbour.
+ */
+async function clickEveryDie(page, names, aims) {
   const faults = [];
   let reached = 0;
   let unreachable = 0;
   let toggled = 0;
   let refused = 0;
+  const aimOf = new Map(aims.map((aim) => [aim.name, aim]));
   for (const name of names) {
-    const aim = await page.evaluate(
-      ({ held, rings, angles }) => {
-        const seam = window.__clatterTable;
-        const box = seam.box;
-        const index = seam.ordered.findIndex((die) => window.__table.elementOf(die.id) === held);
-        if (index < 0) return null;
-        const cell = document.querySelector('[data-el="' + held + '"]').getBoundingClientRect();
-        const centre = { x: cell.x + cell.width / 2, y: cell.y + cell.height / 2 };
-        const radius = cell.width / 2;
-        for (let ring = 0; ring < rings; ring += 1) {
-          const reach = (ring / rings) * radius * 0.8;
-          for (let step = 0; step < (ring === 0 ? 1 : angles); step += 1) {
-            const turn = (step / angles) * Math.PI * 2;
-            const x = centre.x + Math.cos(turn) * reach;
-            const y = centre.y + Math.sin(turn) * reach;
-            if (window.__table.dieAt(box, x, y) === index) {
-              return {
-                x,
-                y,
-                pressed: document
-                  .querySelector('[data-el="' + held + '"]')
-                  .getAttribute('aria-pressed'),
-              };
-            }
-          }
-        }
-        return { x: null, y: null, pressed: null };
-      },
-      { held: name, rings: CLICK_PROBE_RINGS, angles: CLICK_PROBE_ANGLES },
-    );
-    if (aim === null || aim.x === null) {
+    const aim = aimOf.get(name);
+    if (aim === undefined || aim.x === null) {
       unreachable += 1;
+      faults.push(
+        `${name} has no whole pixel of its own: ${aim ? aim.reason : 'it was never aimed at'}`,
+      );
       continue;
     }
     reached += 1;
+    const was = await page.evaluate(
+      (held) => document.querySelector('[data-el="' + held + '"]').getAttribute('aria-pressed'),
+      name,
+    );
     await page.mouse.click(aim.x, aim.y);
     const now = await page.evaluate(
       (held) => document.querySelector('[data-el="' + held + '"]').getAttribute('aria-pressed'),
       name,
     );
-    if (aim.pressed === null) {
+    if (was === null) {
       if (now !== null) faults.push(`${name} answered a click the rules refuse`);
       refused += 1;
       continue;
     }
-    if (now === aim.pressed) {
-      faults.push(`${name} did not answer the click: aria-pressed stayed ${now}`);
+    if (now === was) {
+      faults.push(
+        `${name} did not answer the click at (${aim.x}, ${aim.y}): aria-pressed stayed ${now}. ` +
+          `That pixel is ${aim.margin} px inside its own frontmost surface, which covers ` +
+          `${aim.own} of the ${aim.scanned} whole pixels under the die`,
+      );
       continue;
     }
     toggled += 1;
