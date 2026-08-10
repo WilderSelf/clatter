@@ -195,23 +195,17 @@ hide a failure.
 
 Bash runs in a bubblewrap sandbox. The sandbox blocks network access and the display sockets.
 
-`npm ci` and `npm install` work inside the sandbox, because `registry.npmjs.org` is an allowed
-domain.
+`npm ci` and `npm install` work inside the sandbox, because `registry.npmjs.org` is an allowed domain.
 
-`gh` commands and `git push` need a sandbox exception. As of 2026-08-08 the owner has not yet
-added `gh *`, `git push*` or `node scripts/browser.mjs*` to `sandbox.excludedCommands` in
-`~/.claude/settings.json`. Until they do, every unit from 0.5 onward fails at push or at the
-browser. The agent cannot edit that file. It is deny-listed.
+`gh` commands and `git push` run with sandbox exclusions as of 2026-08-09. The owner added `gh *`, `git push*` and `node scripts/browser.mjs*` to `sandbox.excludedCommands` in `~/.claude/settings.json`. Units 0.5 onward now run without sandbox exceptions for these commands. The agent cannot edit that file. It is deny-listed.
 
-`Bash(gh repo edit:*)` is denied, so the repository description and topics are set by the owner,
-not by an agent.
+`Bash(gh repo edit:*)` is denied, so the repository description and topics are set by the owner, not by an agent.
 
-`Bash(gh api --method PUT:*)` is denied, but the workspace convention `gh api -X PUT` is a
-different string and is allowed. Branch protection is therefore applicable by an agent.
+`Bash(gh api --method PUT:*)` is denied, but the workspace convention `gh api -X PUT` is a different string and is allowed. Branch protection is therefore applicable by an agent.
 
-`git status` inside the sandbox reports untracked files that do not exist, because deny-listed
-paths are bind-mounted as `/dev/null` character devices. Never gitignore or delete such a path.
-A clean-tree check means nothing unless it runs with the sandbox disabled.
+`git status` inside the sandbox reports untracked files that do not exist, because deny-listed paths are bind-mounted as `/dev/null` character devices. Never gitignore or delete such a path. A clean-tree check means nothing unless it runs with the sandbox disabled.
+
+**`git switch --orphan` and `git checkout --orphan` differ in one way that matters:** `switch` empties the working tree while `checkout` keeps it. The working tree is critical. An edit that accidentally used `switch` staged only `node_modules` and `dist`, leaving the source tree unstaged. Use `checkout --orphan` instead. The safer path builds a parentless commit with `git commit-tree`, verifies the tree SHA, the empty content diff and the absent parent, then pushes that commit.
 
 ---
 

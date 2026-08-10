@@ -1,5 +1,7 @@
 # Release checklist — the network half of Units 0.5 and 0.6
 
+**COMPLETE 2026-08-09.** Every step is done. This file is retained because two of its warnings were bought at a price.
+
 Everything an agent can build without the network is built. This file holds what is left.
 
 Two separate restrictions block these commands. Read this section fully before beginning.
@@ -35,6 +37,10 @@ git add <every tracked path>          # git add -A fails on a deny-mount artifac
 git commit -m "feat: add the rules core, the branding gate and the toolchain"
 git branch -M squashed main
 ```
+
+**Warning: `git switch --orphan` is not a substitute.** `switch` empties the working tree while `checkout` keeps it. An accidental use of `switch` left only `node_modules` and `dist` in the index, untracked source files outside it, and a push that carried dependencies with no source.
+
+**Safer alternative:** Build the parentless commit with `git commit-tree` from the current tree. Verify the tree SHA with `git commit-tree --dry-run`, the empty content diff with `git diff <new-commit-ish> main`, and the absent parent. Push that commit.
 
 **Why first.** The push is permanent and public. Work written before Unit 0.3 was never scanned by
 the branding gate, because the gate did not exist yet. One squashed commit carries one message that
@@ -113,7 +119,7 @@ git commit -m "test: prove the merge gate blocks a red run"
 git push -u origin test/gate-proof
 gh pr create --fill
 gh pr view --json mergeable,mergeStateStatus     # record the blocked state in the ledger
-gh pr close --delete-branch
+gh pr close 1 --delete-branch
 ```
 
 **Why the branch is named `test/gate-proof`.** `/advance` treats any open `feat/*` pull request as
