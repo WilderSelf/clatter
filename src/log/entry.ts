@@ -22,11 +22,16 @@ import type { PushCostUnit, PushProfile } from '../rules/push-profile';
 import { isLocked } from '../rules/push-profile';
 import type { RollResult } from '../rules/roll';
 import { baneCount } from '../rules/roll';
-import type { CurveId } from '../rules/success';
-import { score } from '../rules/success';
+import type { ArtifactCurveId } from '../rules/success';
+import { curveFor, score } from '../rules/success';
 
-/** The two curves an artifact die may take. Every other type has one curve. */
-export type ArtifactCurve = Extract<CurveId, 'artifactEscalating' | 'artifactFlat'>;
+/**
+ * The two curves an artifact die may take. Every other type has one curve.
+ *
+ * The type is the core's own. This module keeps the shorter name it has used
+ * since Unit 4.4, and it is the same type rather than a second copy of it.
+ */
+export type ArtifactCurve = ArtifactCurveId;
 
 /**
  * One die at one generation, with the values that die was worth at the time.
@@ -113,11 +118,6 @@ export function profileHash(profile: PushProfile): string {
   return createHash('sha256').update(JSON.stringify(profile, sortedKeys)).digest('hex');
 }
 
-/** An artifact die takes the curve the settings chose. Every other type has one. */
-function curveOf(die: Die, artifactCurve: ArtifactCurve | undefined): CurveId | undefined {
-  return die.type === 'artifact' ? artifactCurve : undefined;
-}
-
 /**
  * The die as it stood at one generation. `score` and `isLocked` both read the
  * newest value, so a shortened copy asks them about an older generation.
@@ -131,7 +131,7 @@ function cellsOf(
   profile: PushProfile,
   artifactCurve: ArtifactCurve | undefined,
 ): readonly (DieCell | null)[] {
-  const curve = curveOf(die, artifactCurve);
+  const curve = curveFor(die, artifactCurve);
   return die.values.map((value, generation) => {
     if (value === null) {
       return null;

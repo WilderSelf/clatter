@@ -198,3 +198,45 @@ describe('score', () => {
     expect(score(createDie('stress-1', 'stress', 6, 2))).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The artifact curve, as a settings choice — Unit 4.1
+//
+// The screen lets the player pick the curve the artifact dice score on. It
+// changes what a die is WORTH and it must never change whether a die LOCKS,
+// because `lockState` reads the die's own default curve and the screen reads
+// the chosen one. The claim below is what makes those two agree, and it is a
+// property of the curves rather than of the code that reads them.
+// ---------------------------------------------------------------------------
+
+describe('the two artifact curves', () => {
+  it('pay from the same face upwards, over every artifact face', () => {
+    // The enumeration above holds both artifact rows. The face counts come from
+    // it, so a face count added to the spec raises this denominator.
+    const sizes = ENUMERATION.filter((row) => row.type === 'artifact').flatMap((row) => [
+      ...row.faces,
+    ]);
+    const sizesOfOneCurve = [...new Set(sizes)];
+    let compared = 0;
+    let differed = 0;
+    for (const faces of sizesOfOneCurve) {
+      for (let face = 1; face <= faces; face += 1) {
+        const die = appendValue(createDie(`artifact-1`, 'artifact', faces), face);
+        const escalating = score(die, 'artifactEscalating');
+        const flat = score(die, 'artifactFlat');
+        expect(
+          escalating > 0,
+          `a d${faces} showing ${face} is a success on one curve and not on the other`,
+        ).toBe(flat > 0);
+        if (escalating !== flat) differed += 1;
+        compared += 1;
+      }
+    }
+    expect(compared, 'every face of every artifact size was compared').toBe(
+      sizesOfOneCurve.reduce((total, faces) => total + faces, 0),
+    );
+    // The check would pass on two identical curves, so the difference the
+    // setting exists for is counted as well.
+    expect(differed, 'the two curves pay differently somewhere').toBeGreaterThan(0);
+  });
+});

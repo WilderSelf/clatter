@@ -47,6 +47,38 @@ export interface PushProfile {
   readonly blockers: readonly PushBlocker[];
 }
 
+// ---------------------------------------------------------------------------
+// The domains
+//
+// Every union above is also a list of values at run time, because the override
+// panel of Unit 4.2 draws a control from the record alone and a union erases
+// when the code runs. Each list is built from a total record, so a member added
+// to a union is a type error here until the list holds it. No list is written
+// twice.
+// ---------------------------------------------------------------------------
+
+/** The keys of a total record, in the order it declares them. */
+function keysOf<T extends string>(total: Readonly<Record<T, unknown>>): readonly T[] {
+  return Object.keys(total) as T[];
+}
+
+export const PUSH_COST_SOURCES: readonly PushCostSource[] = keysOf<PushCostSource>({
+  bane: true,
+  push: true,
+});
+
+export const PUSH_COST_UNITS: readonly PushCostUnit[] = keysOf<PushCostUnit>({
+  ratingPoint: true,
+  healthPoint: true,
+  refereePoint: true,
+  complicationCheck: true,
+});
+
+export const STRESS_BEHAVIOURS: readonly StressBehaviour[] = keysOf<StressBehaviour>({
+  none: true,
+  addBeforeReroll: true,
+});
+
 /**
  * The three states the tray renders: a die the rules hold, a die the player
  * keeps by choice, and a die that goes back in the cup.
@@ -82,6 +114,12 @@ export function isLocked(die: Die, profile: PushProfile, curve?: CurveId): boole
 const BLOCKER_READS: Readonly<Record<PushBlocker, (die: Die) => boolean>> = {
   stressOneShowing: (die) => die.type === 'stress' && latestValue(die) === 1,
 };
+
+/**
+ * The blockers this build answers, read off the record above rather than
+ * written a second time. A blocker with no reader cannot appear here.
+ */
+export const PUSH_BLOCKERS: readonly PushBlocker[] = keysOf<PushBlocker>(BLOCKER_READS);
 
 /**
  * The blocker that refuses the push, or `null` when no blocker applies. The
@@ -198,6 +236,19 @@ const PRESETS: readonly PushProfile[] = [
 ];
 
 export const PUSH_PROFILES: readonly PushProfile[] = Object.freeze(PRESETS.map(freezeProfile));
+
+/**
+ * The preset under an id. An unknown id is a fault and not a fallback, because
+ * a caller that stored an id it cannot resolve has already lost the player's
+ * choice. Storage falls back to a shipping id before it reaches here.
+ */
+export function profileById(id: string): PushProfile {
+  const held = PUSH_PROFILES.find((profile) => profile.id === id);
+  if (held === undefined) {
+    throw new Error(`no push profile is named ${id}`);
+  }
+  return held;
+}
 
 /**
  * A partial profile. The override panel at Unit 4.2 exposes every field, and it

@@ -10,7 +10,8 @@
 import type { Die, DieType } from './die';
 import { appendValue, latestValue } from './die';
 import type { RandomSource } from './random';
-import { score } from './success';
+import type { ArtifactCurveId } from './success';
+import { curveFor, score } from './success';
 
 /**
  * What the application asks the core to throw. `stressBefore` is the stress
@@ -49,9 +50,15 @@ export function roll(request: RollRequest, random: RandomSource): RollResult {
   };
 }
 
-/** The successes the newest generation is worth, read from the success tables. */
-export function successCount(result: RollResult): number {
-  return result.dice.reduce((total, die) => total + score(die), 0);
+/**
+ * The successes the newest generation is worth, read from the success tables.
+ *
+ * `artifactCurve` is the curve the artifact dice run under. It is the one
+ * choice a player has over a curve, and `curveFor` decides which dice it
+ * reaches. Left out, every die takes its own default curve.
+ */
+export function successCount(result: RollResult, artifactCurve?: ArtifactCurveId): number {
+  return result.dice.reduce((total, die) => total + score(die, curveFor(die, artifactCurve)), 0);
 }
 
 /** A bane is a 1. Stress dice cost on a 1 on the first roll too. */
