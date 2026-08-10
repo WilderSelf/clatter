@@ -11,7 +11,14 @@
 //                            [--capture <path>] [--browser <path>]
 //                            [--tray] [--pool] [--push] [--affordance] [--probe]
 //                            [--share] [--capture-later] [--offline]
-//                            [--shell] [--capture-shell <dir>]
+//                            [--shell] [--capture-shell <dir>] [--table]
+//
+// `--table` starts and stops its own preview server, because it drives the
+// built application. Build first, then run it alone:
+//   npm run build && node scripts/browser.mjs --table \
+//     --url http://localhost:4173/clatter/ --viewport 1440x900 \
+//     --capture-before docs/design/0014-table-throw-1440.png \
+//     --capture docs/design/0014-table-push-1440.png
 //
 // `--shell` starts and stops its own preview server, for the same reason
 // `--offline` does. Build first, then run it alone:
@@ -133,6 +140,20 @@
 // `docs/design/0002-screen-design.md` states. `--capture-shell <dir>` writes one
 // PNG per width, for comparison against the renders beside
 // `docs/design/0013-screen-final.html`.
+//
+// `--table` needs `--url`, and the url must be a preview server over the built
+// output. It is the 3D tray inside the application, which is what Units 3.4,
+// 3.5 and 3.7 were building towards. It presses the tiles, presses Roll until
+// the push is live, presses every die with the keyboard and with the pointer,
+// and presses Push. It reads the tray the application mounted through
+// `window.__clatterTable`, which `src/shell/table.tsx` documents as the one
+// seam an outside instrument has into a WebGL scene.
+//
+// **The oracle is the screen's own reading of the rules core.** Every die cell
+// carries an accessible name that states the face the core decided, and each
+// up-face is read off the physics body and compared against it, so the 3D layer
+// is judged against the rules and never against itself. A machine that cannot
+// draw the table prints every check as NOT JUDGED and counts them in skipped=.
 //
 // The sandbox hides /dev/dri, so a sandboxed run gets no WebGL context at all
 // and a hardware run inside the sandbox fails by design. Run a hardware run
@@ -5969,6 +5990,29 @@ async function runShell(page, options, checks) {
       `in which zone follows this throw, not the drawn one.`,
   });
 
+  // Wait for the 3D table to come to rest, where one is running.
+  //
+  // The tray settles on its own clock and its last update re-renders the
+  // screen, which moves the sequential focus navigation starting point the
+  // next block puts back. Measured on this host on 2026-08-09: without this
+  // wait the walk of rest B started at the footer and reached one stop. A run
+  // on flat dice holds no seam and the wait returns at once.
+  await withTimeout(
+    page.evaluate(async () => {
+      const frame = () =>
+        new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+      let quiet = 0;
+      for (let step = 0; step < 2000 && quiet < 3; step += 1) {
+        const seam = window.__clatterTable;
+        if (seam === undefined) return;
+        quiet = seam.busy ? 0 : quiet + 1;
+        await frame();
+      }
+    }),
+    120000,
+    'the table never came to rest',
+  );
+
   // Put the sequential focus navigation starting point back at the top of the
   // screen. The walk of rest A left it on the roll button, and neither `blur()`
   // nor a click moves it, so the first Tab below would reach the footer and the
@@ -6546,6 +6590,556 @@ async function runBlockedChunk(page, options, checks, server) {
 }
 
 // ---------------------------------------------------------------------------
+// The 3D tray, inside the application — Units 3.4, 3.5 and 3.7
+//
+// Every other tray mode builds its own scene. This one drives the application
+// itself: it presses the tiles, presses Roll, presses Push and presses the
+// dice, and it reads the tray the application mounted.
+//
+// **The oracle is the screen's own reading of the rules core.** Each die cell
+// carries an accessible name that states the face the core decided, and the
+// check reads the face pointing up off the physics body and compares the two.
+// The 3D layer is therefore judged against the rules and never against itself.
+//
+// `window.__clatterTable` is the one seam into the application's tray, because
+// a WebGL scene has no other route. `src/shell/table.tsx` documents it.
+// ---------------------------------------------------------------------------
+
+/** How far a cell may sit from the die it names, in CSS pixels. */
+const CELL_OVER_DIE_PX = 1;
+
+/** Steps out from a die's projected centre when the run hunts for a click point. */
+const CLICK_PROBE_RINGS = 6;
+const CLICK_PROBE_ANGLES = 12;
+
+/** The pool the run builds: every tile at its cap, and the difficulty at +3. */
+const TABLE_POOL = SHELL_DRAWN_POOL;
+const TABLE_DIFFICULTY = SHELL_DRAWN_DIFFICULTY;
+
+/**
+ * The page-side helpers this mode needs, as source, so they can be copied into
+ * an evaluate without closing over anything in this module.
+ */
+const TABLE_HELPERS = `
+window.__table = {
+  /* The name the screen gives one die, derived here rather than read from the
+     screen. src/shell/state.ts derives the same name from the same die id, so a
+     screen that renamed a cell fails this run by name instead of quietly
+     agreeing with itself. */
+  tags: { attribute: 'at', skill: 'sk', gear: 'ge', artifact: 'ar', bonus: 'bo', stress: 'st' },
+  elementOf(id) {
+    const cut = id.lastIndexOf('-');
+    return 'die-' + window.__table.tags[id.slice(0, cut)] + id.slice(cut + 1);
+  },
+  frame: () => new Promise((s) => requestAnimationFrame(() => requestAnimationFrame(s))),
+  async settle(done, cap = 1200) {
+    for (let step = 0; step < cap; step += 1) {
+      const seam = window.__clatterTable;
+      if (seam && !seam.busy && seam.throws >= done) return true;
+      await window.__table.frame();
+    }
+    return false;
+  },
+  /* The frontmost die at a point on the screen, as an index into diceList. */
+  dieAt(box, clientX, clientY) {
+    const rect = box.container.getBoundingClientRect();
+    box.raycaster.setFromCamera(
+      {
+        x: ((clientX - rect.left) / rect.width) * 2 - 1,
+        y: -((clientY - rect.top) / rect.height) * 2 + 1,
+      },
+      box.camera,
+    );
+    const hit = box.raycaster.intersectObjects(box.diceList)[0];
+    if (!hit) return null;
+    const owner = new Map();
+    box.diceList.forEach((die, index) => die.traverse((node) => owner.set(node, index)));
+    const found = owner.get(hit.object);
+    return found === undefined ? null : found;
+  },
+  /* What the screen says about every die, by its element name. */
+  read() {
+    const slots = (name) =>
+      [...document.querySelectorAll('[data-el="' + name + '"] .slot')].map((s) => s.dataset.el);
+    const cells = [...document.querySelectorAll('[data-el^="die-"]')];
+    return {
+      tray: slots('dice-tray'),
+      kept: slots('kept-shelf'),
+      loose: slots('throw-zone'),
+      renderer: document.querySelector('.screen')?.dataset.renderer ?? null,
+      canvases: document.querySelectorAll('canvas').length,
+      faces: Object.fromEntries(
+        cells.map((s) => [
+          s.dataset.el,
+          Number(/shows (\\d+)\\./.exec(s.getAttribute('aria-label') || '')?.[1] ?? NaN),
+        ]),
+      ),
+      pressed: Object.fromEntries(cells.map((s) => [s.dataset.el, s.getAttribute('aria-pressed')])),
+      roles: Object.fromEntries(cells.map((s) => [s.dataset.el, s.getAttribute('role') ?? s.tagName.toLowerCase()])),
+      labelled: cells.filter((s) => (s.getAttribute('aria-label') || '').trim() !== '').length,
+      pushDisabled: document.querySelector('[data-el="push-button"]')?.disabled ?? null,
+      cost: (document.querySelector('[data-el="cost-row"] .cost-t')?.textContent ?? '').trim(),
+    };
+  },
+};
+`;
+
+/** The tray as it now stands, die by die, beside what the screen says. */
+async function readTableDice(page) {
+  return page.evaluate(() => {
+    const seam = window.__clatterTable;
+    const box = seam.box;
+    const rect = box.container.getBoundingClientRect();
+    const camera = box.camera;
+    camera.updateMatrixWorld();
+    const projection = Array.from(camera.projectionMatrix.elements);
+    const view = Array.from(camera.matrixWorldInverse.elements);
+    const cell = (name) => {
+      const held = document.querySelector('[data-el="' + name + '"]');
+      if (held === null) return null;
+      const r = held.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height };
+    };
+    return {
+      viewport: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      projection,
+      view,
+      throws: seam.throws,
+      dice: seam.ordered.map((die, index) => {
+        const tray = box.diceList[index];
+        const name = window.__table.elementOf(die.id);
+        return {
+          id: die.id,
+          index,
+          element: name,
+          face: tray ? tray.getFaceValue().value : null,
+          position: tray
+            ? [tray.body.position.x, tray.body.position.y, tray.body.position.z]
+            : null,
+          cell: cell(name),
+        };
+      }),
+      trayCount: box.diceList.length,
+    };
+  });
+}
+
+/**
+ * Where the renderer LAST DREW each lock mark, against the die it names.
+ *
+ * `matrixWorld` is the matrix the renderer used on its most recent frame, so
+ * this reads what the player is looking at and not what the scene graph means
+ * to show. It is the one reading that catches a mark added after the last
+ * frame: the library renders once when a throw ends and then stops, and it
+ * renders nothing at all for a click, so a mark drawn after that frame keeps
+ * the matrix of the frame before it and the player sees the marks of the
+ * previous throw standing where the previous dice stood.
+ *
+ * A raycast cannot see this. Three.js updates the world matrix of anything it
+ * casts against, so a probe that raycasts repairs the fault it came to measure.
+ * A pixel read cannot see it either, because reading a WebGL canvas back needs
+ * a render in the same task and that render repairs it too.
+ */
+async function readMarkPlacement(page) {
+  return page.evaluate(() => {
+    const box = window.__clatterTable.box;
+    const marks = box.scene.children.filter((child) =>
+      String(child.name || '').startsWith('clatter-lock-marker:'),
+    );
+    return {
+      marks: marks.map((mark) => {
+        const index = Number(String(mark.name).split(':')[1]);
+        const die = box.diceList[index];
+        const drawn = mark.matrixWorld.elements;
+        const away =
+          die === undefined
+            ? null
+            : Math.hypot(
+                drawn[12] - die.position.x,
+                drawn[13] - die.position.y,
+                drawn[14] - die.position.z,
+              );
+        if (die !== undefined && !die.geometry.boundingSphere) die.geometry.computeBoundingSphere();
+        return {
+          index,
+          away,
+          radius:
+            die === undefined ? null : (die.geometry.boundingSphere?.radius ?? 0) * die.scale.x,
+          element: window.__table.elementOf(window.__clatterTable.ordered[index]?.id ?? '-'),
+        };
+      }),
+    };
+  });
+}
+
+/** Build the drawn pool and roll until the push button is live. */
+async function rollUntilPushable(page, limit) {
+  return page.evaluate(
+    async ({ plan, notch, limit }) => {
+      for (const [type, count] of plan) {
+        const end = document.querySelector('[data-el="pool-cell-' + type + '"] .cell-p');
+        for (let taken = 0; taken < count; taken += 1) end.click();
+      }
+      document.querySelectorAll('[data-el="difficulty-track"] .tk-n')[notch].click();
+      await window.__table.frame();
+      const button = () => document.querySelector('[data-el="push-button"]');
+      let taken = 0;
+      do {
+        document.querySelector('[data-el="roll-button"]').click();
+        await window.__table.frame();
+        taken += 1;
+      } while (taken < limit && button() !== null && button().disabled);
+      const settled = await window.__table.settle(1);
+      return { taken, limit, settled, ...window.__table.read() };
+    },
+    { plan: TABLE_POOL, notch: TABLE_DIFFICULTY, limit },
+  );
+}
+
+async function runTable(page, options, checks) {
+  await page.evaluate(TABLE_HELPERS);
+  const opening = await page.evaluate(() => window.__table.read());
+  const onTheTable = opening.renderer === 'tray';
+  const why =
+    'the startup probe answered below the bar, so the screen draws flat dice and mounts no ' +
+    'table. There is no WebGL context inside the sandbox. Run this mode with the sandbox off.';
+  /** A check nobody could judge prints its reason and counts in `skipped=`. */
+  const judge = (name, ok, detail) =>
+    checks.push(
+      onTheTable
+        ? { name, ok, detail }
+        : { name, ok: true, skipped: true, detail: `NOT JUDGED: ${why}` },
+    );
+
+  if (!onTheTable) {
+    console.log(`browser: table renderer=${opening.renderer} NOT JUDGED, ${why}`);
+    for (const name of [
+      'table.the-3d-tray-draws-the-result',
+      'table.up-face-equals-core-value',
+      'table.every-die-carries-a-cell-over-it',
+      'table.every-die-answers-a-key-press',
+      'table.every-die-is-accounted-for-by-the-pointer-route',
+      'table.the-push-put-the-die-it-added-on-the-table',
+      'table.the-lock-marks-are-drawn-on-the-dice-they-name',
+    ]) {
+      judge(name, true, '');
+    }
+    return;
+  }
+
+  // ---- The throw ----
+  const rolled = await rollUntilPushable(page, 40);
+  const before = await readTableDice(page);
+  console.log(
+    `browser: table renderer=${rolled.renderer} canvases=${rolled.canvases} ` +
+      `throws=${rolled.taken} of at most ${rolled.limit} settled=${rolled.settled} ` +
+      `dice=${rolled.tray.length} kept=${rolled.kept.length} loose=${rolled.loose.length} ` +
+      `tray_bodies=${before.trayCount} acted_out=${before.throws}`,
+  );
+  judge(
+    'table.the-3d-tray-draws-the-result',
+    rolled.renderer === 'tray' &&
+      rolled.canvases === 1 &&
+      rolled.settled === true &&
+      before.throws >= 1 &&
+      before.trayCount === rolled.tray.length &&
+      rolled.tray.length > 0,
+    `the screen reads renderer=${rolled.renderer} over ${rolled.canvases} canvas elements, and ` +
+      `the tray acted out ${before.throws} throws. It holds ${before.trayCount} bodies against ` +
+      `the ${rolled.tray.length} dice the screen names, and the flat dice draw none of them.`,
+  );
+
+  // ---- Every face, against the value the screen printed for that die ----
+  const wrongFaces = before.dice.flatMap((die) => {
+    const said = rolled.faces[die.element];
+    return die.face === said ? [] : [`${die.element} reads ${die.face}, the screen says ${said}`];
+  });
+  judge(
+    'table.up-face-equals-core-value',
+    wrongFaces.length === 0 && before.dice.length === rolled.tray.length && before.dice.length > 0,
+    `compared=${before.dice.length} of a pool of ${rolled.tray.length}, each read off its own ` +
+      `body quaternion and compared against the face the screen printed for that die. ` +
+      `wrong=${wrongFaces.length}${wrongFaces.length === 0 ? '' : ` [${wrongFaces.join('; ')}]`}`,
+  );
+
+  // ---- Every die carries a cell, over the die it names ----
+  const far = before.dice.flatMap((die) => {
+    if (die.cell === null || die.position === null) return [`${die.element} has no cell`];
+    const centroid = readDieCentroid({
+      position: die.position,
+      viewProjection: multiply4(before.projection, before.view),
+      viewport: before.viewport,
+    });
+    const away = Math.hypot(centroid.x - die.cell.x, centroid.y - die.cell.y);
+    return away <= CELL_OVER_DIE_PX ? [] : [`${die.element} sits ${away.toFixed(3)} px away`];
+  });
+  const named = before.dice.filter((die) => rolled.roles[die.element] !== undefined);
+  judge(
+    'table.every-die-carries-a-cell-over-it',
+    far.length === 0 &&
+      named.length === before.dice.length &&
+      rolled.labelled === before.dice.length &&
+      before.dice.length > 0,
+    `placed=${before.dice.length} of a pool of ${before.dice.length}, every cell centre against ` +
+      `a centroid this file projects from the camera matrices, inside ${CELL_OVER_DIE_PX} px. ` +
+      `${rolled.labelled} of ${before.dice.length} carry an accessible name. ` +
+      `off=${far.length}${far.length === 0 ? '' : ` [${far.join('; ')}]`}`,
+  );
+
+  // ---- The marks the player looks at, where the renderer last drew them ----
+  const markedThrow = await readMarkPlacement(page);
+
+  // ---- Every die answers a key press, and a rule lock refuses ----
+  const pressed = await pressEveryDie(page, rolled.tray);
+  console.log(
+    `browser: table keys pool=${pressed.pool} toggled=${pressed.toggled} ` +
+      `refused=${pressed.refused}`,
+  );
+  judge(
+    'table.every-die-answers-a-key-press',
+    pressed.toggled + pressed.refused === pressed.pool &&
+      pressed.toggled > 0 &&
+      pressed.refused > 0 &&
+      pressed.faults.length === 0,
+    `${pressed.toggled} answered a real Enter by changing aria-pressed and ${pressed.refused} ` +
+      `refused it, over a pool of ${pressed.pool}. A die the rules hold is not a button and ` +
+      `takes no press. faults=${pressed.faults.length}` +
+      `${pressed.faults.length === 0 ? '' : ` [${pressed.faults.join('; ')}]`}`,
+  );
+
+  // ---- One real click on every die the camera can reach ----
+  const clicks = await clickEveryDie(page, rolled.tray);
+  console.log(
+    `browser: table clicks pool=${clicks.pool} reached=${clicks.reached} ` +
+      `unreachable=${clicks.unreachable} toggled=${clicks.toggled} refused=${clicks.refused}`,
+  );
+  judge(
+    'table.every-die-is-accounted-for-by-the-pointer-route',
+    clicks.reached + clicks.unreachable === clicks.pool &&
+      clicks.toggled + clicks.refused === clicks.reached &&
+      clicks.toggled > 0 &&
+      clicks.faults.length === 0,
+    `a real pointer click at a point the raycast proves is that die's own front surface. ` +
+      `reached=${clicks.reached} and unreachable=${clicks.unreachable} sum to the pool of ` +
+      `${clicks.pool}. Of the reached, ${clicks.toggled} toggled and ${clicks.refused} were ` +
+      `refused by a rule lock. **A buried die has no pointer route**, by design: a player who ` +
+      `cannot see a die cannot aim at it, and the key press above reaches every die. ` +
+      `faults=${clicks.faults.length}` +
+      `${clicks.faults.length === 0 ? '' : ` [${clicks.faults.join('; ')}]`}`,
+  );
+
+  if (options.captureBefore !== null) {
+    await page.screenshot({ path: options.captureBefore });
+    console.log(`browser: table captured the throw to ${options.captureBefore}`);
+  }
+
+  // ---- The push, with the die the profile adds before the re-throw ----
+  const keptBefore = new Map(
+    before.dice
+      .filter((die) => rolled.kept.includes(die.element))
+      .map((die) => [die.element, die.cell]),
+  );
+  const pushed = await pushOnTheTable(page, before.throws);
+  const after = await readTableDice(page);
+  const addedNames = after.dice
+    .map((die) => die.element)
+    .filter((name) => !rolled.tray.includes(name));
+  console.log(
+    `browser: table push settled=${pushed.settled} dice=${pushed.tray.length} ` +
+      `tray_bodies=${after.trayCount} added=[${addedNames.join(', ')}] ` +
+      `acted_out=${after.throws}`,
+  );
+  const moved = [...keptBefore].flatMap(([name, cell]) => {
+    const now = after.dice.find((die) => die.element === name);
+    if (now === undefined || now.cell === null || cell === null) return [`${name} left the table`];
+    const away = Math.hypot(now.cell.x - cell.x, now.cell.y - cell.y);
+    return away <= CELL_OVER_DIE_PX ? [] : [`${name} moved ${away.toFixed(3)} px`];
+  });
+  const wrongAfter = after.dice.flatMap((die) => {
+    const said = pushed.faces[die.element];
+    return die.face === said ? [] : [`${die.element} reads ${die.face}, the screen says ${said}`];
+  });
+  judge(
+    'table.the-push-put-the-die-it-added-on-the-table',
+    pushed.settled === true &&
+      after.trayCount === pushed.tray.length &&
+      after.dice.length === pushed.tray.length &&
+      addedNames.length === pushed.tray.length - rolled.tray.length &&
+      addedNames.length > 0 &&
+      moved.length === 0 &&
+      keptBefore.size > 0 &&
+      wrongAfter.length === 0,
+    `the push took the table from ${rolled.tray.length} dice to ${pushed.tray.length}, and the ` +
+      `tray holds ${after.trayCount} bodies for them. The profile adds one stress die before ` +
+      `every re-throw and the screen named [${addedNames.join(', ')}], which the tray spawned ` +
+      `rather than refused. compared=${after.dice.length} of a pool of ${pushed.tray.length} ` +
+      `up-faces against the screen, wrong=${wrongAfter.length}. ` +
+      `kept=${keptBefore.size} of the dice the screen keeps, each inside ${CELL_OVER_DIE_PX} px ` +
+      `of where it lay, moved=${moved.length}` +
+      `${moved.length === 0 ? '' : ` [${moved.join('; ')}]`}` +
+      `${wrongAfter.length === 0 ? '' : ` [${wrongAfter.join('; ')}]`}`,
+  );
+
+  // ---- The lock marks, over both throws ----
+  const markedPush = await readMarkPlacement(page);
+  const strayMarks = [...markedThrow.marks, ...markedPush.marks].flatMap((mark) =>
+    mark.away !== null && mark.radius !== null && mark.away <= mark.radius
+      ? []
+      : [`${mark.element} was drawn ${mark.away === null ? 'nowhere' : mark.away.toFixed(1)} away`],
+  );
+  const markedDice = markedThrow.marks.length + markedPush.marks.length;
+  console.log(
+    `browser: table marks after_throw=${markedThrow.marks.length} of ${rolled.kept.length} kept, ` +
+      `after_push=${markedPush.marks.length} of ${pushed.kept.length} kept, stray=${strayMarks.length}`,
+  );
+  judge(
+    'table.the-lock-marks-are-drawn-on-the-dice-they-name',
+    strayMarks.length === 0 &&
+      markedThrow.marks.length === rolled.kept.length &&
+      markedPush.marks.length === pushed.kept.length &&
+      markedDice > 0,
+    `drawn=${markedDice} marks over two throws, against the ${rolled.kept.length} and ` +
+      `${pushed.kept.length} dice the screen keeps. Each one is read from the world matrix the ` +
+      `renderer last used, so this is where the player sees it and not where the scene means ` +
+      `it to be, and each must lie inside its own die's radius. ` +
+      `stray=${strayMarks.length}${strayMarks.length === 0 ? '' : ` [${strayMarks.join('; ')}]`}`,
+  );
+
+  if (options.capture !== null) {
+    await page.screenshot({ path: options.capture });
+    console.log(`browser: table captured the push to ${options.capture}`);
+  }
+}
+
+/** Column-major 4x4 multiply, so the projection route is this file's own. */
+function multiply4(a, b) {
+  const out = new Array(16).fill(0);
+  for (let column = 0; column < 4; column += 1) {
+    for (let row = 0; row < 4; row += 1) {
+      let sum = 0;
+      for (let k = 0; k < 4; k += 1) sum += a[k * 4 + row] * b[column * 4 + k];
+      out[column * 4 + row] = sum;
+    }
+  }
+  return out;
+}
+
+/** Focus every die cell and press Enter on it, then press it back. */
+async function pressEveryDie(page, names) {
+  const faults = [];
+  let toggled = 0;
+  let refused = 0;
+  for (const name of names) {
+    const state = await page.evaluate((held) => {
+      const cell = document.querySelector('[data-el="' + held + '"]');
+      cell.focus();
+      return {
+        focused: document.activeElement === cell,
+        pressed: cell.getAttribute('aria-pressed'),
+        role: cell.getAttribute('role'),
+      };
+    }, name);
+    if (!state.focused) {
+      faults.push(`${name} could not take the focus`);
+      continue;
+    }
+    await page.keyboard.press('Enter');
+    const now = await page.evaluate(
+      (held) => document.querySelector('[data-el="' + held + '"]').getAttribute('aria-pressed'),
+      name,
+    );
+    if (state.pressed === null) {
+      // A die the rules hold is not a button. It still takes the focus.
+      if (now !== null) faults.push(`${name} answered a press the rules refuse`);
+      refused += 1;
+      continue;
+    }
+    if (now === state.pressed) {
+      faults.push(`${name} did not answer the press: aria-pressed stayed ${now}`);
+      continue;
+    }
+    toggled += 1;
+    // Put it back, so the push below sees the table the throw made.
+    await page.evaluate((held) => document.querySelector('[data-el="' + held + '"]').focus(), name);
+    await page.keyboard.press('Enter');
+  }
+  return { pool: names.length, toggled, refused, faults };
+}
+
+/** One real pointer click on every die the camera can reach. */
+async function clickEveryDie(page, names) {
+  const faults = [];
+  let reached = 0;
+  let unreachable = 0;
+  let toggled = 0;
+  let refused = 0;
+  for (const name of names) {
+    const aim = await page.evaluate(
+      ({ held, rings, angles }) => {
+        const seam = window.__clatterTable;
+        const box = seam.box;
+        const index = seam.ordered.findIndex((die) => window.__table.elementOf(die.id) === held);
+        if (index < 0) return null;
+        const cell = document.querySelector('[data-el="' + held + '"]').getBoundingClientRect();
+        const centre = { x: cell.x + cell.width / 2, y: cell.y + cell.height / 2 };
+        const radius = cell.width / 2;
+        for (let ring = 0; ring < rings; ring += 1) {
+          const reach = (ring / rings) * radius * 0.8;
+          for (let step = 0; step < (ring === 0 ? 1 : angles); step += 1) {
+            const turn = (step / angles) * Math.PI * 2;
+            const x = centre.x + Math.cos(turn) * reach;
+            const y = centre.y + Math.sin(turn) * reach;
+            if (window.__table.dieAt(box, x, y) === index) {
+              return {
+                x,
+                y,
+                pressed: document
+                  .querySelector('[data-el="' + held + '"]')
+                  .getAttribute('aria-pressed'),
+              };
+            }
+          }
+        }
+        return { x: null, y: null, pressed: null };
+      },
+      { held: name, rings: CLICK_PROBE_RINGS, angles: CLICK_PROBE_ANGLES },
+    );
+    if (aim === null || aim.x === null) {
+      unreachable += 1;
+      continue;
+    }
+    reached += 1;
+    await page.mouse.click(aim.x, aim.y);
+    const now = await page.evaluate(
+      (held) => document.querySelector('[data-el="' + held + '"]').getAttribute('aria-pressed'),
+      name,
+    );
+    if (aim.pressed === null) {
+      if (now !== null) faults.push(`${name} answered a click the rules refuse`);
+      refused += 1;
+      continue;
+    }
+    if (now === aim.pressed) {
+      faults.push(`${name} did not answer the click: aria-pressed stayed ${now}`);
+      continue;
+    }
+    toggled += 1;
+    await page.mouse.click(aim.x, aim.y);
+  }
+  return { pool: names.length, reached, unreachable, toggled, refused, faults };
+}
+
+/** Press Push and wait for the tray to act it out. */
+async function pushOnTheTable(page, throwsBefore) {
+  return page.evaluate(async (done) => {
+    document.querySelector('[data-el="push-button"]').click();
+    await window.__table.frame();
+    const settled = await window.__table.settle(done + 1);
+    return { settled, ...window.__table.read() };
+  }, throwsBefore);
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing and the run
 // ---------------------------------------------------------------------------
 
@@ -6584,6 +7178,7 @@ function parseArgs(argv) {
     offline: false,
     shell: false,
     blockedChunk: false,
+    table: false,
     captureShell: null,
     captureLater: false,
     longTaskMs: 0,
@@ -6626,6 +7221,7 @@ function parseArgs(argv) {
     else if (arg === '--offline') options.offline = true;
     else if (arg === '--shell') options.shell = true;
     else if (arg === '--blocked-chunk') options.blockedChunk = true;
+    else if (arg === '--table') options.table = true;
     else if (arg === '--capture-shell') options.captureShell = next();
     else if (arg === '--capture-later') options.captureLater = true;
     else if (arg === '--long-task-ms') options.longTaskMs = Number(next());
@@ -6682,13 +7278,14 @@ function parseArgs(argv) {
     ['--offline', options.offline],
     ['--shell', options.shell],
     ['--blocked-chunk', options.blockedChunk],
+    ['--table', options.table],
   ];
   const named = MODES.filter(([, on]) => on).map(([flag]) => flag);
   if (named.length > 0 && options.url === null) {
     throw new Error(
       `${named[0]} needs --url, and the url must be ` +
         `${
-          options.offline || options.shell || options.blockedChunk
+          options.offline || options.shell || options.blockedChunk || options.table
             ? 'a preview server over the built output'
             : 'a Vite dev server'
         }`,
@@ -6696,6 +7293,9 @@ function parseArgs(argv) {
   }
   if (named.length > 1) {
     throw new Error(`${named.join(', ')} build different scenes. Run one at a time.`);
+  }
+  if (options.captureBefore !== null && !options.push && !options.table) {
+    throw new Error('--capture-before belongs to --push or --table');
   }
   if (options.offsetKept !== null) {
     if (!options.push) throw new Error('--offset-kept belongs to --push');
@@ -6733,7 +7333,7 @@ async function run(options) {
   // a url that somebody else is serving.
   let server = null;
   try {
-    if (options.offline || options.shell || options.blockedChunk) {
+    if (options.offline || options.shell || options.blockedChunk || options.table) {
       server = await startPreviewServer(options.url, join(here, '..'));
     }
     if (
@@ -6744,7 +7344,8 @@ async function run(options) {
       options.contextLoss ||
       options.reducedMotion ||
       options.sound ||
-      options.share
+      options.share ||
+      options.table
     ) {
       await page.setViewport({
         width: options.viewport.width,
@@ -6814,6 +7415,8 @@ async function run(options) {
       await runShell(page, options, checks);
     } else if (options.blockedChunk) {
       await runBlockedChunk(page, options, checks, server);
+    } else if (options.table) {
+      await runTable(page, options, checks);
     } else if (!options.url) {
       await selfTestCentroid(page, checks);
       await selfTestUpFace(page, checks);

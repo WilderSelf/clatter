@@ -286,3 +286,59 @@ there and its note names every reading that failed. `chooseRenderer` in `src/she
 reads the platform before the record for that reason.
 
 ---
+
+## Decision 9 — the die cells lie over the 3D table, taken by me 2026-08-09
+
+A canvas has no children a keyboard can reach. The 3D dice are drawn inside one canvas, so section 6
+of `docs/design/0002-screen-design.md` has nowhere to put the thirty visits it names for the dice,
+and `aria-pressed` has nothing to sit on.
+
+**The die cells are real DOM in both renderers.** With the 3D table running, the same cells lie over
+the canvas, one on each die, at the place the tray put that die. A cell over the table draws no die
+of its own. It carries the role, the accessible name, the pressed state, its place in the roving tab
+index and the focus ring, and nothing else. I took this decision under the delegated interface
+authority of `CLAUDE.md`.
+
+### The four reasons
+
+**One list, not two.** Section 6 states one walk after the throw. A renderer that carried its own
+walk would need a second list, and two lists drift. The cells are the same elements in both
+renderers, so the jsdom walk and the driven-browser walk read one list out of the document and both
+hold whichever renderer is running.
+
+**The player reads the 3D dice, never a copy.** A cell over the table renders no face, no badge and
+no caption. A flat die drawn on top of a 3D die would show the result twice and the two could
+disagree.
+
+**A pointer press stays a press on the die itself.** The cells take no pointer at all, so a click
+falls through to the canvas, where `src/tray/affordance.ts` hit-tests it against the dice. That is
+the route Unit 3.5 built and measured: a rule lock refuses the press there, and a die the camera
+cannot see cannot be aimed at.
+
+**The focus is visible.** A keyboard ring drawn round a transparent cell is a ring round the die
+itself, so a player who walks the tray with the arrow keys sees which die is in focus on the table.
+
+### What follows from it, and what does not
+
+- **`dice-tray` is still ONE control**, with one roving tab index over the shelf and then the zone,
+  which is section 2 and Decision 4 unchanged.
+- **The two zone bands stay.** They print the kept count and the re-throw count on a chip of the
+  interface colours, because the tray surface is a theme axis of its own and the interface ink is
+  not measured against it.
+- **The three lock states are drawn on the dice**, by the marks of Unit 3.5, and not on the cells.
+- **The shake belongs to the flat renderer.** A 3D die tumbles, so the cell over it does not shake.
+- **No control was added and none was taken away**, so the budget of section 3 is untouched.
+
+### The limits, measured and not hidden
+
+**A buried die has no pointer route.** A player who cannot see a die cannot aim at one, and a click
+that reached through the heap would toggle a die the player never meant. The key press reaches every
+die, so no die is out of reach. `node scripts/browser.mjs --table` counts the dice the raycast can
+reach and the dice it cannot, and it fails unless the two sum to the pool.
+
+**The dice heap and no layout stops that.** The library builds a die at a fixed world size and
+throws every die from one place, so a table of thirty dice on a phone puts dice on each other. The
+throw is not spread to fix it: spreading it moves `steps_to_rest_fixed_seed_scene` and the pinned
+scene digest in `budgets.json`, which is a budget conversation and not a free change.
+
+---

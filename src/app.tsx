@@ -38,6 +38,8 @@ import {
   trayNote,
   withDecision,
 } from './shell/renderer';
+import type { TrayMount, TraySpots } from './shell/table';
+import { NO_SPOTS, Table } from './shell/table';
 import type { AppState, DieView, PoolCell } from './shell/state';
 import {
   canPush,
@@ -63,8 +65,9 @@ import {
 } from './shell/state';
 import type { TrayDecision } from './tray/capability';
 import { decideTray, probeCapability } from './tray/capability';
-import type { MountTrayOptions } from './tray/scene';
 import { mountTray } from './tray/scene';
+
+export type { TrayMount, TraySpots } from './shell/table';
 
 export const APP_NAME = 'Clatter';
 
@@ -76,9 +79,6 @@ export const APP_NAME = 'Clatter';
  * an answer of its own rather than a platform.
  */
 export type TrayProbe = () => Promise<TrayDecision>;
-
-/** The mount, as the screen takes it. A test counts the calls. */
-export type TrayMount = (container: HTMLElement, options?: MountTrayOptions) => Promise<unknown>;
 
 const probeTray: TrayProbe = async () => decideTray(await probeCapability());
 
@@ -352,13 +352,39 @@ function Builder({ state, setState }: { state: AppState; setState: (change: Chan
 }
 
 /**
- * One die, drawn flat.
+ * Which renderer the die cells are drawn for.
  *
- * Shape carries every meaning colour carries, which section 7 requires. The
- * three lock states differ by ground and by frame: a rule lock is a solid frame
- * on a shaded pad, a choice lock is a dashed frame, and a loose die is lifted
- * and carries no pad. A success is a circle and a bane is a triangle. The
- * accessible name says all of it again in words, so nothing rides on sight.
+ * `flat` draws the die itself, which is the fallback renderer of Unit 2.2.
+ * `over` draws nothing and lies over the 3D die it names, which is Decision 9
+ * of `docs/design/0012-settled-decisions.md`. Both hold the same role, the
+ * same accessible name, the same `aria-pressed` and the same place in the
+ * walk, so section 6 reads the same list whichever renderer is running.
+ */
+export type TrayLayout = 'flat' | 'over';
+
+/** Where one cell of the overlay goes, in the pixels the tray measured. */
+function overStyle(spot: TraySpots[string] | undefined): string | undefined {
+  if (spot === undefined) return undefined;
+  return (
+    `left:${spot.x}px;top:${spot.y}px;` + `width:${spot.radius * 2}px;height:${spot.radius * 2}px`
+  );
+}
+
+/**
+ * One die.
+ *
+ * **Flat.** Shape carries every meaning colour carries, which section 7
+ * requires. The three lock states differ by ground and by frame: a rule lock is
+ * a solid frame on a shaded pad, a choice lock is a dashed frame, and a loose
+ * die is lifted and carries no pad. A success is a circle and a bane is a
+ * triangle. The accessible name says all of it again in words, so nothing rides
+ * on sight.
+ *
+ * **Over the table.** The cell draws no die at all, because the 3D die under it
+ * is the result the player reads and a flat copy on top would draw it twice.
+ * The cell carries the name, the state and the focus ring, and it takes no
+ * pointer, so a press with a mouse reaches the raycast of Unit 3.5 instead.
+ * The marks on the dice carry the three states to the eye there.
  *
  * A die the rules hold takes no press, so it is not a button. It still holds a
  * place in the arrow walk, because a player who cannot press a die must still
@@ -366,18 +392,24 @@ function Builder({ state, setState }: { state: AppState; setState: (change: Chan
  */
 function Slot({
   view,
+  layout,
+  spot,
   shaken,
   active,
   onPress,
 }: {
   view: DieView;
+  layout: TrayLayout;
+  spot: TraySpots[string] | undefined;
   shaken: boolean;
   active: boolean;
   onPress: () => void;
 }) {
+  const over = layout === 'over';
   const classes = ['slot', view.state];
+  if (over) classes.push('over');
   if (view.die.type === 'stress') classes.push('stress');
-  if (shaken) classes.push('thrown');
+  if (shaken && !over) classes.push('thrown');
   const face =
     view.die.faces === 6 && view.value !== null ? (
       <span class={`die pips f${view.value}`}>
@@ -415,6 +447,12 @@ function Slot({
       <em>{view.word}</em>
     </span>
   );
+  const drawn = over ? null : (
+    <>
+      {face}
+      {caption}
+    </>
+  );
   if (view.state === 'rule') {
     return (
       <div
@@ -423,9 +461,9 @@ function Slot({
         role="img"
         tabIndex={active ? 0 : -1}
         aria-label={view.label}
+        style={over ? overStyle(spot) : undefined}
       >
-        {face}
-        {caption}
+        {drawn}
       </div>
     );
   }
@@ -438,9 +476,9 @@ function Slot({
       aria-pressed={view.state === 'choice'}
       aria-label={view.label}
       onClick={onPress}
+      style={over ? overStyle(spot) : undefined}
     >
-      {face}
-      {caption}
+      {drawn}
     </button>
   );
 }
@@ -450,6 +488,8 @@ function Zone({
   title,
   note,
   views,
+  layout,
+  spots,
   thrown,
   ordinal,
   activeId,
@@ -459,6 +499,8 @@ function Zone({
   title: string;
   note: string;
   views: readonly DieView[];
+  layout: TrayLayout;
+  spots: TraySpots;
   thrown: readonly string[];
   ordinal: number;
   activeId: string;
@@ -487,6 +529,8 @@ function Zone({
           <Slot
             key={thrown.includes(view.die.id) ? `${view.die.id}:${ordinal}` : view.die.id}
             view={view}
+            layout={layout}
+            spot={spots[view.die.id]}
             shaken={thrown.includes(view.die.id)}
             active={view.element === activeId}
             onPress={() => onPress(view.die.id)}
@@ -504,8 +548,22 @@ function Zone({
  * composite widget as one tab stop, and section 6 walks the shelf first and the
  * zone second with pool order inside each. Decision 4 settles that split: the
  * lock state chooses the zone and nothing else.
+ *
+ * **Both renderers hold this list.** With the 3D tray the same cells lie over
+ * the canvas at the place each die landed, so the keyboard walk, the names and
+ * `aria-pressed` do not change with the renderer. Decision 9.
  */
-function DiceTray({ state, setState }: { state: AppState; setState: (change: Change) => void }) {
+function DiceTray({
+  state,
+  setState,
+  layout,
+  spots,
+}: {
+  state: AppState;
+  setState: (change: Change) => void;
+  layout: TrayLayout;
+  spots: TraySpots;
+}) {
   const profile = profileOf(state);
   const zones = zonesOf(state);
   const kept = zones.kept.map((die) => dieView(die, profile));
@@ -547,7 +605,7 @@ function DiceTray({ state, setState }: { state: AppState; setState: (change: Cha
 
   return (
     <div
-      class="zones"
+      class={layout === 'over' ? 'zones over' : 'zones'}
       data-el="dice-tray"
       data-composite=""
       role="toolbar"
@@ -560,6 +618,8 @@ function DiceTray({ state, setState }: { state: AppState; setState: (change: Cha
         title="Kept"
         note="these stay on the table"
         views={kept}
+        layout={layout}
+        spots={spots}
         thrown={state.thrown}
         ordinal={state.throwOrdinal}
         activeId={active}
@@ -570,60 +630,13 @@ function DiceTray({ state, setState }: { state: AppState; setState: (change: Cha
         title="In the cup"
         note="the push throws these"
         views={loose}
+        layout={layout}
+        spots={spots}
         thrown={state.thrown}
         ordinal={state.throwOrdinal}
         activeId={active}
         onPress={(id) => setState((previous) => toggleDie(previous, id))}
       />
-    </div>
-  );
-}
-
-/**
- * The table.
- *
- * It stays in the document across both rest states and hides while the builder
- * is open, because the library reads the size of its container when it mounts
- * and a hidden container measures nothing. The tray is behind a dynamic import,
- * so nothing of it is fetched until the player first closes the builder.
- *
- * **Unit 3.7 chooses.** The table mounts only while `wanted` holds, which is
- * the answer of `chooseRenderer` in `src/shell/renderer.ts`. A platform below
- * the bar, a player who asked for flat dice, and a table that already fell all
- * read false here, and nothing of the 3D chunk is then fetched at all.
- *
- * Two events fall to flat dice and both reach `onFall`: a mount that does not
- * finish, which is what a blocked chunk gives, and a lost WebGL context, which
- * `watchContextLoss` reports through the option below.
- */
-function Table({
-  shown,
-  wanted,
-  mount,
-  onFall,
-}: {
-  shown: boolean;
-  wanted: boolean;
-  mount: TrayMount;
-  onFall: () => void;
-}) {
-  const container = useRef<HTMLDivElement>(null);
-  const mounted = useRef(false);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    const element = container.current;
-    if (!shown || !wanted || element === null || mounted.current) return;
-    mounted.current = true;
-    mount(element, { onFallToFlat: () => onFall() }).catch(() => {
-      setFailed(true);
-      onFall();
-    });
-  }, [shown, wanted]);
-
-  return (
-    <div class="table" data-el="dice-table" hidden={!shown} ref={container}>
-      {failed ? <p class="table-note">The table did not load.</p> : null}
     </div>
   );
 }
@@ -745,7 +758,12 @@ export function App({
   const [renderer, setRenderer] = useState<RendererState>(() =>
     startRenderer(null, readSettings(store)),
   );
+  // Where the 3D dice landed, so the cells the keyboard reaches lie over them.
+  // The flat renderer reads none of it and the record stays empty there.
+  const [spots, setSpots] = useState<TraySpots>(NO_SPOTS);
   const dice = throwDice(state);
+  const onTheTable = renderer.choice.renderer === 'tray';
+  const layout: TrayLayout = onTheTable ? 'over' : 'flat';
   const toggle = useRef<HTMLButtonElement>(null);
   const closeSheet = (): void => {
     setState((previous) => ({ ...previous, sheetOpen: false }));
@@ -787,7 +805,10 @@ export function App({
     >
       <StatusLine state={state} dice={dice} />
 
-      <main class="shell-m" data-el="shell-mid">
+      <main
+        class={onTheTable && !state.builderOpen ? 'shell-m stretch' : 'shell-m'}
+        data-el="shell-mid"
+      >
         {/* The fall to flat dice, said once.
 
             The element is in the document from the first paint and carries no
@@ -802,13 +823,42 @@ export function App({
           {renderer.noticed ? noticeText(renderer.choice) : ''}
         </p>
         {state.builderOpen ? <Builder state={state} setState={setState} /> : null}
-        {state.result === null ? null : <DiceTray state={state} setState={setState} />}
-        <Table
-          shown={!state.builderOpen && state.result === null}
-          wanted={renderer.choice.renderer === 'tray'}
-          mount={mount}
-          onFall={() => apply(fallToFlat)}
-        />
+        {/* The dice, in whichever renderer the choice of Unit 3.7 answered.
+            The table draws them and the cells lie over it, or the cells draw
+            them flat and the table never mounts. The two are one wrapper apart
+            so the cells can be positioned against the canvas, and the walk of
+            section 6 is the same list either way. Decision 9. */}
+        {onTheTable ? (
+          <div class="table-wrap">
+            <Table
+              shown={!state.builderOpen}
+              wanted
+              state={state}
+              mount={mount}
+              onFall={() => apply(fallToFlat)}
+              onSpots={setSpots}
+              onToggle={(id) => setState((previous) => toggleDie(previous, id))}
+            />
+            {state.result === null ? null : (
+              <DiceTray state={state} setState={setState} layout={layout} spots={spots} />
+            )}
+          </div>
+        ) : (
+          <>
+            {state.result === null ? null : (
+              <DiceTray state={state} setState={setState} layout={layout} spots={NO_SPOTS} />
+            )}
+            <Table
+              shown={!state.builderOpen && state.result === null}
+              wanted={false}
+              state={state}
+              mount={mount}
+              onFall={() => apply(fallToFlat)}
+              onSpots={setSpots}
+              onToggle={(id) => setState((previous) => toggleDie(previous, id))}
+            />
+          </>
+        )}
       </main>
 
       <div class="shell-f" data-el="shell-footer">

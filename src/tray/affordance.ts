@@ -202,26 +202,45 @@ function drawMarkers(box: DiceBox, kit: MarkerKit, states: readonly LockState[])
     box.scene.add(mesh);
     kit.meshes.push(mesh);
   }
+  // **Draw the frame that shows them.** The library renders one last frame the
+  // instant a throw finishes and then stops, and it renders nothing at all for
+  // a click. A mark added or moved after that last frame therefore keeps the
+  // world matrix the renderer gave it on the frame before, so the player sees
+  // the marks of the throw before this one, standing where those dice stood.
+  // Measured in the running application on 2026-08-09: a cage sat 450 world
+  // units from the die it named. A raycast cannot see this defect, because a
+  // raycast updates the matrix it reads.
+  box.renderer.render(box.scene, box.camera);
+}
+
+/**
+ * The affordance, once it is wired to a tray.
+ *
+ * `update` takes the pool as it now stands and redraws the marks, so a caller
+ * that owns the pool — the application does, through `src/shell/state.ts` —
+ * stays the one authority on it. `dispose` removes the listener and the marks.
+ */
+export interface AffordanceHandle {
+  update(ordered: readonly Die[]): void;
+  dispose(): void;
 }
 
 /**
  * Wire the affordance to a tray that already holds `ordered`.
  *
- * `ordered` is the list `throwPool` returned, so index `i` of it is
- * `box.diceList[i]`. Every click is hit-tested against the dice themselves, so
- * a die the camera cannot see is a die the tray cannot reach — see `dieAt`.
+ * `ordered` is the list `throwPool` or `pushPool` returned, so index `i` of it
+ * is `box.diceList[i]`. Every click is hit-tested against the dice themselves,
+ * so a die the camera cannot see is a die the tray cannot reach — see `dieAt`.
  *
  * `onClick` is called after the pool changes, with the pool as it now stands.
  * A refused click reports the refusal and hands back the same pool.
- *
- * Returns the call that removes the listener and the marks.
  */
 export async function mountAffordance(
   box: DiceBox,
   ordered: readonly Die[],
   profile: PushProfile,
   onClick: (dice: readonly Die[], clicked: Die, outcome: ClickOutcome) => void = () => {},
-): Promise<() => void> {
+): Promise<AffordanceHandle> {
   const kit = await buildKit();
   let pool = ordered;
   const redraw = (): void =>
@@ -243,14 +262,20 @@ export async function mountAffordance(
   };
   box.container.addEventListener('click', listener);
 
-  return () => {
-    box.container.removeEventListener('click', listener);
-    for (const mesh of kit.meshes) box.scene.remove(mesh);
-    kit.meshes.length = 0;
-    for (const state of ['rule', 'choice'] as const) {
-      kit.geometry[state].dispose();
-      kit.material[state].dispose();
-    }
+  return {
+    update(next: readonly Die[]): void {
+      pool = next;
+      redraw();
+    },
+    dispose(): void {
+      box.container.removeEventListener('click', listener);
+      for (const mesh of kit.meshes) box.scene.remove(mesh);
+      kit.meshes.length = 0;
+      for (const state of ['rule', 'choice'] as const) {
+        kit.geometry[state].dispose();
+        kit.material[state].dispose();
+      }
+    },
   };
 }
 

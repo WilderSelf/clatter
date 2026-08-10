@@ -118,6 +118,13 @@ body {
   align-content: start;
 }
 
+/* The 3D table is the whole result, so it takes the whole middle. The flat dice
+   keep `start`, because a short list of dice must not stretch to fill a desk it
+   does not need. Decision 9. */
+.shell-m.stretch {
+  align-content: stretch;
+}
+
 .shell-f {
   position: relative;
   grid-area: foot;
@@ -643,20 +650,113 @@ body {
   font-style: normal;
 }
 
+/* ------- the cells that lie over the 3D table — Decision 9 -------
+ *
+ * The dice a player reads are the 3D dice. These cells draw none of them. Each
+ * one carries the role, the accessible name, the pressed state, its place in
+ * the walk and the focus ring, and it lies over the die it names. They take no
+ * pointer, so a press with a mouse reaches the raycast of
+ * `src/tray/affordance.ts`, where a rule lock refuses it and a buried die
+ * cannot be reached. The three lock states are drawn on the dice themselves by
+ * the marks of Unit 3.5.
+ *
+ * The two zone bands keep the interface colours on a chip of their own, because
+ * the tray surface is a theme axis of its own and the interface ink is not
+ * measured against it. */
+
+.zones.over {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+
+.zones.over .shelf,
+.zones.over .throwzone {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.zones.over .band-h {
+  position: absolute;
+  top: 8px;
+  display: block;
+  max-width: 46%;
+  margin: 0;
+  padding: 3px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+}
+
+.zones.over .shelf .band-h {
+  left: var(--s2);
+}
+
+.zones.over .throwzone .band-h {
+  right: var(--s2);
+  text-align: right;
+}
+
+.zones.over .tray {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+/* The place and the size come from the tray, in the pixels it measured. The
+   rule below holds the die size the flat renderer uses, which is what a cell
+   covers until the first throw settles. */
+.slot.over {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--die);
+  height: var(--die);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 /* ---------------- the table ---------------- */
 
+/* The table takes the whole middle, and the floor under it is derived.
+ *
+ * A die is a fixed size on the screen at every canvas size, because the library
+ * builds it at `baseScale` world units and the camera frames twice the element
+ * in world units. Measured in the running application on 2026-08-09: a die is
+ * 93 to 99 CSS pixels across, and the tray wall stands one `baseScale` inside
+ * the frame, which is 50 CSS pixels on each side. An element shorter than one
+ * die plus two wall insets holds no die at all, so the floor is 100 plus 50
+ * plus 50. Re-derive it from `baseScale` and the measured die whenever either
+ * one moves; do not raise it to make a picture look better.
+ *
+ * **The dice heap and no height stops that.** Thirty dice of 96 pixels cover
+ * about 276,000 square pixels and a phone middle offers far less, so dice land
+ * on each other. The throw is not spread to fix it, because spreading it moves
+ * `steps_to_rest_fixed_seed_scene` and the pinned scene digest. The harness
+ * counts the dice that show no surface of their own and reports the number. */
 .table {
-  min-height: 220px;
+  min-height: 200px;
   border-radius: 8px;
   background: var(--sunken);
   display: grid;
   place-items: center;
 }
 
-.table-note {
-  margin: 0;
-  font-size: 13px;
-  color: var(--ink-dim);
+/* The table and the cells that lie over it. The wrapper is the frame both are
+   measured in: the library reads the size of the table element, and the cells
+   are placed from the screen positions it answers. Decision 9. */
+.table-wrap {
+  position: relative;
+  display: grid;
 }
 
 /* The fall to flat dice, said once. The element is in the document from the

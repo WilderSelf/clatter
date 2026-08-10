@@ -132,6 +132,24 @@ export interface AppState {
    * identical before and after and the element was reused.
    */
   readonly throwOrdinal: number;
+  /**
+   * What the last throw was, or `null` before the first one.
+   *
+   * The 3D tray acts a roll out with `throwPool` and a push with `pushPool`,
+   * and the two are not the same throw: a roll spawns the whole pool again and
+   * a push re-throws a named subset while the rest stay where they lie. The
+   * dice alone cannot tell them apart, because a re-throw of the same pool
+   * holds the same ids as the push before it.
+   */
+  readonly lastThrow: 'roll' | 'push' | null;
+  /**
+   * The die the last push added before its re-throw, or `null`.
+   *
+   * It is the core's own answer, copied from `PushedRoll.stressAdded`, and the
+   * tray compares it against the dice it does not hold. Two answers to one
+   * question, so a tray that fell out of step with the pool fails by name.
+   */
+  readonly stressAdded: string | null;
 }
 
 export function emptyState(mode: Mode): AppState {
@@ -146,6 +164,8 @@ export function emptyState(mode: Mode): AppState {
     result: null,
     thrown: [],
     throwOrdinal: 0,
+    lastThrow: null,
+    stressAdded: null,
   };
 }
 
@@ -479,6 +499,8 @@ export function rollNow(state: AppState, random: RandomSource): AppState {
       result: null,
       thrown: [],
       throwOrdinal: state.throwOrdinal + 1,
+      lastThrow: 'roll',
+      stressAdded: null,
     };
   }
   const result: RollResult = { dice: outcome.dice, stressAfter: outcome.stressAfter };
@@ -488,6 +510,8 @@ export function rollNow(state: AppState, random: RandomSource): AppState {
     result,
     thrown: result.dice.map((die) => die.id),
     throwOrdinal: state.throwOrdinal + 1,
+    lastThrow: 'roll',
+    stressAdded: null,
   };
 }
 
@@ -519,6 +543,8 @@ export function pushNow(state: AppState, random: RandomSource): AppState {
     result: { dice: pushed.dice, stressAfter: pushed.stressAfter },
     thrown: pushed.rerolled,
     throwOrdinal: state.throwOrdinal + 1,
+    lastThrow: 'push',
+    stressAdded: pushed.stressAdded,
     counts: {
       ...state.counts,
       stress: Math.min(POOL_CAPS.stress, pushed.stressAfter),

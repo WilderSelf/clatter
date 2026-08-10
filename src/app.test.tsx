@@ -1005,16 +1005,125 @@ function fakeStore(opening?: Settings): SettingsStore & { written: number } {
   };
 }
 
+/**
+ * A stand-in for the vendored tray.
+ *
+ * It records what the application asked it to act out and nothing else. Every
+ * field is one the tray modules read: `src/tray/throw.ts` calls `roll`, `add`
+ * and `reroll` and colours a die through `material`, `src/tray/affordance.ts`
+ * builds its marks in `scene` and draws a frame through `renderer`, and
+ * `src/tray/spots.ts` reads `position`, `scale`, `geometry` and
+ * `getScreenPosition`.
+ *
+ * A die sits at a place this file chooses, so the cells over it can be checked
+ * against a number the screen never saw.
+ */
+const FAKE_DIE_RADIUS = 45;
+const FAKE_DIE_X = 100;
+const FAKE_DIE_STEP = 10;
+const FAKE_DIE_Y = 200;
+
+interface FakeTray {
+  thrown: string[];
+  added: string[];
+  rerolled: [number[], number[]][];
+  renders: number;
+  diceList: unknown[];
+  scene: { children: unknown[] };
+}
+
+function fakeTray(): FakeTray {
+  const children: unknown[] = [];
+  const box = {
+    thrown: [] as string[],
+    added: [] as string[],
+    rerolled: [] as [number[], number[]][],
+    renders: 0,
+    container: document.createElement('div'),
+    scene: {
+      children,
+      add: (node: unknown) => void children.push(node),
+      remove: (node: unknown) => {
+        const at = children.indexOf(node);
+        if (at >= 0) children.splice(at, 1);
+      },
+    },
+    camera: {},
+    raycaster: { setFromCamera: () => {}, intersectObjects: () => [] },
+    renderer: {
+      render: () => {
+        box.renders += 1;
+      },
+    },
+    diceList: [] as unknown[],
+    getScreenPosition: (point: { x: number; y: number }) => ({ x: point.x, y: point.y }),
+    roll: (notation: string) => {
+      box.thrown.push(notation);
+      box.diceList = (notation.split('@')[1] ?? '').split(',').map((_, index) => fakeDie(index));
+      return Promise.resolve({});
+    },
+    add: (notation: string) => {
+      box.added.push(notation);
+      box.diceList.push(fakeDie(box.diceList.length));
+      return Promise.resolve([]);
+    },
+    reroll: (ids: number[], forced: number[]) => {
+      box.rerolled.push([ids, forced]);
+      return Promise.resolve([]);
+    },
+  };
+  return box as unknown as FakeTray;
+}
+
+function fakeDie(index: number): unknown {
+  return {
+    material: [{ color: { set: () => {} } }],
+    position: { x: FAKE_DIE_X + index * FAKE_DIE_STEP, y: FAKE_DIE_Y, z: 0 },
+    scale: { x: 1 },
+    geometry: {
+      boundingSphere: { radius: FAKE_DIE_RADIUS },
+      computeBoundingSphere: () => {},
+    },
+    traverse: (visit: (node: unknown) => void) => visit(null),
+    getFaceValue: () => ({ value: 0, label: '', reason: '' }),
+  };
+}
+
+/** Where this file put die `index`, in the pixels a cell over it must read. */
+function fakeSpot(index: number): readonly string[] {
+  return [
+    `${FAKE_DIE_X + index * FAKE_DIE_STEP}px`,
+    `${FAKE_DIE_Y}px`,
+    `${FAKE_DIE_RADIUS * 2}px`,
+    `${FAKE_DIE_RADIUS * 2}px`,
+  ];
+}
+
+/** Where one cell was actually put, read off its own inline style. */
+function cellSpot(name: string): readonly string[] {
+  const style = element(name).style;
+  return [style.left, style.top, style.width, style.height];
+}
+
+/** The order the tray holds a pool in, derived here rather than imported. */
+function trayIndexOf(dice: readonly Die[]): Map<string, number> {
+  const order = [6, 8, 10, 12].flatMap((faces) => dice.filter((die) => die.faces === faces));
+  return new Map(order.map((die, index) => [die.id, index]));
+}
+
 /** A mount that answers, and counts the containers it was handed. */
-function fakeMount(answer: 'mounts' | 'refuses'): TrayMount & { calls: HTMLElement[] } {
+function fakeMount(
+  answer: 'mounts' | 'refuses',
+  tray: FakeTray = fakeTray(),
+): TrayMount & { calls: HTMLElement[]; tray: FakeTray } {
   const calls: HTMLElement[] = [];
   const mount: TrayMount = (container) => {
     calls.push(container);
     return answer === 'mounts'
-      ? Promise.resolve({})
+      ? Promise.resolve(tray)
       : Promise.reject(new Error('the lazy 3D chunk did not arrive'));
   };
-  return Object.assign(mount, { calls });
+  return Object.assign(mount, { calls, tray });
 }
 
 const answers =
@@ -1029,6 +1138,21 @@ async function settle(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+/**
+ * Let the tray finish as well.
+ *
+ * The affordance imports the vendored bundle on demand and every throw is a
+ * promise, so the tray runs over several tasks and not several microtasks.
+ */
+async function settleTray(until: () => boolean = () => true): Promise<void> {
+  for (let step = 0; step < 300; step += 1) {
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    if (step >= 4 && until()) return;
+  }
 }
 
 function screen(): HTMLElement {
@@ -1217,6 +1341,209 @@ describe('the renderer choice', () => {
       note.split('.').filter((part) => part.trim().length > 0).length,
       'one opening sentence and one per reading',
     ).toBe(1 + BELOW_THE_BAR.reasons.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The 3D tray, inside the application
+//
+// The tray runs behind a fake library here, so what is asserted is the WIRING:
+// that the screen hands the tray the answer the rules core gave it, that a
+// push re-throws the named subset and spawns the die the profile added, and
+// that the cells the keyboard reaches lie over the dice the tray put down.
+//
+// The picture itself is not asserted here. `node scripts/browser.mjs --table`
+// reads the face pointing up off every body quaternion on the graphics card
+// and compares it against the value the screen printed.
+// ---------------------------------------------------------------------------
+
+describe('the 3D tray inside the application', () => {
+  it('acts out the roll the core decided, and lays a cell over every die', async () => {
+    const only = profile('pool-banes-damage-ratings');
+    const opening = builtState({ attribute: 3, skill: 2, gear: 1 }, only.id);
+    const mounting = fakeMount('mounts');
+    mount({
+      store: fakeStore(),
+      probe: answers(ABOVE_THE_BAR),
+      mount: mounting,
+      initial: opening,
+      random: seededRandom(8),
+    });
+    await settle();
+    await settleTray();
+    expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
+    expect(mounting.tray.thrown.length, 'an empty table is not acted out').toBe(0);
+
+    click(element('roll-button'));
+    await settleTray(() => mounting.tray.thrown.length > 0);
+
+    // The oracle. The same builder, the same difficulty and the same seed the
+    // screen was given, asked outside it, so no face is written down here.
+    const oracle = rollNow(opening, seededRandom(8));
+    if (oracle.result === null) throw new Error('the fixture rolled nothing');
+    const order = trayIndexOf(oracle.result.dice);
+    const values = [...oracle.result.dice]
+      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+      .map((die) => latestValue(die) as number);
+
+    expect(mounting.tray.thrown.length, 'the tray acted the throw out once').toBe(1);
+    expect(
+      (mounting.tray.thrown[0] ?? '').split('@')[1],
+      'and it acted out the values the core decided, in tray order',
+    ).toBe(values.join(','));
+    expect(mounting.tray.diceList.length, 'one body per die of the pool').toBe(
+      oracle.result.dice.length,
+    );
+
+    // The flat dice draw nothing over the table. Every cell is empty and every
+    // one lies over the die it names, at the place this file put that die.
+    const cells = [...document.querySelectorAll<HTMLElement>('[data-el^="die-"]')];
+    expect(cells.length, 'one cell per die').toBe(oracle.result.dice.length);
+    expect(
+      cells.filter((cell) => (cell.textContent ?? '') !== '').length,
+      'no cell draws a flat copy of the die under it',
+    ).toBe(0);
+    const placed = oracle.result.dice.map((die) => ({
+      name: dieElement(die),
+      drawn: cellSpot(dieElement(die)),
+      wanted: fakeSpot(order.get(die.id) ?? -1),
+    }));
+    expect(placed.length).toBe(oracle.result.dice.length);
+    for (const { name, drawn, wanted } of placed) {
+      expect(drawn, `${name} lies over the die the tray put down`).toEqual(wanted);
+    }
+
+    // Every cell still carries its name and its state, exactly as the flat
+    // renderer does. Section 6 walks the same list either way.
+    expect(cells.filter((cell) => (cell.getAttribute('aria-label') ?? '') !== '').length).toBe(
+      cells.length,
+    );
+    expect(
+      cells.filter(
+        (cell) => cell.getAttribute('aria-pressed') !== null || cell.getAttribute('role') === 'img',
+      ).length,
+      'a die is a button that answers a press, or an image the rules hold',
+    ).toBe(cells.length);
+  });
+
+  it('acts the push out on the table, and spawns the die the profile added', async () => {
+    // The third preset raises stress by one BEFORE the re-throw, so the core
+    // creates a die the tray never spawned. That is the defect this unit
+    // closes.
+    const held = profile('pool-stress-and-complications');
+    expect(held.stressBehaviour, 'the preset adds a die before the re-throw').toBe(
+      'addBeforeReroll',
+    );
+    const opening = builtState({ attribute: 3, skill: 2 }, held.id);
+    const first = rollNow(opening, seededRandom(4));
+    if (first.result === null) throw new Error('the fixture rolled nothing');
+
+    const mounting = fakeMount('mounts');
+    mount({
+      store: fakeStore(),
+      probe: answers(ABOVE_THE_BAR),
+      mount: mounting,
+      initial: first,
+      random: seededRandom(9),
+    });
+    await settle();
+    await settleTray(() => mounting.tray.thrown.length > 0);
+    expect(mounting.tray.thrown.length, 'the first roll is on the table').toBe(1);
+
+    // The oracle, outside the screen, over the same result and the same seed.
+    const oracle = push(first.result, held, seededRandom(9));
+    if (oracle.kind !== 'pushed') throw new Error('the core refused the fixture push');
+    expect(oracle.stressAdded, 'the core added a stress die').not.toBeNull();
+
+    const before = mounting.tray.thrown.length;
+    click(pushButton());
+    await settleTray(() => mounting.tray.rerolled.length > 0);
+
+    const order = trayIndexOf(first.result.dice);
+    const added = oracle.dice.find((die) => die.id === oracle.stressAdded);
+    if (added === undefined) throw new Error('the core named a die it did not add');
+    expect(mounting.tray.thrown.length, 'a push is not a fresh throw of the whole pool').toBe(
+      before,
+    );
+    expect(
+      mounting.tray.added,
+      'the tray spawned the die the push added, on its own value',
+    ).toEqual([`1d${added.faces}@${latestValue(added) as number}`]);
+    // The re-throw names the other loose dice, by tray index, and never the
+    // die `add` has already landed.
+    const wanted = oracle.rerolled
+      .filter((id) => id !== oracle.stressAdded)
+      .map((id) => order.get(id) ?? -1);
+    expect(mounting.tray.rerolled.length).toBe(1);
+    expect(mounting.tray.rerolled[0]?.[0]).toEqual(wanted);
+    expect(mounting.tray.diceList.length, 'the table now holds one more body').toBe(
+      first.result.dice.length + 1,
+    );
+    // And the screen shows the same pool the tray holds.
+    expect(facesOnTable().size).toBe(oracle.dice.length);
+  });
+
+  it('walks the thirty-five visits of section 6 with the table running', async () => {
+    const list = walkList(DESIGN, 'After');
+    expect(list.names.length, 'the numbered list is as long as the prose says').toBe(list.stated);
+
+    const held = profile('pool-stress-and-complications');
+    const dice = throwDice(worstCaseState());
+    const kept = new Set(
+      list.names.slice(1, 1 + list.names.filter((name) => name.startsWith('die-')).length),
+    );
+    // The same fixture the flat walk uses: the document says which dice it
+    // keeps and the screen decides the order.
+    const shelfNames = new Set(list.names.filter((name) => name.startsWith('die-')).slice(0, 9));
+    const rolled = showing(
+      dice,
+      dice.map((die) => (shelfNames.has(dieElement(die)) ? 6 : 3)),
+    );
+    expect(kept.size).toBeGreaterThan(0);
+
+    const mounting = fakeMount('mounts');
+    mount({
+      store: fakeStore(),
+      probe: answers(ABOVE_THE_BAR),
+      mount: mounting,
+      initial: tableState(rolled, held.id, 10),
+    });
+    await settle();
+    await settleTray(() => mounting.tray.thrown.length > 0);
+
+    expect(screen().dataset['renderer'], 'the table is the renderer here').toBe('tray');
+    expect(element('dice-table').hidden, 'and it is on the screen').toBe(false);
+    expect(element('dice-tray').className, 'the cells lie over it').toContain('over');
+
+    const visits = walk(document);
+    expect(visits.map((visit) => visit.name)).toEqual(list.names);
+    expect(visits.length, 'the walk reached every named visit and no other').toBe(list.stated);
+    const positions = (by: 'tab' | 'arrow'): number[] =>
+      visits.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
+    expect(positions('tab')).toEqual(list.tab);
+    expect(positions('arrow')).toEqual(list.arrow);
+
+    // A press still keeps a die and a rule lock still refuses, over the same
+    // cells the walk reached. The denominator is the whole pool.
+    let pressedCount = 0;
+    let refusedCount = 0;
+    for (const name of list.names.filter((one) => one.startsWith('die-'))) {
+      const cell = element(name);
+      const was = cell.getAttribute('aria-pressed');
+      click(cell);
+      const now = element(name).getAttribute('aria-pressed');
+      if (was === null) {
+        expect(now, `${name} is held by the rules and takes no press`).toBeNull();
+        refusedCount += 1;
+        continue;
+      }
+      expect(now, `${name} answered the press`).not.toBe(was);
+      pressedCount += 1;
+      click(element(name));
+    }
+    expect(pressedCount + refusedCount).toBe(dice.length);
+    expect(pressedCount).toBeGreaterThan(0);
+    expect(refusedCount).toBeGreaterThan(0);
   });
 });
 
