@@ -474,3 +474,47 @@ of reach of the interface. The two move controls are the one exception: the firs
 and the last cannot move down, which is a position and not a refusal.
 
 ---
+
+## Decision 12 — the history replaces the roll flow, taken by me 2026-08-10
+
+**`sheet-history` opens a route, not a panel. The history destination replaces the roll flow while
+it is open, and `back-button` brings the roll flow back.** I took this decision under the delegated
+interface authority of `CLAUDE.md`. Unit 4.4 builds it.
+
+Decision 3 already settles that the history is a separate destination with two views. It does not
+say how the destination shares the screen with the roll flow, and there were two ways to build it.
+
+**Rejected: an overlay, like the disclosure sheet.** The sheet is a panel over a screen the player
+is still in the middle of. The history is the opposite: Decision 3 states that the player visits it
+rarely and never in the middle of a decision. An overlay also puts every control of section 3 in the
+document underneath it, so a keyboard reaches the roll flow through the history and both walks of
+section 6 grow.
+
+**Taken: a route.** The roll flow leaves the document. Three things follow, and each one is
+measured rather than claimed.
+
+- **Section 3 is untouched.** The destination carries its own header and its own footer, exactly as
+  the section 3 subsection "The history is a separate destination" says, and it holds no control of
+  the roll flow.
+- **Section 6 is untouched.** Both walks are walks of the roll flow at rest. The history is closed
+  at rest, and while it is open the roll flow holds no element at all. Eleven visits before the
+  throw and thirty-five after it, in both instruments.
+- **The focus never lands on nothing.** The destination takes the focus on `back-button` when it
+  opens, and again when a record opens or closes. `back-button` returns the focus to
+  `disclosure-toggle`, which is the control that led there.
+
+### The record view is a shell in this unit
+
+The summary is complete: `back-button` and `history-list`, one visit per logged roll. The record
+draws the stored readings of one roll and nothing else. **The transposed matrix and `export-button`
+belong to Unit 4.5**, and `LEDGER.md` row 2.2d carries the two matrix acceptances there unchanged.
+A record with no view at all would have left `history-list` opening nothing, so the shell exists to
+make the summary judgeable.
+
+### The storage reading is read-only
+
+`sheet-storage-estimate` sits beside `sheet-history` in the sheet and prints what
+`navigator.storage.estimate()` answers. It holds no tab stop, so it is one of the read-only parts of
+section 3, and it is a live region because the number arrives after the sheet is drawn.
+
+---

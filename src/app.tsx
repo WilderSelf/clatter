@@ -23,6 +23,7 @@
 // count, no cap, no lock and no cost is worked out here.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
+import type { LogEntry } from './log/entry';
 import type { Die } from './rules/die';
 import type { RandomSource } from './rules/random';
 import { cryptoRandom } from './rules/random';
@@ -44,6 +45,7 @@ import {
   savePoolPreset,
   writeSettings,
 } from './settings/settings';
+import { History, storageLine } from './shell/history';
 import { OverridePanel } from './shell/overrides';
 import { PresetPanel } from './shell/presets';
 import {
@@ -54,6 +56,8 @@ import {
   PRESET_SAVED_TEXT,
   UNUSABLE_POOL_TEXT,
 } from './shell/presets';
+import type { OpenRollLogResult, RollLog, RollLogOptions } from './shell/roll-log';
+import { openRollLog } from './shell/roll-log';
 import type { RendererState } from './shell/renderer';
 import {
   askForTray,
@@ -701,22 +705,27 @@ function Sheet({
   setState,
   renderer,
   presetNote,
+  storage,
   onSavePreset,
   onRecallPreset,
   onMovePreset,
   onDeletePreset,
   onAskForTray,
+  onOpenHistory,
   onClose,
 }: {
   state: AppState;
   setState: (change: Change) => void;
   renderer: RendererState;
   presetNote: PresetNote;
+  /** What the browser reports the origin uses, or null where it reports none. */
+  storage: { usage: number | null; quota: number | null } | null;
   onSavePreset: (name: string) => boolean;
   onRecallPreset: (preset: PoolPreset) => void;
   onMovePreset: (preset: PoolPreset, toIndex: number) => void;
   onDeletePreset: (preset: PoolPreset) => void;
   onAskForTray: (wanted: boolean) => void;
+  onOpenHistory: () => void;
   onClose: () => void;
 }) {
   const close = useRef<HTMLButtonElement>(null);
@@ -817,6 +826,24 @@ function Sheet({
           ))}
           <p class="sheet-note">{ARTIFACT_CURVE_NOTE[state.artifactCurve]}</p>
         </fieldset>
+        {/* The history, and what it costs the browser to keep.
+
+            `sheet-history` opens the history destination. Section 4 of
+            `docs/design/0002-screen-design.md` names it against Units 4.4 to
+            4.7, and section 3 puts the log, its statistics and its export
+            there and not here.
+
+            The storage reading beside it is `estimateStorage` from
+            `src/log/store.ts`, which the plan asks this unit to show in
+            settings. It carries no tab stop, so it is one of the read-only
+            parts of section 3, and it is a live region because the number
+            arrives after the sheet is drawn. */}
+        <button class="btn" type="button" data-el="sheet-history" onClick={onOpenHistory}>
+          Open the history
+        </button>
+        <p class="sheet-note" data-el="sheet-storage-estimate" role="status">
+          {storageLine(storage)}
+        </p>
         {/* The way back from a permanent fall to flat dice, which the plan asks
             Unit 3.7 for. The sheet is a second surface and carries no share of
             the control budget of section 3, so this control costs the screen
@@ -873,18 +900,40 @@ function Sheet({
  * `src/shell/renderer.ts` stays pure and a test hands over a store, an answer
  * and a mount of its own.
  */
+/**
+ * Why the log could not be opened, in the words a player reads.
+ *
+ * Three refusals, three sentences. `src/log/store.ts` answers them apart on
+ * purpose, because a browser that refuses a database at all and a full disk
+ * need different words. Unit 4.10 owns the error surfaces of the whole
+ * application, and these three are the ones this unit can produce.
+ */
+const LOG_FAILURE_TEXT: Readonly<Record<'refused' | 'blocked' | 'error', string>> = {
+  refused:
+    'This browser keeps no log. A private window refuses storage, so the rolls are lost when the tab closes.',
+  blocked: 'Another tab of this application holds the log. Close it, then open the history again.',
+  error: 'The log did not open. The rolls of this session are not kept.',
+};
+
 export function App({
   random = cryptoRandom(),
   initial,
   store = localSettingsStore(),
   probe = probeTray,
   mount = mountTray,
+  log: logOptions,
 }: {
   random?: RandomSource;
   initial?: AppState;
   store?: SettingsStore | null;
   probe?: TrayProbe;
   mount?: TrayMount;
+  /**
+   * How the roll log is opened. A test hands over its own database name, its
+   * own clock and its own roll names, so a run is repeatable and two runs do
+   * not share a log.
+   */
+  log?: RollLogOptions;
 } = {}) {
   // The stored record is read once, and it opens both the rules the screen
   // rolls under and the renderer choice. One read, so the two cannot open under
@@ -898,6 +947,17 @@ export function App({
   // What the last preset operation answered. It is empty until the player
   // presses something in the panel.
   const [presetNote, setPresetNote] = useState<PresetNote>(NO_PRESET_NOTE);
+  // ---- The roll log — Unit 4.4 ----
+  //
+  // The history is a separate destination, so `historyOpen` is a route and not
+  // a panel: it REPLACES the roll flow. Both keyboard walks of section 6 are
+  // walks of the roll flow at rest, so neither of them changes.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [rolls, setRolls] = useState<readonly LogEntry[]>([]);
+  const [storage, setStorage] = useState<{ usage: number | null; quota: number | null } | null>(
+    null,
+  );
+  const [logFailure, setLogFailure] = useState<string | null>(null);
   const dice = throwDice(state);
   const onTheTable = renderer.choice.renderer === 'tray';
   const layout: TrayLayout = onTheTable ? 'over' : 'flat';
@@ -978,6 +1038,93 @@ export function App({
     });
   }, [state.mode, state.profileId, state.artifactCurve, state.override]);
 
+  // ---- The roll log — Unit 4.4 ----
+  //
+  // The log is opened once and held in a ref, because a throw arrives from a
+  // callback and never from a render. The open is asynchronous, so what is held
+  // is the PROMISE of it: a roll thrown in the first frames would otherwise
+  // reach a log that is not open yet and be lost, and losing the first roll of
+  // a session is exactly the failure this unit exists to prevent.
+  const rollLog = useRef<Promise<RollLog | null> | null>(null);
+  if (rollLog.current === null) {
+    rollLog.current = openRollLog(logOptions).then((opened: OpenRollLogResult) => {
+      if (opened.kind === 'open') return opened.log;
+      setLogFailure(LOG_FAILURE_TEXT[opened.kind]);
+      return null;
+    });
+  }
+  useEffect(() => {
+    return () => {
+      void rollLog.current?.then((held) => held?.close());
+    };
+  }, []);
+
+  // Every throw reaches the log, and every throw reaches it through the same
+  // call. `record` decides which of the two writes it is: a roll opens an entry
+  // and a push rewrites that same entry, which `src/shell/roll-log.ts` states
+  // and which the shape of `LogEntry` requires.
+  //
+  // The ordinal is the trigger, because it counts a roll and a push alike and
+  // nothing else moves it. The state read here is the state the throw produced.
+  const loggedOrdinal = useRef(state.throwOrdinal);
+  useEffect(() => {
+    if (state.throwOrdinal === loggedOrdinal.current) return;
+    loggedOrdinal.current = state.throwOrdinal;
+    const thrown = state;
+    void rollLog.current?.then(async (held) => {
+      if (held === null) return;
+      const outcome = await held.record(thrown);
+      if (outcome.kind === 'full' || outcome.kind === 'error') {
+        setLogFailure(
+          outcome.kind === 'full'
+            ? 'The storage is full. This roll is not in the log. Export the log and clear some space.'
+            : LOG_FAILURE_TEXT.error,
+        );
+      }
+    });
+  }, [state.throwOrdinal]);
+
+  /**
+   * Open the history.
+   *
+   * The rolls are read out of the store every time, never out of a copy the
+   * screen kept, so the list the player reads is the log the store holds.
+   */
+  const openHistory = (): void => {
+    setState((previous) => ({ ...previous, sheetOpen: false }));
+    setHistoryOpen(true);
+    void rollLog.current?.then(async (held) => {
+      if (held === null) return;
+      setRolls(await held.rolls());
+    });
+  };
+
+  // The focus on the way back from the history.
+  //
+  // It is an effect and not a line inside the handler, because the roll flow is
+  // NOT in the document when the handler runs: the destination replaces it, so
+  // the ref to `disclosure-toggle` is empty until the roll flow is drawn again.
+  const cameFromHistory = useRef(false);
+  useEffect(() => {
+    if (historyOpen) {
+      cameFromHistory.current = true;
+      return;
+    }
+    if (!cameFromHistory.current) return;
+    cameFromHistory.current = false;
+    toggle.current?.focus();
+  }, [historyOpen]);
+
+  // The storage reading the sheet prints. It is read when the sheet opens, so
+  // the number follows the log rather than the first paint.
+  useEffect(() => {
+    if (!state.sheetOpen) return;
+    void rollLog.current?.then(async (held) => {
+      if (held === null) return;
+      setStorage(await held.storage());
+    });
+  }, [state.sheetOpen]);
+
   // The probe runs once, at startup, and the screen draws flat dice until it
   // answers. A probe that answered below the bar records the permanent fall and
   // the notice below says so once. `probeCapability` never throws, so there is
@@ -991,6 +1138,26 @@ export function App({
       live = false;
     };
   }, []);
+
+  // The history is a SEPARATE DESTINATION, so it replaces the roll flow rather
+  // than covering it. Section 3 of `docs/design/0002-screen-design.md` says so,
+  // and Decision 3 of `docs/design/0012-settled-decisions.md` settles it: the
+  // player visits the history rarely and never in the middle of a decision.
+  //
+  // Because the roll flow leaves the document, it holds no control while the
+  // history is open, and neither keyboard walk of section 6 can change.
+  if (historyOpen) {
+    return (
+      <History
+        entries={rolls}
+        failure={logFailure}
+        // The disclosure is the way back in, so the focus returns to the
+        // control that led here. The effect above moves it, because the roll
+        // flow is not in the document yet at this point.
+        onBack={() => setHistoryOpen(false)}
+      />
+    );
+  }
 
   return (
     <div
@@ -1130,6 +1297,7 @@ export function App({
           setState={setState}
           renderer={renderer}
           presetNote={presetNote}
+          storage={storage}
           onSavePreset={(name) =>
             runPreset(
               (settings) => savePoolPreset(settings, name, poolCountsOf(state)),
@@ -1147,6 +1315,7 @@ export function App({
             runPreset((settings) => deletePoolPreset(settings, preset.name), PRESET_DELETED_TEXT)
           }
           onAskForTray={(wanted) => apply((previous) => askForTray(previous, wanted))}
+          onOpenHistory={openHistory}
           onClose={closeSheet}
         />
       ) : null}

@@ -3,8 +3,9 @@
  * Two changes only, and both come from where the rules run rather than from a
  * new decision. The drawn file puts each screen inside a frame and sizes it with
  * container queries, so the real application reads the viewport instead and the
- * same two breakpoints become media queries. The tray zones, the history and the
- * record are not here: no die lands before Unit 2.2 and the history is Unit 4.4.
+ * same two breakpoints become media queries. The history destination is at the
+ * end of this file, under Unit 4.4. Its record view is a shell: the transposed
+ * matrix of Decision 3 arrives with Unit 4.5.
  *
  * Every colour is a role, never a hue. Unit 4.8 replaces this block with the
  * three theme axes and no rule below has to change. */
@@ -1078,6 +1079,137 @@ body {
   text-transform: uppercase;
   color: var(--ink-dim);
   white-space: nowrap;
+}
+
+/* ---------------- the history destination — Unit 4.4 ----------------
+ *
+ * A second surface with its own header and its own footer. It reuses `.screen`,
+ * `.shell-h`, `.shell-m` and `.shell-f`, so it degrades by scrolling exactly as
+ * the roll flow does and its footer clears the same gesture bar. Decision 6.
+ *
+ * The record view of Unit 4.5 adds the transposed matrix under `.hist-record`. */
+
+.hist-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* The plan's seven-day note. It is a warning and not a caption, so it reads at
+   full ink over a shaded pad rather than dimmed away. */
+.hist-warn {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  background: var(--sunken);
+  border-left: 3px solid var(--mark-bane);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.hist-empty {
+  margin: var(--s4) 0 0;
+  color: var(--ink-dim);
+}
+
+.hist-list {
+  display: grid;
+  gap: var(--s1);
+  align-content: start;
+}
+
+/* One row per logged roll. The whole row is the hit target, and it clears the
+   44 px floor of section 7 at every width. */
+.hist-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px var(--s3);
+  min-height: 48px;
+  padding: var(--s2) var(--s3);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.hist-row[aria-selected='true'] {
+  border-color: var(--accent);
+}
+
+.hist-when {
+  font-size: 13px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.hist-nums {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--s3);
+  justify-content: end;
+}
+
+.hist-n {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.hist-n.dim {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink-dim);
+}
+
+/* The player's own text. It wraps and it is never parsed. Constraint 8. */
+.hist-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+.hist-record {
+  display: grid;
+  gap: var(--s3);
+}
+
+.hist-dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--s2);
+  margin: 0;
+}
+
+.hist-pair {
+  padding: var(--s2) var(--s3);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.hist-pair dt {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.hist-pair dd {
+  margin: 2px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* One button in the footer of the history, where the roll flow has two or
+   three. Unit 4.5 adds the export control beside it in the record view. */
+.bar.one {
+  grid-template-columns: 1fr;
 }
 
 /* ---------------- wider screens ---------------- */

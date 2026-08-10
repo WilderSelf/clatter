@@ -2,9 +2,11 @@
 // browser refuses to keep data.
 //
 // This module names browser APIs, so it is not the rules core and nothing in
-// the core may import it. It imports `LogEntry` as a type only, because
-// `src/log/entry.ts` reaches for `node:crypto` and a value import would pull
-// that into the browser bundle.
+// the core may import it. It imports `LogEntry` as a type only: the entry is
+// built by the caller and this file only keeps it.
+//
+// Unit 4.4's screen half moved `profileHash` off `node:crypto` and on to
+// `src/log/sha256.ts`, so `src/log/entry.ts` now runs in a browser as well.
 //
 // Two decisions carry the unit, and both come straight from the plan.
 //
@@ -306,6 +308,78 @@ export async function readRollsInPages(
   }
 }
 
+export type ReplaceResult =
+  /** The record at that key now holds this entry. */
+  | { readonly kind: 'written' }
+  /**
+   * No record holds that key any more. The caller must write the entry as a
+   * new roll instead. It is not an error: a trim drops the oldest keys, so a
+   * roll old enough to fall out of the buffer answers this.
+   */
+  | { readonly kind: 'gone' }
+  | { readonly kind: 'full'; readonly reason: string }
+  | { readonly kind: 'error'; readonly reason: string };
+
+/**
+ * Rewrite one roll where it already lies, in one transaction.
+ *
+ * **A push does not write a second entry.** One `LogEntry` holds every
+ * generation of one roll — `LoggedDie.cells` is one cell per generation and
+ * `pushCount` counts them — and the export schema gives one `roll_id` one block
+ * of rows, so `src/log/csv.ts` rejects a duplicate `roll_id` outright. A push
+ * therefore rewrites the roll it belongs to.
+ *
+ * **The ring buffer does not move.** A `put` at a key the store already holds
+ * replaces the value and changes neither the count nor the key order, so no
+ * trim is due and the oldest roll is still the smallest key. That is why this
+ * is not a second insert path with a second trim to keep correct.
+ *
+ * The existence check runs inside the same readwrite transaction as the write,
+ * for the reason the trim does: another connection cannot delete the key
+ * between the two. Without it a `put` at a trimmed key would put that roll back
+ * at a key older than the buffer's own oldest, and the ring would then hold a
+ * roll it had already dropped.
+ */
+export function replaceRoll(
+  db: IDBDatabase,
+  key: number,
+  entry: LogEntry,
+  options: StoreNames = {},
+): Promise<ReplaceResult> {
+  const storeName = options.storeName ?? STORE_NAME;
+  return new Promise<ReplaceResult>((resolve) => {
+    let transaction: IDBTransaction;
+    try {
+      transaction = db.transaction(storeName, 'readwrite');
+    } catch (error) {
+      resolve({ kind: 'error', reason: reasonOf(error) });
+      return;
+    }
+    const store = transaction.objectStore(storeName);
+    let held = false;
+    try {
+      const counted = store.count(IDBKeyRange.only(key));
+      counted.onsuccess = (): void => {
+        held = counted.result > 0;
+        if (held) store.put(entry, key);
+      };
+    } catch (error) {
+      transaction.abort();
+      resolve({ kind: 'error', reason: reasonOf(error) });
+      return;
+    }
+    transaction.oncomplete = (): void => resolve(held ? { kind: 'written' } : { kind: 'gone' });
+    transaction.onabort = (): void => {
+      const error = transaction.error;
+      resolve(
+        error?.name === 'QuotaExceededError'
+          ? { kind: 'full', reason: reasonOf(error) }
+          : { kind: 'error', reason: reasonOf(error) },
+      );
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // The writer
 //
@@ -315,10 +389,21 @@ export async function readRollsInPages(
 // ---------------------------------------------------------------------------
 
 export interface LogWriter {
-  /** Hold a roll for the next flush. */
+  /**
+   * Hold a roll for the next flush.
+   *
+   * A roll already waiting under the same `rollId` is REPLACED where it stands.
+   * A push rewrites the roll it belongs to rather than adding a second one, and
+   * a push that lands before the flush must obey the same rule as a push that
+   * lands after it. Without this the queue would carry the roll twice and the
+   * flush would write two entries with one `roll_id`, which the export schema
+   * rejects.
+   */
   queue(entry: LogEntry): void;
   /** How many rolls are waiting. A failed flush leaves them here. */
   pending(): number;
+  /** True while this roll is waiting to be written. */
+  holds(rollId: string): boolean;
   /** Write everything waiting. Answers null when nothing was waiting. */
   flush(): Promise<AppendResult | null>;
 }
@@ -327,10 +412,15 @@ export function createLogWriter(db: IDBDatabase, options: AppendOptions = {}): L
   const waiting: LogEntry[] = [];
   return {
     queue(entry) {
-      waiting.push(entry);
+      const at = waiting.findIndex((held) => held.rollId === entry.rollId);
+      if (at < 0) waiting.push(entry);
+      else waiting[at] = entry;
     },
     pending() {
       return waiting.length;
+    },
+    holds(rollId) {
+      return waiting.some((held) => held.rollId === rollId);
     },
     async flush() {
       if (waiting.length === 0) return null;

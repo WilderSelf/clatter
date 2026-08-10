@@ -3390,21 +3390,40 @@ const MIN_CONNECTION_HANDOVERS = 10;
  * Import the store, count the calls it makes to the storage manager, and clear
  * any database an earlier run left behind.
  */
+/**
+ * Count every real call to the browser's storage manager, from the first line
+ * of script the page runs.
+ *
+ * **It is installed before the document, and that is not a convenience.** The
+ * application itself asks for persistent storage at startup, through
+ * `openRollLog`, so a proxy installed after the page had loaded would see zero
+ * calls and would report a memo that was already spent as a method nobody
+ * called. Unit 4.4's screen half added that call and this instrument went blind
+ * to it: measured on 2026-08-10, the check read `calls=0` and went red, and it
+ * read `calls=1` again with the application's own call taken out.
+ *
+ * With the count starting before the page, the claim is stronger than it was:
+ * the application AND this file together ask the browser exactly once.
+ */
+async function countPersistCalls(page) {
+  await page.evaluateOnNewDocument(() => {
+    window.__persist = { calls: 0 };
+    const manager = navigator.storage;
+    if (manager && manager.persist) {
+      const real = manager.persist.bind(manager);
+      manager.persist = () => {
+        window.__persist.calls += 1;
+        return real();
+      };
+    }
+  });
+  await page.reload({ waitUntil: 'load' });
+}
+
 async function bootLogStore(page, pageUrl) {
   const moduleUrl = new URL(LOG_STORE_MODULE, pageUrl).href;
   return page.evaluate(
     async ({ moduleUrl, fillBatch }) => {
-      // Before the import. The proxy wraps the browser's own method, so the
-      // count is of real calls and the answer is the browser's own answer.
-      window.__persist = { calls: 0 };
-      const manager = navigator.storage;
-      if (manager && manager.persist) {
-        const real = manager.persist.bind(manager);
-        manager.persist = () => {
-          window.__persist.calls += 1;
-          return real();
-        };
-      }
       const store = await import(moduleUrl);
 
       /** A roll of the shape the log really holds: twelve dice, three generations. */
@@ -4116,7 +4135,7 @@ async function runStorageManager(page, checks) {
     const first = await within(store.persistOnce());
     const second = await within(store.persistOnce());
     const estimate = await within(store.estimateStorage());
-    return { first, second, calls: window.__persist.calls, estimate };
+    return { first, second, calls: window.__persist?.calls ?? -1, estimate };
   });
   console.log(
     `browser: log-store persist calls=${asked.calls} answer=${asked.first} ` +
@@ -4133,8 +4152,9 @@ async function runStorageManager(page, checks) {
       typeof asked.estimate.quota === 'number' &&
       asked.estimate.usage > 0,
     detail:
-      `persistOnce was called twice and the browser's own storage manager saw ${asked.calls} ` +
-      `call, counted by a proxy installed on the real method before the module was imported. ` +
+      `persistOnce was called twice here, and the application asked once of its own at ` +
+      `startup. The browser's own storage manager saw ${asked.calls} call in all, counted by a ` +
+      `proxy installed on the real method before the first line of script the page runs. ` +
       `Both calls answered ${asked.first} and ${asked.second}. The estimate reads ` +
       `usage=${asked.estimate ? asked.estimate.usage : 'none'} bytes of ` +
       `quota=${asked.estimate ? asked.estimate.quota : 'none'}, and the usage must be above ` +
@@ -4218,6 +4238,9 @@ async function runLogStore(page, options, checks) {
     return;
   }
 
+  // The count starts before the document, because the application asks the
+  // storage manager once at startup and that call belongs in the denominator.
+  await countPersistCalls(page);
   const booted = await bootLogStore(page, options.url);
   console.log(
     `browser: log-store db=${booted.dbName} store=${booted.storeName} ` +
@@ -7853,6 +7876,499 @@ async function runSheet(page, options, checks) {
 }
 
 // ---------------------------------------------------------------------------
+// The roll log and the history destination — Unit 4.4, the screen half
+//
+// **The trap this mode exists for: a write that is queued is not a write that
+// landed.** `LogWriter` queues, so a check that asked the application whether
+// it had accepted a roll would prove nothing about the database. Every count
+// below is read out of IndexedDB through a connection this file opens itself,
+// after the application wrote through its own.
+//
+// **The second trap: a list rendered from a store the check also wrote can
+// agree with itself.** So the summary list is counted off the screen and the
+// log is counted off the store, in two separate reads, and the two are compared
+// against a third number: the presses this file made.
+// ---------------------------------------------------------------------------
+
+/** The database the application writes. Both names come from src/log/store.ts. */
+const LOG_DB = 'clatter-log';
+const LOG_STORE = 'rolls';
+
+/**
+ * Every roll in the log, read through this file's own connection.
+ *
+ * No version is asked for, so the open never triggers an upgrade and never
+ * blocks the connection the application holds.
+ */
+async function readLogRolls(page) {
+  return page.evaluate(
+    (names) =>
+      new Promise((resolve) => {
+        let request;
+        try {
+          request = indexedDB.open(names.db);
+        } catch (error) {
+          resolve({ error: String(error), rolls: [], keys: [] });
+          return;
+        }
+        request.onerror = () => resolve({ error: String(request.error), rolls: [], keys: [] });
+        request.onsuccess = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(names.store)) {
+            db.close();
+            resolve({ error: null, rolls: [], keys: [] });
+            return;
+          }
+          const transaction = db.transaction(names.store, 'readonly');
+          const store = transaction.objectStore(names.store);
+          const values = store.getAll();
+          const keys = store.getAllKeys();
+          transaction.oncomplete = () => {
+            db.close();
+            resolve({ error: null, rolls: values.result, keys: keys.result });
+          };
+          transaction.onabort = () => {
+            db.close();
+            resolve({ error: String(transaction.error), rolls: [], keys: [] });
+          };
+        };
+      }),
+    { db: LOG_DB, store: LOG_STORE },
+  );
+}
+
+/** Empty the log without a version change, so no open connection is disturbed. */
+async function clearLog(page) {
+  return page.evaluate(
+    (names) =>
+      new Promise((resolve) => {
+        let request;
+        try {
+          request = indexedDB.open(names.db);
+        } catch (error) {
+          resolve(String(error));
+          return;
+        }
+        request.onerror = () => resolve(String(request.error));
+        request.onsuccess = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(names.store)) {
+            db.close();
+            resolve(null);
+            return;
+          }
+          const transaction = db.transaction(names.store, 'readwrite');
+          transaction.objectStore(names.store).clear();
+          transaction.oncomplete = () => {
+            db.close();
+            resolve(null);
+          };
+          transaction.onabort = () => {
+            db.close();
+            resolve(String(transaction.error));
+          };
+        };
+      }),
+    { db: LOG_DB, store: LOG_STORE },
+  );
+}
+
+/**
+ * Wait until the store holds this many rolls.
+ *
+ * The application writes from a promise chain, so a roll is in the database a
+ * task or two after the press. Waiting on the count is what makes the check
+ * about the database and not about the click.
+ */
+async function logHolds(page, wanted, waitMs = 8000) {
+  const until = Date.now() + waitMs;
+  let held = await readLogRolls(page);
+  while (held.rolls.length < wanted && Date.now() < until) {
+    await new Promise((done) => setTimeout(done, 50));
+    held = await readLogRolls(page);
+  }
+  return held;
+}
+
+async function runHistory(page, options, checks) {
+  const design = readFileSync(join(here, '..', 'docs', 'design', '0002-screen-design.md'), 'utf8');
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // A browser that refuses storage answers the defaults anyway.
+    }
+  });
+  await clearLog(page);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 30000 });
+
+  // ---- 1. A roll writes exactly one entry, and a push rewrites that entry. ----
+  //
+  // The pool is small and holds no stress die, so a push is never blocked by a
+  // stress bane and the run does not depend on the faces that landed.
+  await pressTile(page, 'attribute', 'p', 4);
+  await pressTile(page, 'skill', 'p', 3);
+
+  let rollsPressed = 0;
+  let pushesPressed = 0;
+  const perRoll = [];
+  for (let round = 0; round < 4; round += 1) {
+    await page.click('[data-el="roll-button"]');
+    rollsPressed += 1;
+    await settleScreen(page);
+    let pushedHere = 0;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const live = await page.evaluate(() => {
+        const button = document.querySelector('[data-el="push-button"]');
+        return button !== null && !button.disabled;
+      });
+      if (!live) break;
+      await page.click('[data-el="push-button"]');
+      pushesPressed += 1;
+      pushedHere += 1;
+      await settleScreen(page);
+    }
+    perRoll.push(pushedHere);
+    await logHolds(page, rollsPressed);
+  }
+
+  const written = await logHolds(page, rollsPressed);
+  const rolls = written.rolls;
+  const rollIds = new Set(rolls.map((entry) => entry.rollId));
+  const pushesStored = rolls.reduce((total, entry) => total + entry.pushCount, 0);
+  const generationsStored = rolls.reduce(
+    (total, entry) => total + Math.max(0, ...entry.dice.map((die) => die.cells.length)) - 1,
+    0,
+  );
+  console.log(
+    `browser: history rolls_pressed=${rollsPressed} pushes_pressed=${pushesPressed} ` +
+      `entries=${rolls.length} distinct_roll_ids=${rollIds.size} ` +
+      `push_count_sum=${pushesStored} generations_sum=${generationsStored} ` +
+      `per_roll=[${perRoll.join(',')}] keys=${written.keys.length} error=${written.error}`,
+  );
+  checks.push({
+    name: 'history.a-roll-writes-one-entry-and-a-push-rewrites-it',
+    ok:
+      written.error === null &&
+      rollsPressed > 1 &&
+      pushesPressed > 0 &&
+      rolls.length === rollsPressed &&
+      rollIds.size === rolls.length &&
+      pushesStored === pushesPressed &&
+      generationsStored === pushesPressed,
+    detail:
+      `${rollsPressed} presses on Roll and ${pushesPressed} on Push put ${rolls.length} ` +
+      `entries in IndexedDB, under ${rollIds.size} distinct roll ids. The stored push counts ` +
+      `add up to ${pushesStored} and the stored generations add up to ${generationsStored}, ` +
+      `each against the ${pushesPressed} pushes this run pressed. The denominator is counted ` +
+      `three ways: the presses, the entries, and the generations inside them. One entry per ` +
+      `roll is what the shape of the log requires — one LogEntry holds every generation, and ` +
+      `src/log/csv.ts rejects a file where one roll_id appears twice. The rolls are read back ` +
+      `through a connection this harness opened, never through the application. ` +
+      `Read error: ${written.error}.`,
+  });
+
+  // ---- 2. The stored hash is the hash of the profile the roll ran under. ----
+  //
+  // Units 4.1 and 4.2 make the profile changeable at run time and Decision 10
+  // clears the table on a change, so the two rolls below are two throws under
+  // two rule sets and never one roll re-priced.
+  await clearLog(page);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 30000 });
+  // The pool is not stored, so a reload empties the tiles. A roll of no dice is
+  // an automatic failure that puts nothing on the table and writes no entry,
+  // which would leave this check measuring an empty log.
+  await pressTile(page, 'attribute', 'p', 3);
+  await page.click('[data-el="roll-button"]');
+  await logHolds(page, 1);
+  const beforeChange = await diceOnTable(page);
+  await openSheet(page);
+  const chosen = await page.evaluate(() => {
+    const inputs = [...document.querySelectorAll('[data-el="sheet-ruleset"] input')];
+    const before = inputs.find((input) => input.checked)?.value ?? null;
+    const other = inputs.find((input) => !input.checked);
+    other?.click();
+    return { before, after: other?.value ?? null };
+  });
+  await closeSheet(page);
+  const cleared = await diceOnTable(page);
+  await page.click('[data-el="roll-button"]');
+  const bothWritten = await logHolds(page, 2);
+  const hashes = bothWritten.rolls.map((entry) => entry.profileHash);
+  const rulesets = bothWritten.rolls.map((entry) => entry.ruleset);
+  const shaped = hashes.filter((hash) => /^[0-9a-f]{64}$/.test(hash));
+  console.log(
+    `browser: history profile_change ${chosen.before} -> ${chosen.after} ` +
+      `dice_before=${beforeChange} cleared_table=${cleared} ` +
+      `entries=${bothWritten.rolls.length} ` +
+      `rulesets=[${rulesets.join(', ')}] distinct_hashes=${new Set(hashes).size} ` +
+      `sha256_shaped=${shaped.length} first=${(hashes[0] ?? '').slice(0, 12)} ` +
+      `second=${(hashes[1] ?? '').slice(0, 12)}`,
+  );
+  checks.push({
+    name: 'history.the-stored-hash-is-the-profile-the-roll-ran-under',
+    ok:
+      bothWritten.rolls.length === 2 &&
+      chosen.before !== null &&
+      chosen.after !== null &&
+      chosen.before !== chosen.after &&
+      beforeChange > 0 &&
+      cleared === 0 &&
+      rulesets[0] === chosen.before &&
+      rulesets[1] === chosen.after &&
+      new Set(hashes).size === 2 &&
+      shaped.length === 2,
+    detail:
+      `the rule set moved from ${chosen.before} to ${chosen.after} between the two rolls, and ` +
+      `the change took the table from ${beforeChange} dice to ${cleared}, which is Decision 10. ` +
+      `The two entries ` +
+      `name [${rulesets.join(', ')}] and carry ${new Set(hashes).size} distinct digests, ` +
+      `${shaped.length} of the 2 shaped as SHA-256: ${(hashes[0] ?? '').slice(0, 12)}... and ` +
+      `${(hashes[1] ?? '').slice(0, 12)}.... A hash re-derived from the profile in force today ` +
+      `would read the same twice, which is the defect specs/0001-rules-model.md names.`,
+  });
+
+  // ---- 3. The summary list length follows the log. ----
+  //
+  // The count off the screen and the count off the store are two separate
+  // readings, so a list that agreed with itself would still fail.
+  await clearLog(page);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 30000 });
+  await pressTile(page, 'attribute', 'p', 3);
+  const lengths = [];
+  for (let round = 0; round < 3; round += 1) {
+    await page.click('[data-el="roll-button"]');
+    await logHolds(page, round + 1);
+    await openSheet(page);
+    await page.click('[data-el="sheet-history"]');
+    await page.waitForSelector('[data-el="history"]', { timeout: 15000 });
+    await settleScreen(page);
+    const drawn = await page.evaluate(
+      () => document.querySelectorAll('[data-el="history-list"] [role="option"]').length,
+    );
+    const inStore = (await readLogRolls(page)).rolls.length;
+    lengths.push({ round: round + 1, drawn, inStore });
+    await page.click('[data-el="back-button"]');
+    await page.waitForSelector('[data-el="roll-button"]', { timeout: 15000 });
+  }
+  const agreed = lengths.filter((each) => each.drawn === each.inStore && each.drawn === each.round);
+  console.log(
+    `browser: history list ${lengths
+      .map((each) => `pressed=${each.round} drawn=${each.drawn} in_store=${each.inStore}`)
+      .join(' | ')}`,
+  );
+  checks.push({
+    name: 'history.the-summary-list-length-follows-the-log',
+    ok: lengths.length === 3 && agreed.length === lengths.length,
+    detail:
+      `${agreed.length} of ${lengths.length} readings agree across three counts: the presses ` +
+      `this run made, the options the list drew, and the rolls a second connection read out of ` +
+      `IndexedDB. ` +
+      `[${lengths
+        .map((each) => `${each.round} pressed / ${each.drawn} drawn / ${each.inStore} stored`)
+        .join(' | ')}].`,
+  });
+
+  // ---- 4. The destination is operable by keyboard alone. ----
+  await openSheet(page);
+  await page.click('[data-el="sheet-history"]');
+  await page.waitForSelector('[data-el="history-list"]', { timeout: 15000 });
+  await settleScreen(page);
+  await page.evaluate(() => document.activeElement?.blur());
+  const walked = await walkShell(page, 12);
+  const authored = walked.filter((visit) => !visit.implicit);
+  const tabStops = authored.filter((visit) => visit.by === 'tab').map((visit) => visit.name);
+  const arrowVisits = authored.filter((visit) => visit.by === 'arrow').map((visit) => visit.name);
+  const inStore = (await readLogRolls(page)).rolls.length;
+  const named = await page.evaluate(() => {
+    const list = document.querySelector('[data-el="history-list"]');
+    const options = [...(list?.querySelectorAll('[role="option"]') ?? [])];
+    const note = document.querySelector('[data-el="history-storage-note"]');
+    return {
+      listRole: list?.getAttribute('role') ?? null,
+      listName: list?.getAttribute('aria-label') ?? null,
+      roving: options.filter((option) => option.tabIndex === 0).length,
+      unnamed: options.filter((option) => (option.getAttribute('aria-label') ?? '') === '').length,
+      stateless: options.filter((option) => option.getAttribute('aria-selected') === null).length,
+      short: options.filter((option) => option.getBoundingClientRect().height < 24).length,
+      options: options.length,
+      noteRole: note?.getAttribute('role') ?? null,
+      noteText: note?.textContent ?? '',
+      backName: document.querySelector('[data-el="back-button"]')?.textContent ?? '',
+    };
+  });
+  // Enter on an option opens the record, and the focus must land somewhere.
+  await page.evaluate(() => {
+    document.querySelector('[data-el="history-list"] [role="option"]')?.focus();
+  });
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-el="history-record"]', { timeout: 15000 });
+  // Preact runs `useEffect` after the paint, so the focus the record takes
+  // lands one frame after the record is in the document. The wait is two
+  // frames, which is what `settleScreen` gives.
+  await settleScreen(page);
+  const afterEnter = await page.evaluate(() => ({
+    record: document.querySelector('[data-el="history-record"]') !== null,
+    focus:
+      document.activeElement?.getAttribute('data-el') ??
+      document.activeElement?.tagName ??
+      'nothing',
+  }));
+  const summaryControls = design
+    .slice(
+      design.indexOf('### The history is a separate destination'),
+      design.indexOf('###', design.indexOf('### The history is a separate destination') + 1),
+    )
+    .split('\n')
+    .find((line) => line.trim().startsWith('| Summary'));
+  const wantedControls = [...(summaryControls ?? '').matchAll(/`([a-z-]+)`/g)]
+    .map((match) => match[1])
+    .sort();
+  console.log(
+    `browser: history keyboard tab_stops=[${tabStops.join(' ')}] ` +
+      `arrow_visits=${arrowVisits.length} options=${named.options} in_store=${inStore} ` +
+      `roving=${named.roving} unnamed=${named.unnamed} stateless=${named.stateless} ` +
+      `short=${named.short} list_role=${named.listRole} note_role=${named.noteRole} ` +
+      `record_after_enter=${afterEnter.record} focus_after_enter=${afterEnter.focus}`,
+  );
+  checks.push({
+    name: 'history.the-destination-is-operable-by-keyboard-alone',
+    ok:
+      wantedControls.length === 2 &&
+      tabStops.slice().sort().join(' ') === wantedControls.join(' ') &&
+      named.listRole === 'listbox' &&
+      (named.listName ?? '').length > 0 &&
+      named.options === inStore &&
+      arrowVisits.length === inStore &&
+      named.roving === 1 &&
+      named.unnamed === 0 &&
+      named.stateless === 0 &&
+      named.short === 0 &&
+      afterEnter.record &&
+      afterEnter.focus === 'back-button',
+    detail:
+      `real Tab presses reached [${tabStops.join(' ')}] against the ` +
+      `[${wantedControls.join(' ')}] section 3 of the design names for the summary view, read ` +
+      `out of the document and never restated. The list is one tab stop with ${named.roving} ` +
+      `roving index and the arrows reached ${arrowVisits.length} rows against the ${inStore} ` +
+      `rolls a second connection read out of IndexedDB. Every option carries a role, a name ` +
+      `and a state: ${named.unnamed} without a name, ${named.stateless} without a state, and ` +
+      `${named.short} under the 24 px floor of WCAG 2.2 SC 2.5.8. A real Enter opened the ` +
+      `record (${afterEnter.record}) and the focus landed on ${afterEnter.focus}.`,
+  });
+
+  // ---- 5. The seven-day note reaches the player. ----
+  await page.click('[data-el="back-button"]');
+  await page.waitForSelector('[data-el="history-list"]', { timeout: 15000 });
+  const notePlan =
+    named.noteText.includes('seven days') &&
+    named.noteText.toLowerCase().includes('home screen') &&
+    named.noteText.toLowerCase().includes('export');
+  const seen = await page.evaluate(() => {
+    const note = document.querySelector('[data-el="history-storage-note"]');
+    if (note === null) return null;
+    const box = note.getBoundingClientRect();
+    return { width: Math.round(box.width), height: Math.round(box.height), text: note.textContent };
+  });
+  console.log(
+    `browser: history note role=${named.noteRole} on_plan=${notePlan} ` +
+      `box=${seen?.width}x${seen?.height} text="${(seen?.text ?? '').slice(0, 60)}..."`,
+  );
+  checks.push({
+    name: 'history.the-seven-day-note-reaches-the-player',
+    ok:
+      named.noteRole === 'note' &&
+      notePlan &&
+      seen !== null &&
+      seen.width > 0 &&
+      seen.height > 0 &&
+      seen.text === named.noteText,
+    detail:
+      `the note carries role=${named.noteRole} and draws ${seen?.width}x${seen?.height} px, so ` +
+      `it is on the screen and not only in the markup. It names the seven days, the home ` +
+      `screen and the export the plan asks for: ${notePlan}. "${named.noteText}"`,
+  });
+
+  // ---- 6. The storage estimate reaches the settings sheet. ----
+  await page.click('[data-el="back-button"]');
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 15000 });
+  await openSheet(page);
+  await page.waitForFunction(
+    () =>
+      (document.querySelector('[data-el="sheet-storage-estimate"]')?.textContent ?? '').includes(
+        'MB',
+      ),
+    { timeout: 15000 },
+  );
+  const estimate = await page.evaluate(() => {
+    const shown = document.querySelector('[data-el="sheet-storage-estimate"]');
+    return {
+      text: shown?.textContent ?? '',
+      role: shown?.getAttribute('role') ?? null,
+      tabIndex: shown?.tabIndex ?? 0,
+    };
+  });
+  const real = await page.evaluate(async () => {
+    const held = await navigator.storage.estimate();
+    return { usage: held.usage ?? null, quota: held.quota ?? null };
+  });
+  const shownUsage = Number(/uses ([0-9.]+) MB/.exec(estimate.text)?.[1] ?? NaN);
+  const wantedUsage = Number((real.usage / 1048576).toFixed(1));
+  console.log(
+    `browser: history storage text="${estimate.text}" role=${estimate.role} ` +
+      `usage=${real.usage} quota=${real.quota} shown_mb=${shownUsage} wanted_mb=${wantedUsage}`,
+  );
+  checks.push({
+    name: 'history.the-storage-estimate-reaches-the-settings-sheet',
+    ok:
+      estimate.role === 'status' &&
+      estimate.tabIndex < 0 &&
+      Number.isFinite(shownUsage) &&
+      shownUsage === wantedUsage &&
+      real.quota !== null,
+    detail:
+      `the sheet prints "${estimate.text}" in a live region (role=${estimate.role}) that holds ` +
+      `no tab stop (tabIndex=${estimate.tabIndex}). It reads ${shownUsage} MB against the ` +
+      `${wantedUsage} MB navigator.storage.estimate() answers this run, over a quota of ` +
+      `${real.quota} bytes. The plan asks this unit to show estimate() in settings.`,
+  });
+
+  // ---- 7. The captures the owner looks at. ----
+  if (options.captureShell !== null) {
+    await closeSheet(page);
+    await openSheet(page);
+    await page.click('[data-el="sheet-history"]');
+    await page.waitForSelector('[data-el="history-list"]', { timeout: 15000 });
+    for (const width of [360, 1440]) {
+      await page.setViewport({ width, height: width === 360 ? 760 : 900, deviceScaleFactor: 1 });
+      await settleScreen(page);
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0016-history-${width}.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+      // The record shell as well, because it is what Unit 4.5 builds on.
+      await page.evaluate(() => {
+        document.querySelector('[data-el="history-list"] [role="option"]')?.click();
+      });
+      await page.waitForSelector('[data-el="history-record"]', { timeout: 15000 });
+      await settleScreen(page);
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0016-history-record-${width}.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+      await page.click('[data-el="back-button"]');
+      await page.waitForSelector('[data-el="history-list"]', { timeout: 15000 });
+    }
+    console.log(`browser: history captures written to ${options.captureShell}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing and the run
 // ---------------------------------------------------------------------------
 
@@ -7891,6 +8407,7 @@ function parseArgs(argv) {
     offline: false,
     shell: false,
     sheet: false,
+    history: false,
     blockedChunk: false,
     table: false,
     captureShell: null,
@@ -7935,6 +8452,7 @@ function parseArgs(argv) {
     else if (arg === '--offline') options.offline = true;
     else if (arg === '--shell') options.shell = true;
     else if (arg === '--sheet') options.sheet = true;
+    else if (arg === '--history') options.history = true;
     else if (arg === '--blocked-chunk') options.blockedChunk = true;
     else if (arg === '--table') options.table = true;
     else if (arg === '--capture-shell') options.captureShell = next();
@@ -7993,6 +8511,7 @@ function parseArgs(argv) {
     ['--offline', options.offline],
     ['--shell', options.shell],
     ['--sheet', options.sheet],
+    ['--history', options.history],
     ['--blocked-chunk', options.blockedChunk],
     ['--table', options.table],
   ];
@@ -8001,7 +8520,12 @@ function parseArgs(argv) {
     throw new Error(
       `${named[0]} needs --url, and the url must be ` +
         `${
-          options.offline || options.shell || options.sheet || options.blockedChunk || options.table
+          options.offline ||
+          options.shell ||
+          options.sheet ||
+          options.history ||
+          options.blockedChunk ||
+          options.table
             ? 'a preview server over the built output'
             : 'a Vite dev server'
         }`,
@@ -8022,8 +8546,8 @@ function parseArgs(argv) {
   if (options.captureLater && !options.share) {
     throw new Error('--capture-later belongs to --share');
   }
-  if (options.captureShell !== null && !options.shell && !options.sheet) {
-    throw new Error('--capture-shell belongs to --shell or --sheet');
+  if (options.captureShell !== null && !options.shell && !options.sheet && !options.history) {
+    throw new Error('--capture-shell belongs to --shell, --sheet or --history');
   }
   if (options.longTaskMs !== 0) {
     if (!options.logStore && !options.logCsv) {
@@ -8053,6 +8577,7 @@ async function run(options) {
       options.offline ||
       options.shell ||
       options.sheet ||
+      options.history ||
       options.blockedChunk ||
       options.table
     ) {
@@ -8137,6 +8662,8 @@ async function run(options) {
       await runShell(page, options, checks);
     } else if (options.sheet) {
       await runSheet(page, options, checks);
+    } else if (options.history) {
+      await runHistory(page, options, checks);
     } else if (options.blockedChunk) {
       await runBlockedChunk(page, options, checks, server);
     } else if (options.table) {
