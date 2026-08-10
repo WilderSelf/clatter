@@ -12,6 +12,7 @@
 //                            [--tray] [--pool] [--push] [--affordance] [--probe]
 //                            [--share] [--share-controls] [--capture-later] [--offline]
 //                            [--shell] [--capture-shell <dir>] [--table] [--sheet]
+//                            [--sound-controls] [--overlay]
 //
 // `--table` starts and stops its own preview server, because it drives the
 // built application. Build first, then run it alone:
@@ -108,6 +109,26 @@
 // with sound off and once with it on, and judges the sound engine against the
 // collisions the physics world reported. It counts those collisions itself, so
 // no number the engine writes is its own denominator.
+//
+// `--sound-controls` needs `--url` over a preview server, because it drives the
+// BUILT application. It is the interface half of Unit 3.6: the player turns
+// sound on through the real control with real key presses, sets the level with
+// real arrow presses, and rolls. It counts the voices through the browser's own
+// `AudioBufferSourceNode.start` and reads the level off the `GainNode` the
+// engine built, so no number the engine writes is its own denominator. Build
+// first, then run it alone:
+//   npm run build && node scripts/browser.mjs --sound-controls \
+//     --url http://localhost:4173/clatter/ --hardware --capture-shell docs/design
+//
+// `--overlay` needs `--url` over a preview server too. It is the overlay half
+// of Unit 3.8: it turns the performance overlay on with real key presses,
+// throws, and judges each of the four figures against something the overlay did
+// not write. It injects a per-frame stall and reads the percentiles before and
+// after it, and it watches the drawn positions of the dice itself to bound
+// throw-to-first-motion. **It reads no budget and judges no machine.** Build
+// first, then run it alone:
+//   npm run build && node scripts/browser.mjs --overlay \
+//     --url http://localhost:4173/clatter/ --hardware --capture-shell docs/design
 //
 // `--reduced-motion` needs `--url`. It throws the same pool twice from one
 // seed, once tumbling and once with the tumble skipped, and asserts the faces
@@ -11321,6 +11342,790 @@ async function runHistory(page, options, checks) {
 }
 
 // ---------------------------------------------------------------------------
+// The sound controls in the application — Unit 3.6, the interface half
+//
+// The engine half already proved the engine: no context until the player asks,
+// silence while sound is off, a context born suspended, and every collision
+// accounted for. All of that ran against an engine this file wired up by hand.
+//
+// This mode drives the SHIPPED application. The player turns sound on through
+// the real control with real key presses, sets a level with real arrow presses,
+// and rolls. Two numbers are counted here and neither one is the engine's: the
+// contexts the page constructed, and the voices the browser's own audio really
+// started. The level is read off the `GainNode` the engine built, never off the
+// record it came from.
+// ---------------------------------------------------------------------------
+
+/** Where the arrow keys take the volume. Neither is a default of anything. */
+const LOUD_VOLUME = 0.75;
+const QUIET_VOLUME = 0.25;
+
+/**
+ * Count what the browser's own audio really did.
+ *
+ * `createBufferSource` is the call every voice starts with, and it belongs to
+ * the browser rather than to this application. A count taken here is therefore
+ * a second enumeration of the voices, and a synthesiser that was wired up and
+ * never gated cannot hide inside its own counters.
+ */
+const AUDIO_PROBE = `
+window.__audio = { built: 0, voices: 0, started: 0 };
+{
+  const Real = window.AudioContext;
+  window.AudioContext = new Proxy(Real, {
+    construct(target, args) {
+      window.__audio.built += 1;
+      return Reflect.construct(target, args);
+    },
+  });
+  const make = Real.prototype.createBufferSource;
+  Real.prototype.createBufferSource = function () {
+    window.__audio.voices += 1;
+    const node = make.call(this);
+    const start = node.start.bind(node);
+    node.start = (...args) => {
+      window.__audio.started += 1;
+      return start(...args);
+    };
+    return node;
+  };
+}
+`;
+
+/** What the page knows about its own sound, at this instant. */
+async function readSoundControls(page) {
+  return page.evaluate(() => {
+    const engine = window.__clatterSound ?? null;
+    const output = engine?.output ?? null;
+    const stored = JSON.parse(window.localStorage.getItem('clatter.settings') ?? '{}');
+    return {
+      audio: { ...window.__audio },
+      hasEngine: engine !== null,
+      enabled: engine?.enabled ?? null,
+      counts: engine === null ? null : { ...engine.counts },
+      // The level as the audio graph carries it. `GainNode.gain` is an
+      // AudioParam of a real node the engine built, so this is the graph and
+      // not the setting that fed it.
+      gain: output === null ? null : output.gain.value,
+      isGainNode: output === null ? null : output instanceof GainNode,
+      contextState: engine?.context?.state ?? null,
+      storedEnabled: stored.soundEnabled ?? null,
+      storedVolume: stored.soundVolume ?? null,
+    };
+  });
+}
+
+/** Tab forward from a named control until the wanted one takes the focus. */
+async function tabUntil(page, start, wanted, limit = 30) {
+  await page.focus(`[data-el="${start}"]`);
+  const seen = [];
+  for (let step = 0; step < limit; step += 1) {
+    await page.keyboard.press('Tab');
+    const at = await page.evaluate(
+      () => document.activeElement?.getAttribute('data-el') ?? document.activeElement?.tagName,
+    );
+    seen.push(at);
+    if (at === wanted) return { reached: true, presses: step + 1, seen };
+  }
+  return { reached: false, presses: limit, seen };
+}
+
+/** What a reader meets at one control: its role, its name and its state. */
+async function readControlSemantics(page, name) {
+  return page.evaluate((el) => {
+    const control = document.querySelector(`[data-el="${el}"]`);
+    if (control === null) return null;
+    const label = control.closest('label');
+    const box = control.getBoundingClientRect();
+    return {
+      role:
+        control.getAttribute('role') ??
+        (control.tagName === 'INPUT' ? control.type : control.tagName.toLowerCase()),
+      name: (control.getAttribute('aria-label') ?? label?.textContent ?? control.textContent ?? '')
+        .replace(/\s+/g, ' ')
+        .trim(),
+      state:
+        control.type === 'checkbox'
+          ? String(control.checked)
+          : (control.getAttribute('aria-valuetext') ?? String(control.value)),
+      value: control.value ?? null,
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+    };
+  }, name);
+}
+
+async function runSoundControls(page, options, checks) {
+  await page.evaluate(AUDIO_PROBE);
+  await page.evaluate(TABLE_HELPERS);
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      /* a browser that refuses storage answers the defaults anyway */
+    }
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.evaluate(AUDIO_PROBE);
+  await page.evaluate(TABLE_HELPERS);
+  await page.waitForSelector('[data-el="disclosure-toggle"]', { timeout: 30000 });
+
+  const opening = await page.evaluate(() => window.__table.read());
+  const onTheTable = opening.renderer === 'tray';
+  const why =
+    'the startup probe answered below the bar, so the screen draws flat dice, mounts no table ' +
+    'and reports no collision. There is no WebGL context inside the sandbox. Run this mode ' +
+    'with the sandbox off.';
+  const judge = (name, ok, detail) =>
+    checks.push(
+      onTheTable
+        ? { name, ok, detail }
+        : { name, ok: true, skipped: true, detail: `NOT JUDGED: ${why}` },
+    );
+  if (!onTheTable) console.log(`browser: sound-controls renderer=${opening.renderer} NOT JUDGED`);
+
+  // A pool worth hearing. Six attribute dice make a throw of six collisions or
+  // more, and the count is measured rather than assumed below.
+  await pressTile(page, 'attribute', 'p', 6);
+
+  // ---- 1. A roll with sound off ------------------------------------------
+  await page.click('[data-el="roll-button"]');
+  await page.evaluate(() => window.__table.settle(1));
+  const silent = await readSoundControls(page);
+  console.log(
+    `browser: sound-controls OFF contexts=${silent.audio.built} voices=${silent.audio.voices} ` +
+      `started=${silent.audio.started} impacts=${silent.counts?.impacts ?? 'none'} ` +
+      `triggers=${silent.counts?.triggers ?? 'none'} engine=${silent.hasEngine}`,
+  );
+
+  // ---- 2. The player turns sound on, with the keyboard alone --------------
+  await openSheet(page);
+  const walked = await tabUntil(page, 'sheet-tray-renderer', 'sheet-sound-toggle');
+  const toggleBefore = await readControlSemantics(page, 'sheet-sound-toggle');
+  await page.keyboard.press(' ');
+  await settleScreen(page);
+  const toggleAfter = await readControlSemantics(page, 'sheet-sound-toggle');
+  const afterEnable = await readSoundControls(page);
+
+  // ---- 3. The level, set by real arrow presses ----------------------------
+  const toVolume = await tabUntil(page, 'sheet-sound-toggle', 'sheet-sound-volume', 3);
+  const stepsUp = Math.round((LOUD_VOLUME - 0.5) / 0.05);
+  for (let press = 0; press < stepsUp; press += 1) await page.keyboard.press('ArrowRight');
+  await settleScreen(page);
+  const loud = await readSoundControls(page);
+  const loudControl = await readControlSemantics(page, 'sheet-sound-volume');
+  const stepsDown = Math.round((LOUD_VOLUME - QUIET_VOLUME) / 0.05);
+  for (let press = 0; press < stepsDown; press += 1) await page.keyboard.press('ArrowLeft');
+  await settleScreen(page);
+  const quiet = await readSoundControls(page);
+  // Read while the sheet is open. The panel leaves the document when it closes,
+  // and a reading taken after that would be a reading of nothing.
+  const volumeControl = await readControlSemantics(page, 'sheet-sound-volume');
+  console.log(
+    `browser: sound-controls keyboard toggle_presses=${walked.presses} ` +
+      `reached=${walked.reached} volume_presses=${toVolume.presses} ` +
+      `gain_at_loud=${loud.gain} gain_at_quiet=${quiet.gain} ` +
+      `stored_loud=${loud.storedVolume} stored_quiet=${quiet.storedVolume} ` +
+      `context=${afterEnable.contextState} gain_node=${quiet.isGainNode}`,
+  );
+  await closeSheet(page);
+
+  // ---- 4. A roll with sound on -------------------------------------------
+  await page.click('[data-el="roll-button"]');
+  await page.evaluate(() => window.__table.settle(2));
+  const heard = await readSoundControls(page);
+  const madeVoices = heard.audio.started - silent.audio.started;
+  const madeImpacts = (heard.counts?.impacts ?? 0) - (silent.counts?.impacts ?? 0);
+  console.log(
+    `browser: sound-controls ON contexts=${heard.audio.built} voices=${madeVoices} ` +
+      `engine_triggers=${heard.counts?.triggers ?? 'none'} collisions=${madeImpacts} ` +
+      `state=${heard.contextState} gain=${heard.gain}`,
+  );
+
+  judge(
+    'sound-controls.a-roll-in-the-application-starts-voices',
+    madeVoices > 0 &&
+      madeImpacts > 0 &&
+      heard.counts?.triggers === madeVoices &&
+      heard.audio.built === 1 &&
+      heard.contextState === 'running',
+    `the player turned sound on through the sheet and rolled. The browser's own audio started ` +
+      `${madeVoices} voices over a throw that reported ${madeImpacts} collisions, against a ` +
+      `floor of 1 of each. The engine says it started ${heard.counts?.triggers ?? 'nothing'}, ` +
+      `and the two counts must agree. The page constructed ${heard.audio.built} audio ` +
+      `contexts in all and the clock reads ${heard.contextState}: a suspended clock makes no ` +
+      `sound whatever the graph holds. The voice count is taken off ` +
+      `AudioBufferSourceNode.start, which belongs to the browser and not to this application.`,
+  );
+
+  // ---- 5. Sound off again, over a whole throw -----------------------------
+  await openSheet(page);
+  await page.click('[data-el="sheet-sound-toggle"]');
+  await settleScreen(page);
+  await closeSheet(page);
+  const before = await readSoundControls(page);
+  await page.click('[data-el="roll-button"]');
+  await page.evaluate(() => window.__table.settle(3));
+  const after = await readSoundControls(page);
+  const silentVoices = after.audio.started - before.audio.started;
+  const silentImpacts = (after.counts?.impacts ?? 0) - (before.counts?.impacts ?? 0);
+  const silentTriggers = (after.counts?.triggers ?? 0) - (before.counts?.triggers ?? 0);
+  console.log(
+    `browser: sound-controls OFF AGAIN voices=${silentVoices} triggers=${silentTriggers} ` +
+      `collisions=${silentImpacts} stored_enabled=${after.storedEnabled} ` +
+      `context_still_there=${after.contextState}`,
+  );
+
+  judge(
+    'sound-controls.the-toggle-off-leaves-the-engine-silent-over-a-whole-throw',
+    silentVoices === 0 &&
+      silentTriggers === 0 &&
+      silentImpacts > 0 &&
+      after.storedEnabled === false &&
+      after.contextState !== null,
+    `the toggle went off and the table was thrown again. The browser started ${silentVoices} ` +
+      `voices and the engine started ${silentTriggers}, both against a ceiling of 0, while the ` +
+      `tray handed the engine ${silentImpacts} collisions over that throw, against a floor of ` +
+      `1. The record reads soundEnabled=${after.storedEnabled}. The context is still there and ` +
+      `reads ${after.contextState}, so this is the gate and not a torn-down graph.`,
+  );
+
+  const wantedLoud = Math.fround(LOUD_VOLUME);
+  const wantedQuiet = Math.fround(QUIET_VOLUME);
+  judge(
+    'sound-controls.the-stored-volume-reaches-the-output-gain',
+    loud.gain === wantedLoud &&
+      quiet.gain === wantedQuiet &&
+      loud.storedVolume === LOUD_VOLUME &&
+      quiet.storedVolume === QUIET_VOLUME &&
+      quiet.isGainNode === true,
+    `two levels, both set by real arrow presses and both read off the GainNode the engine ` +
+      `built. At ${LOUD_VOLUME} the gain reads ${loud.gain} against the ${wantedLoud} an ` +
+      `AudioParam holds, and the record holds ${loud.storedVolume}. At ${QUIET_VOLUME} the gain ` +
+      `reads ${quiet.gain} against ${wantedQuiet}, and the record holds ${quiet.storedVolume}. ` +
+      `output instanceof GainNode is ${quiet.isGainNode}. Neither level is the 0.5 the ` +
+      `settings module ships nor the 1 the engine starts at, so a level that never left the ` +
+      `record fails here.`,
+  );
+
+  console.log(
+    `browser: sound-controls semantics toggle=[${toggleBefore?.role} "${toggleBefore?.name}" ` +
+      `${toggleBefore?.state}->${toggleAfter?.state}] volume=[${volumeControl?.role} ` +
+      `"${volumeControl?.name}" ${loudControl?.state}] hit=${volumeControl?.height}px`,
+  );
+  checks.push({
+    name: 'sound-controls.both-controls-carry-a-role-a-name-and-a-state-by-keyboard-alone',
+    ok:
+      walked.reached &&
+      toVolume.reached &&
+      toggleBefore?.role === 'checkbox' &&
+      (toggleBefore?.name ?? '').length > 0 &&
+      toggleBefore?.state === 'false' &&
+      toggleAfter?.state === 'true' &&
+      volumeControl?.role === 'range' &&
+      // Exactly the word, and not the word plus the reading beside it. The
+      // label wraps the level as well, so a control taking its name from that
+      // label would have a reader announce the level twice.
+      volumeControl?.name === 'Volume' &&
+      loudControl?.state === `${Math.round(LOUD_VOLUME * 100)} per cent` &&
+      (volumeControl?.height ?? 0) >= 24,
+    detail:
+      `real Tab presses reached the toggle in ${walked.presses} and the volume in ` +
+      `${toVolume.presses} more, from ${walked.seen.length} stops walked. A real Space press ` +
+      `moved the toggle state from ${toggleBefore?.state} to ${toggleAfter?.state}. The toggle ` +
+      `is a ${toggleBefore?.role} named "${toggleBefore?.name}" and the volume is a ` +
+      `${volumeControl?.role} named "${volumeControl?.name}", which must be "Volume" and ` +
+      `nothing more, whose state reads ` +
+      `"${loudControl?.state}" after the arrow presses. The volume row measures ` +
+      `${volumeControl?.height} px against the 24 px floor of WCAG 2.2 SC 2.5.8.`,
+  });
+
+  if (options.captureShell !== null) {
+    await openSheet(page);
+    await page.setViewport({ width: 360, height: 760, deviceScaleFactor: 1 });
+    await settleScreen(page);
+    await new Promise((done) => setTimeout(done, 200));
+    writeFileSync(
+      join(options.captureShell, '0022-sheet-sound-360.png'),
+      await page.screenshot({ type: 'png' }),
+    );
+    console.log(`browser: sound-controls capture written to ${options.captureShell}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The performance overlay — Unit 3.8, the overlay half
+//
+// The overlay is the only honest measurement of a mid-range phone this project
+// will ever have, so this mode drives it in the built application and judges
+// every figure against something the overlay did not write.
+//
+// **It judges the instrument and never the machine.** No reading here is
+// compared against a budget. `CLAUDE.md` splits the performance claims in two:
+// the deterministic gates are integers in CI, and the timing figures are
+// reported on real hardware and pasted into the ledger by the owner. A check
+// that failed a run because this desktop was slow would be the second kind
+// pretending to be the first.
+//
+// What is measured against what:
+//
+//   * The frame percentiles answer a stall this run injects, and the run reads
+//     them before and after. A figure computed from a constant cannot move.
+//   * Throw-to-first-motion is compared against a watcher this file owns, which
+//     reads the drawn positions of the dice off the tray seam. The same watcher
+//     records how many frames were drawn with no die moved, which is the
+//     difference between the first frame and the first motion.
+//   * A percentile below its floor is refused, and the refusal names the count.
+//   * A figure with no source in this browser is named and prints no number.
+// ---------------------------------------------------------------------------
+
+/** How long the injected stall holds the thread, per frame. */
+const OVERLAY_STALL_MS = 40;
+
+/**
+ * How far the overlay and this file's own watcher may disagree.
+ *
+ * Both sample on the same animation clock and each takes the timestamp of the
+ * frame it saw the movement on, so they can differ by one frame. Two frames at
+ * 60 Hz is the allowance. The difference this check must tell apart is far
+ * larger and is printed beside it: the whole synchronous simulation, which is
+ * what a probe stopping at the first frame would have missed.
+ */
+const OVERLAY_AGREEMENT_MS = 34;
+
+const OVERLAY_WATCHER = `
+window.__watch = { armed: 0 };
+window.__stall = 0;
+{
+  const positions = () => {
+    const box = window.__clatterTable ? window.__clatterTable.box : null;
+    if (!box) return [];
+    const out = [];
+    for (const die of box.diceList) out.push(die.position.x, die.position.y, die.position.z);
+    return out;
+  };
+  const changed = (before, now) =>
+    before.length !== now.length || now.some((value, at) => value !== before[at]);
+  /* The capture phase, so this reading is taken before the application has run
+     a single line of its own handler. */
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!event.target.closest('[data-el="roll-button"]')) return;
+      const held = {
+        pressedAt: event.timeStamp,
+        handlerAt: performance.now(),
+        before: positions(),
+        frames: [],
+        motionAt: null,
+        still: 0,
+        movedTo: null,
+      };
+      window.__watch = held;
+      window.__watch.armed = (window.__watch.armed || 0) + 1;
+      const look = (at) => {
+        const now = positions();
+        const moved = changed(held.before, now);
+        held.frames.push(at);
+        if (moved) {
+          held.motionAt = at;
+          held.movedTo = now.length / 3;
+          return;
+        }
+        held.still += 1;
+        requestAnimationFrame(look);
+      };
+      requestAnimationFrame(look);
+    },
+    true,
+  );
+  /* The injected stall. It holds the thread for window.__stall milliseconds on
+     every frame, which is a cost the overlay must be able to see. */
+  const spin = () => {
+    if (window.__stall > 0) {
+      const end = performance.now() + window.__stall;
+      while (performance.now() < end) {
+        /* hold the thread */
+      }
+    }
+    requestAnimationFrame(spin);
+  };
+  requestAnimationFrame(spin);
+}
+`;
+
+/** Every row of the panel, as the owner reads it off a photograph. */
+async function readOverlay(page) {
+  return page.evaluate(() => {
+    const panel = document.querySelector('[data-el="perf-overlay"]');
+    const offered = window.PerformanceObserver
+      ? (window.PerformanceObserver.supportedEntryTypes ?? [])
+      : [];
+    if (panel === null) {
+      return { present: false, longTaskOffered: offered.includes('longtask') };
+    }
+    const box = panel.getBoundingClientRect();
+    const number = (text) => {
+      const found = /^([\d.]+) ms over (\d+) /.exec(text.trim());
+      return found === null
+        ? { value: null, samples: null }
+        : { value: Number(found[1]), samples: Number(found[2]) };
+    };
+    return {
+      present: true,
+      tag: panel.tagName,
+      label: panel.getAttribute('aria-label'),
+      note: (panel.querySelector('[data-el="perf-note"]')?.textContent ?? '').trim(),
+      // The panel ITSELF as well as its children. A tabindex on the container
+      // is exactly the way this panel would join the walk of section 6, and a
+      // descendant-only count would never see it.
+      tabStops:
+        panel.querySelectorAll('a, button, input, select, textarea, [tabindex]').length +
+        (panel.matches('[tabindex]') ? 1 : 0),
+      left: Math.round(box.left),
+      right: Math.round(box.right),
+      viewport: window.innerWidth,
+      longTaskOffered: offered.includes('longtask'),
+      rows: [...panel.querySelectorAll('.perf-row')].map((row) => {
+        const text = (row.querySelector('dd')?.textContent ?? '').trim();
+        return {
+          key: (row.dataset.el ?? '').replace(/^perf-/, ''),
+          kind: row.dataset.reading ?? '',
+          term: (row.querySelector('dt')?.textContent ?? '').trim(),
+          text,
+          ...number(text),
+        };
+      }),
+    };
+  });
+}
+
+/** One row of the panel, by key. */
+function overlayRow(read, key) {
+  return read.rows?.find((row) => row.key === key) ?? null;
+}
+
+/** Wait past one redraw of the panel, which is held back inside a throw. */
+async function afterRedraw(page) {
+  await settleScreen(page);
+  await new Promise((done) => setTimeout(done, 900));
+}
+
+async function runOverlay(page, options, checks) {
+  await page.evaluate(TABLE_HELPERS);
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      /* the defaults answer anyway */
+    }
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.evaluate(TABLE_HELPERS);
+  await page.evaluate(OVERLAY_WATCHER);
+  await page.waitForSelector('[data-el="disclosure-toggle"]', { timeout: 30000 });
+
+  const opening = await page.evaluate(() => window.__table.read());
+  const onTheTable = opening.renderer === 'tray';
+  const why =
+    'the startup probe answered below the bar, so the screen draws flat dice and no table ' +
+    'moves. There is no WebGL context inside the sandbox. Run this mode with the sandbox off.';
+  const judge = (name, ok, detail) =>
+    checks.push(
+      onTheTable
+        ? { name, ok, detail }
+        : { name, ok: true, skipped: true, detail: `NOT JUDGED: ${why}` },
+    );
+
+  // ---- 1. The switch, by keyboard alone ----------------------------------
+  //
+  // A pool worth measuring. The library simulates the whole throw before it
+  // draws a frame, and the cost of that block follows the number of dice, so a
+  // throw of two dice would measure the instrument against nothing.
+  for (const [tile, presses] of [
+    ['attribute', 5],
+    ['skill', 5],
+    ['gear', 3],
+    ['bonus', 2],
+    ['stress', 5],
+  ]) {
+    await pressTile(page, tile, 'p', presses);
+  }
+  await openSheet(page);
+  const walked = await tabUntil(page, 'sheet-stress-reset', 'sheet-overlay-toggle');
+  await page.keyboard.press(' ');
+  await settleScreen(page);
+  await closeSheet(page);
+  const opened = await readOverlay(page);
+  console.log(
+    `browser: overlay opened presses=${walked.presses} reached=${walked.reached} ` +
+      `present=${opened.present} tag=${opened.tag} label="${opened.label}" ` +
+      `tab_stops=${opened.tabStops} long_task_offered=${opened.longTaskOffered}`,
+  );
+  for (const row of opened.rows ?? []) {
+    console.log(`browser: overlay at rest ${row.key} [${row.kind}] ${row.term}: ${row.text}`);
+  }
+
+  checks.push({
+    name: 'overlay.a-percentile-refuses-to-print-below-its-minimum-sample-count',
+    ok:
+      opened.present &&
+      overlayRow(opened, 'frameP95')?.kind === 'tooFew' &&
+      overlayRow(opened, 'frameP99')?.kind === 'tooFew' &&
+      /0 of 20 /.test(overlayRow(opened, 'frameP95')?.text ?? '') &&
+      /0 of 100 /.test(overlayRow(opened, 'frameP99')?.text ?? ''),
+    detail:
+      `no throw has been measured, so the two percentiles read ` +
+      `"${overlayRow(opened, 'frameP95')?.text}" and "${overlayRow(opened, 'frameP99')?.text}". ` +
+      `The floor is derived from the quantile: below 1/(1-q) samples no sample lies above the ` +
+      `quantile at all, which gives 20 frames for p95 and 100 for p99. A panel that printed ` +
+      `the largest of four frames as a p95 fails here.`,
+  });
+
+  // ---- 2. Two ordinary throws --------------------------------------------
+  //
+  // The first one mounts the table: the builder is open until the player
+  // presses Roll and the library measures a container that is in the document,
+  // so the first throw carries the fetch and the mount of the 3D chunk with it.
+  // It is a real reading and it is not the one to judge an instrument by, so
+  // the comparison below runs on the second.
+  await page.click('[data-el="roll-button"]');
+  await page.evaluate(() => window.__table.settle(1));
+  await afterRedraw(page);
+  const first = await readOverlay(page);
+  console.log(`browser: overlay throw one motion="${overlayRow(first, 'firstMotion')?.text}"`);
+  await page.click('[data-el="roll-button"]');
+  await page.evaluate(() => window.__table.settle(2));
+  await afterRedraw(page);
+  const thrown = await readOverlay(page);
+  const watch = await page.evaluate(() => {
+    const held = window.__watch;
+    return {
+      pressedAt: held.pressedAt ?? null,
+      handlerAt: held.handlerAt ?? null,
+      motionAt: held.motionAt ?? null,
+      firstFrameAt: held.frames?.[0] ?? null,
+      frames: held.frames?.length ?? 0,
+      still: held.still ?? 0,
+      dice: held.movedTo ?? null,
+    };
+  });
+  const ownMotion =
+    watch.motionAt === null || watch.pressedAt === null ? null : watch.motionAt - watch.pressedAt;
+  const ownFirstFrame =
+    watch.firstFrameAt === null || watch.pressedAt === null
+      ? null
+      : watch.firstFrameAt - watch.pressedAt;
+  const drawn = overlayRow(thrown, 'firstMotion');
+  const apart = drawn?.value === null || ownMotion === null ? null : drawn.value - ownMotion;
+  console.log(
+    `browser: overlay throw two p95="${overlayRow(thrown, 'frameP95')?.text}" ` +
+      `p99="${overlayRow(thrown, 'frameP99')?.text}" motion="${drawn?.text}"`,
+  );
+  console.log(
+    `browser: overlay watcher pressed_at=${watch.pressedAt?.toFixed(1)} ` +
+      `handler_at=${watch.handlerAt?.toFixed(1)} first_frame=+${ownFirstFrame?.toFixed(1)}ms ` +
+      `motion=+${ownMotion?.toFixed(1)}ms still_frames=${watch.still} dice=${watch.dice} ` +
+      `apart=${apart === null ? 'none' : apart.toFixed(1)}ms`,
+  );
+
+  judge(
+    'overlay.throw-to-first-motion-is-bounded-by-a-moved-die-and-not-by-a-frame',
+    drawn?.kind === 'measured' &&
+      overlayRow(first, 'firstMotion')?.kind === 'measured' &&
+      ownMotion !== null &&
+      ownFirstFrame !== null &&
+      watch.still >= 1 &&
+      ownMotion > ownFirstFrame &&
+      apart !== null &&
+      Math.abs(apart) <= OVERLAY_AGREEMENT_MS &&
+      watch.handlerAt !== null &&
+      watch.pressedAt !== null &&
+      watch.handlerAt >= watch.pressedAt,
+    `the first throw of the session read "${overlayRow(first, 'firstMotion')?.text}", so no ` +
+      `throw goes unmeasured. On the second: the near end is the press, and the click event ` +
+      `carries timeStamp ` +
+      `${watch.pressedAt?.toFixed(1)} and a capture-phase handler read the clock at ` +
+      `${watch.handlerAt?.toFixed(1)}, so the instant recorded is the press and not the ` +
+      `handler. The far end is a MOVED DIE: this file watched the drawn positions of the dice ` +
+      `off the tray seam and drew ${watch.still} frames in which every die was exactly where ` +
+      `the press left it, the first of them ${ownFirstFrame?.toFixed(1)} ms after the press. ` +
+      `It saw the first movement ${ownMotion?.toFixed(1)} ms after the press, over ` +
+      `${watch.dice} dice. The panel reads ${drawn?.value} ms, which is ` +
+      `${apart === null ? 'nothing' : Math.abs(apart).toFixed(1)} ms from that, against an ` +
+      `allowance of ${OVERLAY_AGREEMENT_MS} ms for the one frame two watchers on the same ` +
+      `clock can differ by. A probe that stopped at the first frame would have read ` +
+      `${ownFirstFrame?.toFixed(1)} ms, which is the difference this check exists to see.`,
+  );
+
+  // ---- 3. The same throw, with a stall this run injects -------------------
+  const before95 = overlayRow(thrown, 'frameP95');
+  await page.evaluate((ms) => {
+    window.__stall = ms;
+  }, OVERLAY_STALL_MS);
+  await page.click('[data-el="roll-button"]');
+  await page.evaluate(() => window.__table.settle(3));
+  await page.evaluate(() => {
+    window.__stall = 0;
+  });
+  await afterRedraw(page);
+  const stalled = await readOverlay(page);
+  const after95 = overlayRow(stalled, 'frameP95');
+  const after99 = overlayRow(stalled, 'frameP99');
+  console.log(
+    `browser: overlay stall injected=${OVERLAY_STALL_MS}ms p95 ${before95?.value} -> ` +
+      `${after95?.value} p99=${after99?.value} samples ${before95?.samples} -> ` +
+      `${after95?.samples}`,
+  );
+
+  judge(
+    'overlay.the-frame-percentiles-answer-a-stall-this-run-injected',
+    before95?.kind === 'measured' &&
+      after95?.kind === 'measured' &&
+      after99?.kind === 'measured' &&
+      after95.value > before95.value &&
+      after95.value >= OVERLAY_STALL_MS &&
+      after99.value >= after95.value &&
+      after95.samples > before95.samples,
+    `an ordinary throw read p95=${before95?.value} ms over ${before95?.samples} frames. The ` +
+      `run then held the thread for ${OVERLAY_STALL_MS} ms on every frame and threw again, ` +
+      `and p95 reads ${after95?.value} ms over ${after95?.samples} frames with ` +
+      `p99=${after99?.value} ms. The instrument must answer the injected cost and must not ` +
+      `fall below it, and p99 may not read under p95 over one set of samples. A figure ` +
+      `computed from a constant cannot move at all. No budget is read here: this judges the ` +
+      `instrument, never the machine.`,
+  );
+
+  // ---- 4. A figure this browser cannot measure ---------------------------
+  const longTask = overlayRow(stalled, 'longTask');
+  console.log(
+    `browser: overlay long tasks offered=${stalled.longTaskOffered} kind=${longTask?.kind} ` +
+      `text="${longTask?.text}"`,
+  );
+  checks.push({
+    name: 'overlay.an-unavailable-figure-says-so-by-name-and-never-prints-a-zero',
+    ok: stalled.longTaskOffered
+      ? longTask?.kind === 'measured' && /over \d+ long tasks$/.test(longTask?.text ?? '')
+      : longTask?.kind === 'unavailable' &&
+        /this browser reports no long tasks/.test(longTask?.text ?? '') &&
+        !/\d/.test(longTask?.text ?? ''),
+    detail: stalled.longTaskOffered
+      ? `this browser lists longtask among PerformanceObserver.supportedEntryTypes, so the ` +
+        `figure is measured and reads "${longTask?.text}".`
+      : `this browser does not list longtask among PerformanceObserver.supportedEntryTypes, so ` +
+        `there is no source for the figure. The panel reads "${longTask?.text}", which names ` +
+        `the reason and holds no digit at all. A zero would be a measurement, and it would be ` +
+        `a lie: a run of ${OVERLAY_STALL_MS} ms stalls had just gone through this page.`,
+  });
+
+  // ---- 5. A clean sitting, for the reading the owner photographs ---------
+  //
+  // The switch off and on again builds a new instrument, so the samples of the
+  // injected stall are gone and the panel below carries this machine's own
+  // figures. The captures are taken from here for the same reason: a
+  // photograph of an instrumented run would report a cost this run created.
+  await openSheet(page);
+  await page.click('[data-el="sheet-overlay-toggle"]');
+  await settleScreen(page);
+  await page.click('[data-el="sheet-overlay-toggle"]');
+  await settleScreen(page);
+  await closeSheet(page);
+  const reset = await readOverlay(page);
+  await page.click('[data-el="roll-button"]');
+  await page.evaluate(() => window.__table.settle(4));
+  await afterRedraw(page);
+  const clean = await readOverlay(page);
+  console.log(
+    `browser: overlay after a new sitting reset_p95="${overlayRow(reset, 'frameP95')?.text}" ` +
+      `clean_p95="${overlayRow(clean, 'frameP95')?.text}" ` +
+      `clean_p99="${overlayRow(clean, 'frameP99')?.text}" ` +
+      `clean_motion="${overlayRow(clean, 'firstMotion')?.text}"`,
+  );
+  judge(
+    'overlay.the-switch-off-and-on-again-starts-a-new-instrument',
+    overlayRow(reset, 'frameP95')?.kind === 'tooFew' &&
+      overlayRow(reset, 'firstMotion')?.kind === 'tooFew' &&
+      overlayRow(clean, 'frameP95')?.kind === 'measured' &&
+      (overlayRow(clean, 'frameP95')?.samples ?? 0) < (after95?.samples ?? 0) &&
+      (overlayRow(clean, 'frameP95')?.value ?? 0) < OVERLAY_STALL_MS,
+    `the switch went off and on again and the panel read ` +
+      `"${overlayRow(reset, 'frameP95')?.text}", so the samples of the injected stall are gone. ` +
+      `One throw later it reads "${overlayRow(clean, 'frameP95')?.text}" against the ` +
+      `${after95?.samples} frames the sitting before it had gathered, and the reading is back ` +
+      `under the ${OVERLAY_STALL_MS} ms this run injected. A panel that carried its samples ` +
+      `across a switch would report an instrumented run to the owner as this machine.`,
+  );
+
+  // ---- 6. Readable at 360 px, and no tab stop ----------------------------
+  await page.setViewport({ width: 360, height: 760, deviceScaleFactor: 1 });
+  await settleScreen(page);
+  await new Promise((done) => setTimeout(done, 300));
+  const narrow = await readOverlay(page);
+  const nextStop = await tabFrom(page, 'disclosure-toggle', 1);
+  const verdicts = ['pass', 'fail', 'budget', 'over budget', 'too slow', 'good', 'bad'];
+  // The rows alone. The note under them says "not a pass or a fail" on purpose,
+  // and a scan that read the disclaimer as a verdict would be reading the words
+  // and not the claim.
+  const said = (narrow.rows ?? [])
+    .map((row) => `${row.term} ${row.text}`)
+    .join(' ')
+    .toLowerCase();
+  const judged = verdicts.filter((word) => said.includes(word));
+  console.log(
+    `browser: overlay at 360 left=${narrow.left} right=${narrow.right} ` +
+      `viewport=${narrow.viewport} tab_stops=${narrow.tabStops} next_after_disclosure=` +
+      `${nextStop.join(',')} verdict_words=${judged.length}`,
+  );
+  for (const row of narrow.rows ?? []) {
+    console.log(`browser: overlay reads ${row.key} [${row.kind}] ${row.term}: ${row.text}`);
+  }
+  checks.push({
+    name: 'overlay.reads-at-360-px-holds-no-tab-stop-and-passes-no-verdict',
+    ok:
+      narrow.present &&
+      narrow.tag === 'SECTION' &&
+      (narrow.label ?? '').length > 0 &&
+      narrow.tabStops === 0 &&
+      narrow.left >= 0 &&
+      narrow.right <= narrow.viewport &&
+      nextStop[0] === 'roll-button' &&
+      judged.length === 0 &&
+      /not a pass or a fail/.test(narrow.note ?? '') &&
+      (narrow.rows ?? []).length === 4 &&
+      // Every row either names its sample count or names the reason it has
+      // none. A row that printed a bare number would fail here.
+      (narrow.rows ?? []).every((row) =>
+        row.kind === 'unavailable'
+          ? /^not measured here: \S/.test(row.text)
+          : /\d+ (frames? in a throw|long tasks?|throws?)/.test(row.text),
+      ),
+    detail:
+      `the panel is a ${narrow.tag} named "${narrow.label}" holding ${narrow.tabStops} tab ` +
+      `stops, and Tab from disclosure-toggle still lands on ${nextStop.join(',')}, so nothing ` +
+      `was inserted into the walk of section 6. At 360 px it runs from ${narrow.left} px to ` +
+      `${narrow.right} px inside a ${narrow.viewport} px viewport. Its ${(narrow.rows ?? []).length} ` +
+      `rows each name a sample count, and none of the words [${verdicts.join(', ')}] appears in ` +
+      `any of them, at 17 ms a frame or at 50. The note under them reads "${narrow.note}". The ` +
+      `overlay reports and never gates.`,
+  });
+
+  if (options.captureShell !== null) {
+    writeFileSync(
+      join(options.captureShell, '0023-overlay-360.png'),
+      await page.screenshot({ type: 'png' }),
+    );
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+    await settleScreen(page);
+    await new Promise((done) => setTimeout(done, 300));
+    writeFileSync(
+      join(options.captureShell, '0023-overlay-1440.png'),
+      await page.screenshot({ type: 'png' }),
+    );
+    console.log(`browser: overlay captures written to ${options.captureShell}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing and the run
 // ---------------------------------------------------------------------------
 
@@ -11357,6 +12162,8 @@ function parseArgs(argv) {
     settingsStore: false,
     share: false,
     shareControls: false,
+    soundControls: false,
+    overlay: false,
     offline: false,
     shell: false,
     sheet: false,
@@ -11405,6 +12212,8 @@ function parseArgs(argv) {
     else if (arg === '--settings-store') options.settingsStore = true;
     else if (arg === '--share') options.share = true;
     else if (arg === '--share-controls') options.shareControls = true;
+    else if (arg === '--sound-controls') options.soundControls = true;
+    else if (arg === '--overlay') options.overlay = true;
     else if (arg === '--offline') options.offline = true;
     else if (arg === '--shell') options.shell = true;
     else if (arg === '--sheet') options.sheet = true;
@@ -11470,6 +12279,8 @@ function parseArgs(argv) {
     ['--settings-store', options.settingsStore],
     ['--share', options.share],
     ['--share-controls', options.shareControls],
+    ['--sound-controls', options.soundControls],
+    ['--overlay', options.overlay],
     ['--offline', options.offline],
     ['--shell', options.shell],
     ['--sheet', options.sheet],
@@ -11489,6 +12300,8 @@ function parseArgs(argv) {
           options.theme ||
           options.history ||
           options.blockedChunk ||
+          options.soundControls ||
+          options.overlay ||
           options.table
             ? 'a preview server over the built output'
             : 'a Vite dev server'
@@ -11517,10 +12330,13 @@ function parseArgs(argv) {
     !options.theme &&
     !options.history &&
     !options.share &&
-    !options.shareControls
+    !options.shareControls &&
+    !options.soundControls &&
+    !options.overlay
   ) {
     throw new Error(
-      '--capture-shell belongs to --shell, --sheet, --theme, --history, --share or --share-controls',
+      '--capture-shell belongs to --shell, --sheet, --theme, --history, --share, ' +
+        '--share-controls, --sound-controls or --overlay',
     );
   }
   if (options.longTaskMs !== 0) {
@@ -11555,6 +12371,8 @@ async function run(options) {
       options.history ||
       options.blockedChunk ||
       options.shareControls ||
+      options.soundControls ||
+      options.overlay ||
       options.table
     ) {
       server = await startPreviewServer(options.url, join(here, '..'));
@@ -11569,6 +12387,8 @@ async function run(options) {
       options.sound ||
       options.share ||
       options.shareControls ||
+      options.soundControls ||
+      options.overlay ||
       options.table
     ) {
       await page.setViewport({
@@ -11635,6 +12455,10 @@ async function run(options) {
       await runShareCard(page, options, checks);
     } else if (options.shareControls) {
       await runShareControls(page, options, checks);
+    } else if (options.soundControls) {
+      await runSoundControls(page, options, checks);
+    } else if (options.overlay) {
+      await runOverlay(page, options, checks);
     } else if (options.offline) {
       await runOffline(page, options, checks, server);
     } else if (options.shell) {

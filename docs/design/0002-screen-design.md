@@ -172,7 +172,9 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | `sheet-history` | Opens the history destination. The log, its statistics and its export live there, not here. A read-only storage reading sits beside it, `sheet-storage-estimate`, which holds no tab stop. | 4.4 to 4.7 |
 | `sheet-stress-reset` | Sets the stress counter back to zero. | 2.1 |
 | `sheet-tray-renderer` | Rolls the dice on the table, or draws them flat. It clears a permanent fall to flat dice. | 3.7 |
+| `sheet-sound` | The dice sounds. A checkbox turns them on and a slider sets the level, from nothing to full in twenty arrow presses. The slider stays reachable while sound is off, marked `aria-disabled`, so a level can be set before any noise is made. Every sound is synthesised and this application holds no sound file. Decision 17. | 3.6 |
 | `sheet-share` | Makes one card of the roll on the table, shows it with alternative text carrying the same readings, and offers two ways out: a saved file, and the browser's own share target where the browser offers one. The card names the application and nothing else about where it came from. Decision 16. | 4.9 |
+| `sheet-overlay` | Shows the performance readings over the screen: p95 and p99 frame duration, the long-task total, and throw-to-first-motion. Every line names its unit and its sample count, a percentile below its floor is refused, and a figure this browser cannot measure is named rather than printed as a zero. **It reports and never gates**, and the switch is not stored. Decision 18. | 3.8 |
 | `sheet-close` | Closes the sheet and returns focus to `disclosure-toggle`. | 2.1 |
 
 The mode switch sits here on purpose. It destroys the built pool, so it must not sit one tap away
@@ -191,6 +193,13 @@ WCAG 2.2 SC 2.5.8, nothing sits off the side of the viewport, and the close butt
 of the main screen at rest, where the sheet is closed and holds no element at all. Neither list names
 a `sheet-` control, and the counts stay eleven visits before the throw and thirty-five after it. Both
 instruments read those lists out of this document.
+
+**The performance overlay is drawn over the main screen and still changes neither walk.** It is the
+one thing behind this disclosure that puts an element on the roll flow. It is a named region holding
+no control, so a reader reaches it as a landmark and the keyboard passes it by. `src/app.test.tsx`
+walks the live screen with the panel on and reads the same eleven visits, and
+`node scripts/browser.mjs --overlay` counts the tab stops of the panel, the panel element included,
+and presses Tab from `disclosure-toggle` to prove `roll-button` is still the next stop.
 
 **The override panel is generated from the profile record.** It lists no field of its own, so a field
 added to the record appears without an edit to the screen. `src/settings/profile-fields.test.ts` and

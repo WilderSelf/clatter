@@ -64,7 +64,8 @@ Status table for each unit. Every unit appends one row after it lands.
 | 4.4 | Roll log — the screen half: a roll writes an entry, and the history destination reads it | Done. The record view is a shell for Unit 4.5. | #14 | Every roll and every push now reaches IndexedDB through `LogWriter`, and `sheet-history` opens the history destination. **The log's shape decides the write, and the decision is stated: ONE entry per roll, rewritten by every push.** `createLogEntry` takes a whole `RollResult` whose dice carry one value per generation, it derives `pushCount` from the number of generations, and `src/log/csv.ts` rejects a file where one `roll_id` appears twice, so a second entry per push would export a file the application refuses to read back. `src/shell/roll-log.ts` opens the entry on a roll and rewrites it in place on a push, at the key the store acknowledged the insert with. `replaceRoll` in `src/log/store.ts` does that in ONE transaction and checks the key still exists inside it, so a `put` at a trimmed key cannot put a dropped roll back below the oldest. No second store was built. **`profileHash` no longer needs node.** The store half recorded `node:crypto` as unavailable in a browser and named this unit as the one that would settle it. `src/log/sha256.ts` is one synchronous implementation that names no platform API, so the test runner and the browser produce the same digest, and `src/log/sha256.test.ts` holds it against `node:crypto` over every length to 200 bytes and against the published FIPS 180-4 vectors. The pinned digest in `src/log/entry.test.ts` did not move, and the browser wrote `0b489af6...` for the second preset, which is the digest the pure half recorded. **The write is read back out of the database, never out of the queue.** `node scripts/browser.mjs --history` opens its own connection to `clatter-log` and counts: 4 presses on Roll and 6 on Push put 4 entries under 4 distinct roll ids, whose stored push counts sum to 6 and whose stored generations sum to 6. Three counts, one denominator. **The list is counted twice, so the two can disagree.** The summary length is read off the screen and off a second connection to the store at each of three rounds: 1/1/1, 2/2/2, 3/3/3. **The rules core is the oracle for the entry.** `src/shell/roll-log.test.ts` throws a roll and two pushes, then compares every cell of every die and every generation against `score` and `isLocked` under the profile in force, 48 cells against a count taken a second way off the live result, plus the roll-level values against `successCount`, `baneCount`, `generations` and `pushCost`. **The hash is the profile the roll ran under.** The preset changes between two rolls, Decision 10 takes the table from 3 dice to 0, and the two entries carry two distinct digests and name two rule sets. **The destination is a route and not an overlay.** Decision 12 of `docs/design/0012-settled-decisions.md` records it: the roll flow leaves the document, so section 6 still reads eleven visits before the throw and thirty-five after it, in BOTH instruments, with both lists read out of the design. The summary holds exactly `back-button` and `history-list`, read out of section 3 of the design and never restated, and `history-list` is one composite with a roving tab index, 1 of 3 options carrying it, every option holding a role, an accessible name and a state, and no option under the 24 px floor. A real Enter opens the record and the focus lands on `back-button`. **The seven-day note reaches the player**, at `history-storage-note` with `role="note"`, drawing 752x54 px, and it names the seven days, the home screen and the export the plan asks for. **The storage estimate reaches the settings sheet** at `sheet-storage-estimate`, a live region with no tab stop, reading 0.7 MB against the 0.7 MB `navigator.storage.estimate()` answered that run. **A log note is user text and no parser sees it**, drawn through `textContent` in an element holding one node and no element. Constraint 8. Vitest moves from 279 to 302 tests over 31 files. `node scripts/browser.mjs --history` is the new mode at `checks=8 failures=0 skipped=0`, and `--log-store` moves from 13 checks to 13 with one instrument made stronger. Initial JavaScript moves from 22,532 to 28,155 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Eleven injections were proved red and every one was restored by editing the injection back. The captures are `docs/design/0016-history-360.png`, `0016-history-1440.png`, `0016-history-record-360.png` and `0016-history-record-1440.png`. **Open, and owed by Unit 4.4:** nothing. **Left for Unit 4.5:** the transposed matrix and `export-button` inside `history-record`, with the two acceptances row 2.2d carries. See the notes under this table. |
 | 4.5 | CSV export — the record view, the transposed matrix and the export control. **Unit 4.5 is now complete, with one owner decision open.** | Done. `BLOCKED:budget` on the import cap. | #15 | `history-record` now holds the transposed matrix of Decision 3 and `export-button`, which closes the open half of Unit 4.5 and carries the two acceptances row 2.2d holds. **The matrix is one row per die and one column per generation**, a real `<table>` with a caption, `scope="col"` and `scope="row"` headers, and a `headers` attribute on every cell naming one row header and one column header, so a screen reader reaches a cell by its row and its column and not by its text. It holds no tab stop, because section 3 lists it under the read-only parts. **Both 2.2d acceptances are counted twice and neither count reads the matrix.** The cell count is the product taken off the stored entry — 18 cells against 9 dice by 2 generations, read back through the harness's own connection to IndexedDB — and the blank count is a second loop over the same stored cells: a die locked at the generation before carries its value forward, and a die that did not exist yet is absent. Both blank kinds are guaranteed by the fixture and not left to the faces: the run keeps one die by hand before the push, and the third rule set adds a stress die BEFORE the re-roll. Every carry is checked to be a carry, 5 of 5 repeating the value of the cell before it. **The export writes the WHOLE log**, and that is forced rather than chosen: Unit 4.6 settled that an import replaces the log, so a file of one roll would delete a campaign when it was read back. Decision 13 of `docs/design/0012-settled-decisions.md` records it, and the button prints the roll count it will write. **The file is compared byte for byte.** The harness intercepts `URL.createObjectURL`, which is the browser's own call, and compares the blob the button handed over against what `exportCsvInChunks` builds IN NODE from the rolls a separate connection read out of the store: 5,200 bytes against 5,200, 5,200 bytes compared, no difference, and 2 of 2 roll identifiers in the file. A log of one roll could not tell a whole-log export from a one-roll one, so the fixture throws two. **The record capture found a layout defect the green suite did not.** Drawn under the eight readings, the matrix sat below the fold of a 360 px screen, which is the width Decision 3 transposed it for. The matrix now comes first and the readings are compact. Captures `docs/design/0017-history-record-360.png` and `0017-history-record-1440.png`. **A manual keep made after the final generation and never pushed is not in the entry, and the matrix is not wrong for such a roll.** The matrix reads `locked` only at the generation BEFORE a cell, to decide whether that cell is a carry, so the newest generation's `locked` is never drawn. The stored field can still miss such a keep, and the export carries the entry unchanged; that is a limit of the entry and it belongs to Unit 4.4, which reported it. Vitest moves from 302 to 321 tests over 32 files. `--history` moves from 8 checks to 15 at `failures=0 skipped=0`, and `--log-csv` from 10 to 11. Initial JavaScript moves from 28,155 to 31,527 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Nine injections were proved red and every one was restored by editing the injection back. **Open, and it is the owner's:** `BLOCKED:budget` — a full-buffer export leaves 4.026 characters a row under the import cap. The arithmetic and the three priced options are in the notes under this table. |
 | 4.6 | CSV import — the file picker, the size guard and the message. **Unit 4.6 is now complete, less the error surface Unit 4.10 owns.** | Done. `BLOCKED:budget` on the import cap. | #15 | `import-button` sits in the footer of the history summary and opens a hidden file picker. Decision 13 records why it is there and not in the record: an import replaces the whole log, so it belongs beside the list of the whole log and not beside one roll, and the record then keeps the two controls section 3 names. The picker carries `tabindex="-1"` and `aria-hidden`, so the summary counts three controls and not four. **The size is judged on the FILE, before one byte of it is read.** `src/log/import-file.ts` refuses a file over `MAX_IMPORT_BYTES` from `File.size` and never calls `text()` on it. The proof is a call counter on the file's own `text`: a real `File` of 33,554,433 bytes went into the real picker, the patch is proved to have landed, and the control read the file 0 times. A guard that read `text.length` would have read it once, which is the injection that turns the check red. **The byte cap is not a second budget.** It is `MAX_IMPORT_CHARS`, and one number serves both because UTF-8 never spends fewer bytes than the string spends UTF-16 code units, so a file inside the byte cap is always inside the character cap. The inequality is asserted over a corpus covering all four UTF-8 lengths, not described. **The round trip runs through the real controls.** The file the export button wrote goes back in as a real `File` in a real `FileList` through `DataTransfer`: 136 leaf fields against 136 counted a second way, 0 differences, and the log back at 2 rolls. One extra roll is thrown between the export and the import, so an import that wrote nothing cannot pass — the marker roll must be gone. `RollLog.replace` writes it in ONE transaction through `appendRolls`, and it forgets the open roll, so a push after an import cannot `put` at a key an imported roll now holds. **The message is the smallest honest one, and Unit 4.10 still owes the rest.** `history-message` is a live region in both views and names the cause of every refusal: too large, empty, not a log this application wrote, a header with no roll, unreadable, and a store that refused the write. It quotes the file, so it is drawn as text and no parser sees it. Constraint 8. **What 4.10 owes:** a designed error surface rather than one sentence, a recovery route from a failed import, and the same treatment for the other three failures the plan names — a 3D chunk that will not load, an IndexedDB that will not open, and storage that is full. **Open, and it is the owner's:** `BLOCKED:budget`, the same one Unit 4.5 carries. See the notes under this table. |
-| 4.7 | Statistics view — the charts, in a third view of the history destination. **Unit 4.7 is now complete.** | Done. | #16 | Three charts over the record `summariseLog` returns, in `src/shell/statistics.tsx`, drawn in a third view of the history destination. **Decision 14 of `docs/design/0012-settled-decisions.md` records where they live and why**, and section 3 of the design carries the control table: the summary now counts four controls and the statistics view one. The rejected option is a section of the summary, and the reason is Unit 4.5's own defect: a section pushes either the list or the charts below the fold of a 360 px screen. **The screen computes no statistic.** `statistics.tsx` imports no log entry, no push profile and no rule, so there is nothing in it to re-derive a number from. The claim is measured at the CALL SITE and not at the component: the destination is handed a record that disagrees with its own log on all 24 fields, the disagreement is counted first so no field can pass by coincidence, and every drawn value follows the record. **A chart is a table, not a picture.** Every value is text in a real cell that names its row header and its column header, and every bar is `aria-hidden` decoration beside it, so one document serves a screen reader and an eye and the two readings are compared against each other. **The denominator is the record, counted a second way**: 24 values against a sum over the shape of the record, `1 + 2 pool sizes by 5 + 7 push fields + 4 cost units + 2`, so a missing bar is a red and not an unread cell. The oracle for the browser half is `summariseLog` run IN NODE over the rolls a second connection reads out of IndexedDB. **Every bar is measured against the geometry.** In the browser the bar and its track are measured in real pixels and the bound is one device pixel over the track width, 190, 172 and 722 px this run. In the test runner the drawn width is compared against the record with a bound of 0.0005 of a percentage point, taken from the three decimal places the view writes and not chosen; the smallest real difference between two bars of the fixture is 25 percentage points. **Shape carries every meaning colour carries.** Four series, and no chart holds two of one shape: a circle for a success and for a gain, a square for the outcome that did not move, a triangle for the one that went the wrong way. The engine resolved 3 shapes and 3 colours for the three push outcomes. **No chart draws a bane**, because the record holds no bane statistic. **Contrast holds over two denominators.** 13 chart colours are read out of `src/shell.css` by the rule that spends them, resolved against `:root`, and judged at 4.5 to 1 for text and 3 to 1 for a graphical object; the same 13 run over all 6 interface palettes of Unit 4.8 as a product of 78, tightest 4.40 to 1. In the browser 36 colours are read as the engine resolved them, each against the first ancestor that really paints one, 0 missed. **Three degenerate cases answer for themselves**: no roll draws a sentence and no chart, no push reads "No roll has pushed yet." and never a nought per cent, and one roll draws one row. **Keyboard alone reaches the charts and leaves them.** A real Enter on `statistics-button` opens them with the focus on `back-button`, and a real Enter on `back-button` returns to the SUMMARY and not to the dice. The charts hold 0 tab stops. Section 6 is unchanged and measured in both instruments: eleven visits before the throw and thirty-five after it, with both lists read out of the design. Vitest moves from 321 to 334 tests over 33 files. `--history` moves from 15 checks to 21 at `failures=0 skipped=0`. Initial JavaScript moves from 31,527 to 33,449 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Sixteen injections were proved red and every one was restored by editing the injection back, with the three touched files hashed against a saved copy. The captures are `docs/design/0018-history-stats-360.png` and `0018-history-stats-1440.png`. **Open, and owed by Unit 4.7:** nothing. See the notes under this table. |
+| 4.7 | Statistics view — the charts, in a third view of the history destination. **Unit 4.7 is now complete.** | Done. | #16 | Three charts over the record `summariseLog` returns, in `src/shell/statistics.tsx`, drawn in a third view of the history destination. **Decision 14 of `docs/design/0012-settled-decisions.md` records where they live and why**, and section 3 of the design carries the control table: the summary now counts four controls and the statistics view one. The rejected option is a section of the summary, and the reason is Unit 4.5's own defect: a section pushes either the list or the charts below the fold of a 360 px screen. **The screen computes no statistic.** `statistics.tsx` imports no log entry, no push profile and no rule, so there is nothing in it to re-derive a number from. The claim is measured at the CALL SITE and not at the component: the destination is handed a record that disagrees with its own log on all 24 fields, the disagreement is counted first so no field can pass by coincidence, and every drawn value follows the record. **A chart is a table, not a picture.** Every value is text in a real cell that names its row header and its column header, and every bar is `aria-hidden` decoration beside it, so one document serves a screen reader and an eye and the two readings are compared against each other. **The denominator is the record, counted a second way**: 24 values against a sum over the shape of the record, `1 + 2 pool sizes by 5 + 7 push fields + 4 cost units + 2`, so a missing bar is a red and not an unread cell. The oracle for the browser half is `summariseLog` run IN NODE over the rolls a second connection reads out of IndexedDB. **Every bar is measured against the geometry.** In the browser the bar and its track are measured in real pixels and the bound is one device pixel over the track width, 190, 172 and 722 px this run. In the test runner the drawn width is compared against the record with a bound of 0.0005 of a percentage point, taken from the three decimal places the view writes and not chosen; the smallest real difference between two bars of the fixture is 25 percentage points. **Shape carries every meaning colour carries.** Four series, and no chart holds two of one shape: a circle for a success and for a gain, a square for the outcome that did not move, a triangle for the one that went the wrong way. The engine resolved 3 shapes and 3 colours for the three push outcomes. **No chart draws a bane**, because the record holds no bane statistic. **Contrast holds over two denominators.** 13 chart colours are read out of `src/shell.css` by the rule that spends them, resolved against `:root`, and judged at 4.5 to 1 for text and 3 to 1 for a graphical object; the same 13 run over all 6 interface palettes of Unit 4.8 as a product of 78, tightest 4.40 to 1. In the browser 36 colours are read as the engine resolved them, each against the first ancestor that really paints one, 0 missed. **Three degenerate cases answer for themselves**: no roll draws a sentence and no chart, no push reads "No roll has pushed yet." and never a nought per cent, and one roll draws one row. **Keyboard alone reaches the charts and leaves them.** A real Enter on `statistics-button` opens them with the focus on `back-button`, and a real Enter on `back-button` returns to the SUMMARY and not to the dice. The charts hold 0 tab stops. Section 6 is unchanged and measured in both instruments: eleven visits before the throw and thirty-five after it, with both lists read out of the design. Vitest moves from 321 to 334 tests over 33 files. `--history` moves from 15 checks to 21 at `failures=0 skipped=0`. Initial JavaScript moves from 31,527 to 33,449 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Sixteen injections were proved red and every one was restored by editing the injection back, with the three touched files hashed against a saved copy. The captures are `docs/design/0018-history-stats-360.png` and `0018-history-stats-1440.png`. **Open, and owed by Unit 4.7:** nothing. See the notes under this table. || 3.6 | Sound — the interface half: the toggle, the volume, and the engine wired to the tray. **Unit 3.6 is now complete.** | Done | #19 | `sheet-sound` holds a checkbox and a slider, and `src/shell/table.tsx` hands the tray an `onImpact` hook that reaches the engine the screen holds. A roll in the built application started 82 voices, counted through the browser's own `AudioBufferSourceNode.start` rather than through any counter the engine writes. The level is read off the `GainNode` the engine built, at 0.75 and at 0.25, both set by real arrow presses. Decision 17 of `docs/design/0012-settled-decisions.md` records the choices and section 4 of `docs/design/0002-screen-design.md` lists both controls. Two accessibility defects were found by the checks and fixed: the slider took its name from the label around it, which reads the level twice, and it drew itself 20 px tall against a 24 px floor. See the notes under this table. |
+| 3.8 | Performance gates and the phone overlay — the overlay half. **Unit 3.8 is now complete. The owner still owes the phone reading.** | Done | #19 | `sheet-overlay` shows four readings over the screen: p95 and p99 frame duration, the long-task total, and throw-to-first-motion. **It reports and never gates**, which is what the End state of `CLAUDE.md` asks of a timing figure. Every line names its unit and its sample count, a percentile below a floor derived from its own quantile is refused, and a figure this browser cannot measure is named rather than printed as a zero. Frames are sampled inside a throw and nowhere else. Decision 18 records every choice. The desktop reading is in the notes and is NOT the phone reading the plan asks for. See the notes under this table. |
 
 ## Unit 4.7 — the charts, in a third view of the history destination
 
@@ -5558,3 +5559,240 @@ Every image was looked at, and the first set is what found the overflow above.
 | `npm run perf` | `steps_to_rest_fixed_seed_scene measured=203 budget=224`, scene digest matched, exit 0 |
 | Harness | `--share` 13/0/0, `--share-controls` 8/0/1, `--shell` 8/0/0, `--sheet` 11/0/0, `--theme` 10/0/0, `--table` 9/0/0, `--blocked-chunk` 11/0/0, `--history` 21/0/0 |
 | Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |
+
+## Unit 3.6 — the interface half: the toggle, the volume, and the engine at work
+
+### What landed
+
+`sheet-sound` behind the one disclosure, a checkbox and a slider, and the wiring that makes the
+engine of the first half audible: `src/shell/table.tsx` passes `onImpact` to `mountTray` through its
+`config`, and the hook reads a ref, so the engine answers every collision under the choice in force
+rather than the one that stood at the mount. Decision 17 of `docs/design/0012-settled-decisions.md`
+records every choice and section 4 of `docs/design/0002-screen-design.md` lists both controls.
+
+The engine, the stored state and the collision hook are the first half and were not rebuilt. No
+audio file was added. Every sound is still synthesised.
+
+### The claim the first half could not make, and how this one makes it
+
+The engine half proved the engine against collisions it wired up by hand. This half proves the
+**application**: the player turns sound on through the real control with real key presses, sets a
+level with real arrow presses, and rolls.
+
+**No number the engine writes is its own denominator.** `node scripts/browser.mjs --sound-controls`
+counts the voices through `AudioBufferSourceNode.start`, which belongs to the browser, and it reads
+the level off `engine.output.gain.value`, which is an `AudioParam` of a real `GainNode`. Run on the
+graphics card with the sandbox off:
+
+    browser: sound-controls OFF contexts=0 voices=0 started=0 impacts=125 triggers=0 engine=true
+    browser: sound-controls keyboard toggle_presses=1 reached=true volume_presses=1
+             gain_at_loud=0.75 gain_at_quiet=0.25 stored_loud=0.75 stored_quiet=0.25
+             context=running gain_node=true
+    browser: sound-controls ON contexts=1 voices=82 engine_triggers=82 collisions=130
+             state=running gain=0.25
+    browser: sound-controls OFF AGAIN voices=0 triggers=0 collisions=134 stored_enabled=false
+             context_still_there=running
+
+The toggle off leaves the graph standing and reads 0 voices over a whole throw while 134 collisions
+still arrive, so the check reads the gate and not a torn-down context.
+
+### Two accessibility defects the checks found
+
+**The slider took its name from the label around it.** That label also holds the level, so the
+accessible name read "Volume25 per cent" and a reader would announce the level twice, once from the
+name and once from `aria-valuetext`. `aria-label="Volume"` is now written on the control and the
+printed level is `aria-hidden`.
+
+**The check that found it could not have failed at first.** Its first form asserted only that the
+name was not empty, and the label fallback always fills that. Removing `aria-label` left it green.
+The check now asserts the name is exactly "Volume", and the same removal turns it red at
+`the volume is a range named "Volume25 per cent", which must be "Volume" and nothing more`.
+
+**The slider drew itself 20 px tall**, against the 24 px floor of WCAG 2.2 SC 2.5.8 and the 44 px
+this project uses. It now takes the full row at 44 px.
+
+### The browser with no Web Audio
+
+`enable` constructs an `AudioContext` and a browser without the Web Audio API has none. The failure
+lands inside the press that asked for sound, so it is caught and the note says so. **The record is
+not written in that case**, because a record that promised sound the browser cannot make would greet
+the next session with a switch that reads on and a table that is silent.
+
+## Unit 3.8 — the overlay half: four readings, reported and never gated
+
+### The rule that governs the whole panel
+
+The End state of `CLAUDE.md` splits the performance claims in two. The deterministic gates are
+integers, they run in CI, and they read a bound out of `budgets.json`. The timing figures are
+**reported, on real hardware**, once per phase, and the owner pastes them into this file. The overlay
+is the second kind:
+
+- It reads no budget, compares no reading against one, and prints no verdict.
+- No `validate` command and no CI step runs it.
+- Every number names its unit and its sample count, because the owner reads them off a photograph.
+- A percentile below its floor is refused. A figure with no source in this browser is named.
+
+Decision 18 of `docs/design/0012-settled-decisions.md` records all of it.
+
+### The sample floor is derived, not chosen
+
+A quantile q over n samples names a value that at most n(1-q) samples lie above. Below 1/(1-q)
+samples that count is under one, so the "p95" is the largest sample and the "p99" is the same number
+again. `minimumSamples` is `Math.ceil(1 / (1 - quantile))`: **20 frames for p95 and 100 for p99**.
+Below it the panel prints `too few samples: 4 of 20 frames in a throw` and no number at all.
+
+### The frames are sampled inside a throw, and nowhere else
+
+A probe that samples a resting table measures the browser idling. The cost of this application is the
+throw. A measurement window opens at the press and closes when the tray reports the table at rest,
+and a window nothing reports rest for shuts after four seconds, because the flat renderer acts no
+throw out and would otherwise fill the samples with idle frames.
+
+### Throw to first motion, and both of its ends
+
+**The near end is the press itself.** It is the `timeStamp` of the click event, which the browser
+wrote before any handler of this application ran. The run reads the clock inside a capture-phase
+handler of its own and prints both, so a figure taken at the handler rather than at the press is
+visible: they read 6932.0 and 6932.0.
+
+**The far end is a die drawn somewhere else.** `src/tray/motion.ts` compares the drawn positions of
+every die against the reading taken at the press, exactly, with no tolerance: a sleeping body does
+not move by a little, it does not move. The watch starts BEFORE `box.roll` is called, so the whole
+synchronous simulation lies inside the measurement.
+
+**The first frame is not the first motion, and that is measured rather than argued.** The harness
+watches the same positions through the tray seam by a route of its own. On the run below the browser
+drew a frame 4.3 ms BEFORE the press timestamp, and one more frame in which every die was exactly
+where the press left it, before the dice moved 95.1 ms after the press:
+
+    browser: overlay watcher pressed_at=6932.0 handler_at=6932.0 first_frame=+-4.3ms
+             motion=+95.1ms still_frames=1 dice=20 apart=-0.0ms
+
+The two watchers agree to 0.0 ms. The allowance is 34 ms, which is the one frame two watchers on the
+same clock can differ by, and it is printed beside the difference it has to tell apart.
+
+### The instrument is shown to answer before its verdict is trusted
+
+`node scripts/browser.mjs --overlay` throws once, then holds the thread for 40 ms on every frame and
+throws again:
+
+    browser: overlay stall injected=40ms p95 17.1 -> 50.2 p99=50.2 samples 362 -> 429
+
+A figure computed from a constant cannot move. The check reads no budget: it judges the instrument
+and never the machine.
+
+### The switch off and on again builds a new instrument
+
+The samples belong to the sitting. A panel that carried the samples of an instrumented run across a
+switch would report that run to the owner as this machine, so the recorder is built on the way on and
+dropped on the way off. The captures are taken from a fresh sitting for the same reason.
+
+### The desktop reading — NOT the reading the plan asks for
+
+**This is an RX 6700 XT on a Linux desktop in Firefox. It is not a mid-range phone and it is not the
+measurement the plan wants.** It is recorded here to show what the overlay prints, and the owner
+still owes the phone reading. Twenty dice, the sandbox off, a fresh sitting, one throw:
+
+| Figure | Reading |
+|---|---|
+| Frame p95 | 17.1 ms over 195 frames in a throw |
+| Frame p99 | 17.3 ms over 195 frames in a throw |
+| Long tasks | not measured here: this browser reports no long tasks |
+| Throw to first motion | 96.8 ms over 1 throw |
+
+### The figure this browser cannot measure
+
+Firefox does not list `longtask` among `PerformanceObserver.supportedEntryTypes`, so there is no
+source for the long-task total. The panel names the reason and prints no digit. A zero would be a
+measurement and it would be a lie, because a run of 40 ms stalls had just gone through that page.
+
+## Units 3.6 and 3.8 — what both halves share
+
+### The twenty-one red-proofs
+
+Sixteen over the test runner, in `src/shell/perf.test.ts`, `src/tray/motion.test.ts`,
+`src/shell/overlay.test.tsx` and `src/app.test.tsx`:
+
+1. `figureLine` prints a bare number — `expected '152' to be '152 ms over 2 long tasks'`, and five more
+2. `minimumSamples` returns 1 — `expected 1 to be 20`
+3. `quantileOf` returns a constant 16.7 — `expected { kind: 'measured', value: 16.7 } to deeply equal { kind: 'measured', value: 16 }`
+4. frames sampled outside a window — `expected 59 to be +0`, and `expected 399 to be 250`
+5. `hasMoved` always true — `expected [ { at: 16, evidence: … } ] to have a length of +0 but got 1`
+6. an unavailable long-task total printed as 0 — `expected { kind: 'measured', value: +0 } to deeply equal { kind: 'unavailable', … }`
+7. the level never leaves the record — `expected 0.5 to be 0.25`
+8. the slider loses `aria-label` — `the accessible name, and only it: expected null to be 'Volume'`
+9. the panel takes a `tabindex` and loses its name — `expected [ Array(12) ] to deeply equal [ 'collapse-button', … ]` and `expected null to be 'Performance readings'`
+10. the overlay switch is stored — `expected [ 'overlayOn' ] to deeply equal []`
+11. the record written on a browser with no audio — `expected true to be false`
+12. a context built before the player asks — `nothing is built while sound is off: expected { destination: … } to be null`
+13. the clock and the observer never stop — `expected +0 to be 1`
+14. the panel drawn again inside a throw — `expected '90.0 ms over 1 long task' to be '0.0 ms over 0 long tasks'`
+15. the sound toggle leaves the keyboard order — `expected [ undefined, undefined, …(54) ] to include 'sheet-sound-toggle'`
+16. one of a thing printed in the plural — `expected '96.0 ms over 1 throws' to be '96.0 ms over 1 throw'`
+
+Nine over the driven browser, each one rebuilt and re-run. Several of the injections above go red in
+both instruments:
+
+17. the sound hook never reaches the tray — `started 0 voices over a throw that reported 0 collisions`
+18. the toggle off never disables the engine — `The browser started 69 voices and the engine started 69, both against a ceiling of 0`
+19. the level never leaves the record — `At 0.75 the gain reads 0.5 against the 0.75 an AudioParam holds`
+20. the toggle leaves the keyboard order — `reached the toggle in 30`, and three more checks with it
+21. `minimumSamples` returns 1 — `the two percentiles read "too few samples: 0 of 1 frames in a throw"`
+22. `quantileOf` returns a constant — `p95 reads 16.7 ms over 483 frames`, unmoved by a 40 ms stall
+23. the long-task total printed as 0 — `The panel reads "0.0 ms over 0 long tasks"`
+24. motion reported at the first frame after the press — `the first throw of the session read "-4.0 ms over 1 throw"`
+25. the watch started after the library was asked to act the throw out — `The panel reads 262 ms, which is 133.4 ms from that`
+26. a verdict word on a row, and separately a `tabindex` on the panel — `verdict_words=1`, and `holding 1 tab stops`
+27. the recorder survives the switch — `the panel read "50.2 ms over 441 frames in a throw"` after the switch went off and on
+
+Each injection was confirmed to have landed before the run, and every file was restored **by editing
+the injection back**. The SHA-256 of each restored file matches the reading taken before its
+injection. No `git stash` and no checkout touched the working tree.
+
+### The injection that could not go red, and what it showed
+
+Making `hasMoved` answer true on every frame turns three tests red and leaves the browser check
+green. The reason is worth recording: the application's watch is registered inside the effect that
+queues the throw, and that effect calls `box.roll` in the same task, so the first frame the watch
+ever sees already falls after the synchronous simulation. The reading is the same either way on this
+host. The two injections that DO move it are the two shapes the acceptance names — a reading taken at
+the first frame after the press, and a watch started after the library was asked to act the throw out
+— and both are proved above.
+
+### Measurements
+
+| Number | Value |
+|---|---|
+| New files | 6: `src/shell/perf.ts`, `src/shell/perf.test.ts`, `src/shell/overlay.tsx`, `src/shell/overlay.test.tsx`, `src/tray/motion.ts`, `src/tray/motion.test.ts` |
+| New tests | 43. The vitest total moves from 395 over 38 files to 438 over 41. The `node --test` total is unchanged at 23. |
+| Injections proved red | 21, every one restored by editing the injection back |
+| Keyboard walks | 11 visits before the throw and 35 after it, unchanged, in both instruments, and asserted again with the overlay panel on the screen |
+| Controls at rest | unchanged. Both new controls are on the sheet, which is a second surface. |
+| Initial JavaScript | 39,932 to 43,390 gzip bytes. Budget in `budgets.json`, and the measurement is under it. |
+| Lazy 3D chunk | 151,876 gzip bytes, unchanged |
+| `npm run perf` | `steps_to_rest_fixed_seed_scene measured=203 budget=224`, scene digest matched, exit 0 |
+| Twelve-die render counters | 841, 842 and 77, unchanged |
+| Branding gate | `files_scanned=148`, `hits=0`, exit 0 |
+| Harness | `--sound-controls` 6/0/0, `--overlay` 8/0/0, `--sound` 10/0/0, `--shell` 8/0/0, `--sheet` 11/0/0, `--theme` 10/0/0, `--history` 21/0/0, `--blocked-chunk` 11/0/0, `--table` 9/0/0, `--tray` 7/0/0, `--share` 13/0/0, `--share-controls` 8/0/1 |
+| Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |
+
+### The captures, and what they show
+
+`docs/design/0022-sheet-sound-360.png` is the sheet at 360 px with the sound panel open. The
+checkbox and the slider each fill a 44 px row and the level is printed in words beside the slider.
+
+`docs/design/0023-overlay-360.png` and `docs/design/0023-overlay-1440.png` are the overlay on a
+fresh sitting after one throw of twenty dice. Every line reads at a glance at phone width: the
+figure, the number, the unit and the sample count. The long-task row is in italic and names its
+reason instead of a number. At 1440 px the panel sits in the upper left and covers no die.
+
+Both images were looked at. The 360 px frame is the one the owner will photograph, and the dice are
+still visible under the panel.
+
+### What is open
+
+**Nothing of either unit.** Both are complete.
+
+**The owner still owes the phone reading.** The plan's owner action stands: open the application on
+the phone, turn `sheet-overlay` on, roll, and paste the four figures into this file. The desktop
+reading above is not that measurement and is labelled as such.

@@ -16,7 +16,7 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TrayMount, TrayProbe } from './app';
-import { App } from './app';
+import { App, NO_AUDIO_TEXT, SOUND_NOTE_TEXT } from './app';
 import type { Die } from './rules/die';
 import { appendValue, latestValue } from './rules/die';
 import { applyDifficulty, buildPool, firstRoll, poolBuilder } from './rules/pool';
@@ -28,6 +28,8 @@ import { seededRandom } from './rules/seeded-random';
 import type { TrayDecision } from './tray/capability';
 import type { RollResult } from './rules/roll';
 import { roll, successCount } from './rules/roll';
+import type { SoundEngine } from './tray/sound';
+import { createSoundEngine } from './tray/sound';
 import type { Settings, SettingsStore } from './settings/settings';
 import {
   DEFAULT_SETTINGS,
@@ -276,6 +278,7 @@ function mount(
     probe?: TrayProbe;
     mount?: TrayMount;
     makeCard?: typeof makeShareCard;
+    sound?: SoundEngine;
   } = {},
 ): HTMLElement {
   root = document.createElement('div');
@@ -2746,5 +2749,282 @@ describe('the share card behind the disclosure', () => {
       expect(before.names, `the before-throw walk never names ${name}`).not.toContain(name);
       expect(after.names, `the after-throw walk never names ${name}`).not.toContain(name);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The sound controls — Unit 3.6, the interface half
+//
+// The engine, its state and the collision hook landed with the engine half.
+// What is here is the two controls and the wiring: a level a player sets
+// reaches the GAIN NODE the engine built, and it is read off that node rather
+// than off the record it came from. jsdom has no Web Audio, so the engine under
+// test is built on a context this file makes.
+//
+// The claim these checks cannot make is that a roll in a browser really starts
+// voices, because jsdom mounts no tray and a tray reports no collision without
+// one. `node scripts/browser.mjs --sound-controls` makes it.
+// ---------------------------------------------------------------------------
+
+/** The three nodes `createSoundEngine` builds, and nothing else. */
+function fakeAudio(): { context: BaseAudioContext; gains: number[] } {
+  const gains: number[] = [];
+  const node = (extra: Record<string, unknown> = {}) => {
+    const held = {
+      connect: (target: unknown) => target,
+      ...extra,
+    };
+    return held;
+  };
+  const param = () => ({ value: 0 });
+  const context = {
+    destination: node(),
+    currentTime: 0,
+    sampleRate: 48000,
+    state: 'suspended',
+    createGain: () => {
+      const gain = { value: 1 };
+      gains.push(gain.value);
+      return node({ gain });
+    },
+    createDynamicsCompressor: () =>
+      node({
+        threshold: param(),
+        knee: param(),
+        ratio: param(),
+        attack: param(),
+        release: param(),
+      }),
+  } as unknown as BaseAudioContext;
+  return { context, gains };
+}
+
+/** An engine on a context this file owns, so `enable` builds a real graph. */
+function testEngine(volume = DEFAULT_SETTINGS.soundVolume): SoundEngine {
+  return createSoundEngine({ volume, createContext: () => fakeAudio().context });
+}
+
+/** An engine on a browser that has no Web Audio at all. */
+function silentBrowserEngine(): SoundEngine {
+  return createSoundEngine({
+    createContext: () => {
+      throw new TypeError('AudioContext is not defined');
+    },
+  });
+}
+
+/** The level the gain node really carries, or null while none is built. */
+function gainLevel(engine: SoundEngine): number | null {
+  return engine.output === null ? null : engine.output.gain.value;
+}
+
+/** Throw the screen away, which is what a reload does. */
+function unmount(): void {
+  act(() => render(null, root as HTMLElement));
+  root?.remove();
+  root = null;
+}
+
+function setRange(name: string, value: number): void {
+  const range = element(name) as HTMLInputElement;
+  act(() => {
+    range.value = String(value);
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+describe('the sound controls behind the disclosure', () => {
+  it('builds no audio context until the player asks for sound', () => {
+    const engine = testEngine();
+    mount({ store: fakeStore(), sound: engine });
+    click(element('disclosure-toggle'));
+    expect(engine.context, 'nothing is built while sound is off').toBeNull();
+    expect(engine.enabled).toBe(false);
+    click(element('sheet-sound-toggle'));
+    expect(engine.enabled).toBe(true);
+    expect(engine.context, 'the press that asked for sound built the graph').not.toBeNull();
+  });
+
+  it('carries the level to the gain node, at more than one level', () => {
+    const store = fakeStore();
+    const engine = testEngine();
+    mount({ store, sound: engine });
+    click(element('disclosure-toggle'));
+    click(element('sheet-sound-toggle'));
+
+    // Read off the audio graph every time, never off the setting that fed it.
+    setRange('sheet-sound-volume', 0.25);
+    expect(gainLevel(engine)).toBe(0.25);
+    expect(readSettings(store).soundVolume).toBe(0.25);
+
+    setRange('sheet-sound-volume', 0.75);
+    expect(gainLevel(engine)).toBe(0.75);
+    expect(readSettings(store).soundVolume).toBe(0.75);
+
+    // Zero is a shut output and is not the off state: the graph still stands.
+    setRange('sheet-sound-volume', 0);
+    expect(gainLevel(engine)).toBe(0);
+    expect(engine.enabled, 'a level of zero is not the same as off').toBe(true);
+  });
+
+  it('opens the level the record holds, and takes the level across a reload', () => {
+    const store = fakeStore();
+    const first = testEngine();
+    mount({ store, sound: first });
+    click(element('disclosure-toggle'));
+    click(element('sheet-sound-toggle'));
+    setRange('sheet-sound-volume', 0.35);
+    unmount();
+
+    const stored = readSettings(store);
+    expect(stored).toMatchObject({ soundEnabled: true, soundVolume: 0.35 });
+    // A second screen over the same record: the engine opens at that level and
+    // the graph carries it, with no control touched.
+    const second = createSoundEngine({
+      enabled: stored.soundEnabled,
+      volume: stored.soundVolume,
+      createContext: () => fakeAudio().context,
+    });
+    mount({ store, sound: second });
+    expect(second.enabled).toBe(true);
+    expect(gainLevel(second), 'the stored level reached the graph on its own').toBe(0.35);
+    click(element('disclosure-toggle'));
+    expect((element('sheet-sound-volume') as HTMLInputElement).value).toBe('0.35');
+    expect((element('sheet-sound-toggle') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('gives both controls a role, an accessible name and a state', () => {
+    mount({ store: fakeStore(), sound: testEngine() });
+    click(element('disclosure-toggle'));
+    const toggle = element('sheet-sound-toggle') as HTMLInputElement;
+    const volume = element('sheet-sound-volume') as HTMLInputElement;
+
+    expect(toggle.type, 'a checkbox carries the checkbox role').toBe('checkbox');
+    expect(
+      (toggle.closest('label')?.textContent ?? '').trim(),
+      'the label is the accessible name',
+    ).toBe('The dice make a sound');
+    expect(toggle.checked, 'the state is off, which is what the record holds').toBe(false);
+
+    expect(volume.type, 'a range input carries the slider role').toBe('range');
+    // The name is on the control. The label around it also holds the level, so
+    // a name taken from that label would announce the level twice.
+    expect(volume.getAttribute('aria-label'), 'the accessible name, and only it').toBe('Volume');
+    expect((volume.closest('label')?.textContent ?? '').trim()).toContain('Volume');
+    expect(volume.getAttribute('aria-valuetext'), 'the state, in words').toBe('50 per cent');
+    expect(volume.min).toBe('0');
+    expect(volume.max).toBe('1');
+
+    // Reachable by keyboard alone: both are tab stops of the open sheet.
+    const stops = tabStops(element('disclosure-sheet')).map((each) => each.dataset['el']);
+    expect(stops).toContain('sheet-sound-toggle');
+    expect(stops).toContain('sheet-sound-volume');
+  });
+
+  it('says so where the browser makes no sound at all, and records nothing', () => {
+    const store = fakeStore();
+    mount({ store, sound: silentBrowserEngine() });
+    click(element('disclosure-toggle'));
+    expect(element('sheet-sound-note').textContent).toBe(SOUND_NOTE_TEXT);
+    click(element('sheet-sound-toggle'));
+    expect(element('sheet-sound-note').textContent).toBe(NO_AUDIO_TEXT);
+    expect(
+      readSettings(store).soundEnabled,
+      'a record that promised sound this browser cannot make would greet the next session with silence',
+    ).toBe(false);
+    expect((element('sheet-sound-toggle') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('draws no part of itself at either rest state', () => {
+    mount({ store: fakeStore(), sound: testEngine() });
+    expect(document.querySelector('[data-el="sheet-sound"]')).toBeNull();
+    click(element('roll-button'));
+    expect(document.querySelector('[data-el="sheet-sound"]')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The performance overlay — Unit 3.8, the overlay half
+//
+// The instrument is held by `src/shell/perf.test.ts` and the panel by
+// `src/shell/overlay.test.tsx`. What is here is the wiring into the screen: the
+// switch that shows it, the press that opens a measurement window, and the
+// claim that the panel adds nothing to either keyboard walk of section 6.
+// ---------------------------------------------------------------------------
+
+describe('the performance overlay', () => {
+  it('is off until the player asks for it, and the switch shows it', () => {
+    mount({ store: fakeStore() });
+    expect(document.querySelector('[data-el="perf-overlay"]')).toBeNull();
+    click(element('disclosure-toggle'));
+    const toggle = element('sheet-overlay-toggle') as HTMLInputElement;
+    expect(toggle.type).toBe('checkbox');
+    expect(toggle.checked).toBe(false);
+    expect((toggle.closest('label')?.textContent ?? '').trim()).toBe(
+      'Show the performance readings',
+    );
+    click(toggle);
+    expect(element('perf-overlay')).not.toBeNull();
+    click(element('sheet-overlay-toggle'));
+    expect(document.querySelector('[data-el="perf-overlay"]')).toBeNull();
+  });
+
+  it('is not stored, so a reload opens without it', () => {
+    const store = fakeStore();
+    mount({ store });
+    click(element('disclosure-toggle'));
+    click(element('sheet-overlay-toggle'));
+    expect(element('perf-overlay')).not.toBeNull();
+    const record = JSON.parse(String(store.getItem(SETTINGS_KEY) ?? '{}')) as Record<
+      string,
+      unknown
+    >;
+    expect(
+      Object.keys(record).filter((key) => key.toLowerCase().includes('overlay')),
+      'a diagnostic panel that outlived the session would be a cost the player forgot about',
+    ).toEqual([]);
+    unmount();
+    mount({ store });
+    expect(document.querySelector('[data-el="perf-overlay"]')).toBeNull();
+  });
+
+  it('opens a measurement window at the press itself', () => {
+    mount({ store: fakeStore() });
+    click(element('disclosure-toggle'));
+    click(element('sheet-overlay-toggle'));
+    click(element('sheet-close'));
+    const before = element('perf-firstMotion').textContent ?? '';
+    expect(before, 'no throw has been measured yet').toContain('not measured here');
+    click(element('roll-button'));
+    // The flat dice of jsdom have no table, so the figure names the reason
+    // rather than printing a zero. The window still opened: the panel counts
+    // the throw.
+    expect(element('perf-firstMotion').dataset['reading']).toBe('unavailable');
+    expect(element('perf-firstMotion').textContent).not.toMatch(/\b0 ms\b/);
+  });
+
+  it('adds no tab stop, so both walks of section 6 are the walks they were', () => {
+    const before = walkList(DESIGN, 'Before');
+    const after = walkList(DESIGN, 'After');
+    expect(before.stated).toBe(11);
+    expect(after.stated).toBe(35);
+    for (const name of ['sheet-sound', 'sheet-overlay', 'perf-overlay']) {
+      expect(before.names, `the before-throw walk never names ${name}`).not.toContain(name);
+      expect(after.names, `the after-throw walk never names ${name}`).not.toContain(name);
+    }
+
+    // The live screen, with the overlay on. The panel is drawn over the screen
+    // and the walk must be the same eleven visits it was without it.
+    mount({ store: fakeStore() });
+    click(element('disclosure-toggle'));
+    click(element('sheet-overlay-toggle'));
+    click(element('sheet-close'));
+    expect(element('perf-overlay'), 'the panel is on the screen for this walk').not.toBeNull();
+    const visits = walk(document);
+    expect(visits.map((visit) => visit.name)).toEqual(before.names);
+    expect(visits.length).toBe(before.stated);
+    const panel = element('perf-overlay');
+    expect(panel.getAttribute('aria-label')).toBe('Performance readings');
+    expect(tabStops(panel)).toHaveLength(0);
   });
 });
