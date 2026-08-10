@@ -47,6 +47,24 @@ llvmpipe, softpipe, swrast, lavapipe, Mesa OffScreen, SwiftShader, Microsoft Bas
 and the generic "software renderer" names. An empty or unreadable name fails a hardware run.
 Unknown is not the same as good.
 
+## The throw seed
+
+`--throw-seed <n>` pins the seed the vendored tray throws from. Every run prints the seed it used. A
+run that names no seed draws a fresh one.
+
+**The seed pins the tray and not the rules.** It replaces `Math.random`, which the vendored library
+draws its throw vectors from. Constraint 7 makes the rules core draw from `crypto.getRandomValues`,
+and the seed does not reach that.
+
+| Mode | Repeats from the seed? | Why |
+|---|---|---|
+| `--tray`, `--pool`, `--push`, `--affordance` | Yes | Each builds its own fixture. The values are written in the harness. |
+| `--table` | **No** | It drives the application, and the rules core rolls the pool. |
+
+Two `--table` runs at seed 2107814439 read 20 and 24 dice the player may release, measured on
+2026-08-10. Name a seed to repeat the tray, not to repeat the roll. A red `--table` run therefore
+needs a seed sweep to reproduce, not one seed.
+
 ## Sandbox realities
 
 Bash runs in a bubblewrap sandbox. The sandbox hides `/dev/dri` and the display sockets.

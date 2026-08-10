@@ -66,6 +66,212 @@ Status table for each unit. Every unit appends one row after it lands.
 | 4.6 | CSV import — the file picker, the size guard and the message. **Unit 4.6 is now complete, less the error surface Unit 4.10 owns.** | Done. `BLOCKED:budget` on the import cap. | #15 | `import-button` sits in the footer of the history summary and opens a hidden file picker. Decision 13 records why it is there and not in the record: an import replaces the whole log, so it belongs beside the list of the whole log and not beside one roll, and the record then keeps the two controls section 3 names. The picker carries `tabindex="-1"` and `aria-hidden`, so the summary counts three controls and not four. **The size is judged on the FILE, before one byte of it is read.** `src/log/import-file.ts` refuses a file over `MAX_IMPORT_BYTES` from `File.size` and never calls `text()` on it. The proof is a call counter on the file's own `text`: a real `File` of 33,554,433 bytes went into the real picker, the patch is proved to have landed, and the control read the file 0 times. A guard that read `text.length` would have read it once, which is the injection that turns the check red. **The byte cap is not a second budget.** It is `MAX_IMPORT_CHARS`, and one number serves both because UTF-8 never spends fewer bytes than the string spends UTF-16 code units, so a file inside the byte cap is always inside the character cap. The inequality is asserted over a corpus covering all four UTF-8 lengths, not described. **The round trip runs through the real controls.** The file the export button wrote goes back in as a real `File` in a real `FileList` through `DataTransfer`: 136 leaf fields against 136 counted a second way, 0 differences, and the log back at 2 rolls. One extra roll is thrown between the export and the import, so an import that wrote nothing cannot pass — the marker roll must be gone. `RollLog.replace` writes it in ONE transaction through `appendRolls`, and it forgets the open roll, so a push after an import cannot `put` at a key an imported roll now holds. **The message is the smallest honest one, and Unit 4.10 still owes the rest.** `history-message` is a live region in both views and names the cause of every refusal: too large, empty, not a log this application wrote, a header with no roll, unreadable, and a store that refused the write. It quotes the file, so it is drawn as text and no parser sees it. Constraint 8. **What 4.10 owes:** a designed error surface rather than one sentence, a recovery route from a failed import, and the same treatment for the other three failures the plan names — a 3D chunk that will not load, an IndexedDB that will not open, and storage that is full. **Open, and it is the owner's:** `BLOCKED:budget`, the same one Unit 4.5 carries. See the notes under this table. |
 | 4.7 | Statistics view — the charts, in a third view of the history destination. **Unit 4.7 is now complete.** | Done. | #16 | Three charts over the record `summariseLog` returns, in `src/shell/statistics.tsx`, drawn in a third view of the history destination. **Decision 14 of `docs/design/0012-settled-decisions.md` records where they live and why**, and section 3 of the design carries the control table: the summary now counts four controls and the statistics view one. The rejected option is a section of the summary, and the reason is Unit 4.5's own defect: a section pushes either the list or the charts below the fold of a 360 px screen. **The screen computes no statistic.** `statistics.tsx` imports no log entry, no push profile and no rule, so there is nothing in it to re-derive a number from. The claim is measured at the CALL SITE and not at the component: the destination is handed a record that disagrees with its own log on all 24 fields, the disagreement is counted first so no field can pass by coincidence, and every drawn value follows the record. **A chart is a table, not a picture.** Every value is text in a real cell that names its row header and its column header, and every bar is `aria-hidden` decoration beside it, so one document serves a screen reader and an eye and the two readings are compared against each other. **The denominator is the record, counted a second way**: 24 values against a sum over the shape of the record, `1 + 2 pool sizes by 5 + 7 push fields + 4 cost units + 2`, so a missing bar is a red and not an unread cell. The oracle for the browser half is `summariseLog` run IN NODE over the rolls a second connection reads out of IndexedDB. **Every bar is measured against the geometry.** In the browser the bar and its track are measured in real pixels and the bound is one device pixel over the track width, 190, 172 and 722 px this run. In the test runner the drawn width is compared against the record with a bound of 0.0005 of a percentage point, taken from the three decimal places the view writes and not chosen; the smallest real difference between two bars of the fixture is 25 percentage points. **Shape carries every meaning colour carries.** Four series, and no chart holds two of one shape: a circle for a success and for a gain, a square for the outcome that did not move, a triangle for the one that went the wrong way. The engine resolved 3 shapes and 3 colours for the three push outcomes. **No chart draws a bane**, because the record holds no bane statistic. **Contrast holds over two denominators.** 13 chart colours are read out of `src/shell.css` by the rule that spends them, resolved against `:root`, and judged at 4.5 to 1 for text and 3 to 1 for a graphical object; the same 13 run over all 6 interface palettes of Unit 4.8 as a product of 78, tightest 4.40 to 1. In the browser 36 colours are read as the engine resolved them, each against the first ancestor that really paints one, 0 missed. **Three degenerate cases answer for themselves**: no roll draws a sentence and no chart, no push reads "No roll has pushed yet." and never a nought per cent, and one roll draws one row. **Keyboard alone reaches the charts and leaves them.** A real Enter on `statistics-button` opens them with the focus on `back-button`, and a real Enter on `back-button` returns to the SUMMARY and not to the dice. The charts hold 0 tab stops. Section 6 is unchanged and measured in both instruments: eleven visits before the throw and thirty-five after it, with both lists read out of the design. Vitest moves from 321 to 334 tests over 33 files. `--history` moves from 15 checks to 21 at `failures=0 skipped=0`. Initial JavaScript moves from 31,527 to 33,449 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Sixteen injections were proved red and every one was restored by editing the injection back, with the three touched files hashed against a saved copy. The captures are `docs/design/0018-history-stats-360.png` and `0018-history-stats-1440.png`. **Open, and owed by Unit 4.7:** nothing. See the notes under this table. || 3.6 | Sound — the interface half: the toggle, the volume, and the engine wired to the tray. **Unit 3.6 is now complete.** | Done | #19 | `sheet-sound` holds a checkbox and a slider, and `src/shell/table.tsx` hands the tray an `onImpact` hook that reaches the engine the screen holds. A roll in the built application started 82 voices, counted through the browser's own `AudioBufferSourceNode.start` rather than through any counter the engine writes. The level is read off the `GainNode` the engine built, at 0.75 and at 0.25, both set by real arrow presses. Decision 17 of `docs/design/0012-settled-decisions.md` records the choices and section 4 of `docs/design/0002-screen-design.md` lists both controls. Two accessibility defects were found by the checks and fixed: the slider took its name from the label around it, which reads the level twice, and it drew itself 20 px tall against a 24 px floor. See the notes under this table. |
 | 3.8 | Performance gates and the phone overlay — the overlay half. **Unit 3.8 is now complete. The owner still owes the phone reading.** | Done | #19 | `sheet-overlay` shows four readings over the screen: p95 and p99 frame duration, the long-task total, and throw-to-first-motion. **It reports and never gates**, which is what the End state of `CLAUDE.md` asks of a timing figure. Every line names its unit and its sample count, a percentile below a floor derived from its own quantile is refused, and a figure this browser cannot measure is named rather than printed as a zero. Frames are sampled inside a throw and nowhere else. Decision 18 records every choice. The desktop reading is in the notes and is NOT the phone reading the plan asks for. See the notes under this table. |
+| fix | The pointer probe aimed where no pointer can land | Done | #20 | `--table` lost a die to the pointer route on some throws, with `die-at2 did not answer the click`. **Neither candidate cause was the cause.** The die was not buried: `unreachable=0` on every failing run, and the two dice that were lost held 1,415 and 1,820 whole pixels of their own front surface. The die cells did not eat the press either: the click reached the canvas, and `pointer-events: none` of Decision 9 held at every point measured. **The cause is the probe.** It walked outwards from a die's centre and returned the FIRST point that belonged to the die, which lies on the boundary with whatever covers the centre, by construction. That point is fractional, and the driver rounds every pointer coordinate to a whole pixel — `Math.round` in `node_modules/puppeteer-core/lib/puppeteer/bidi/Input.js`. The press therefore landed across the boundary and the neighbour took it. Measured at seed 108: the aim read `(232.626, 495.087)` where the raycast answers die 22, the rounded point `(233, 495)` answers die 7, and `die-sk3` toggled instead of `die-st8`. **The fix is a construction, not a rule.** `window.__clatterAim` scans the whole pixels the die's projected disc covers, keeps the ones where the die is the frontmost body, and answers the one furthest from any pixel that is not, by a Chebyshev distance transform. The answer is a whole pixel, so rounding changes nothing, and it is the point deepest inside what the player sees. One implementation serves `--table` and `--affordance`. `CLICK_PROBE_RINGS` and `CLICK_PROBE_ANGLES` are gone and nothing replaced them: the scan has no free parameter. **No shipping file changed.** The pointer route was already correct. Over 64 throw seeds at 1440x900 the mode now reads `passed=64 of 64` at `checks=10 failures=0 skipped=0`, against 2 red in 32 before the fix, and seed 2107814439 passes. `table.every-aim-is-a-whole-pixel-the-pointer-can-address` is new. The pointer check now counts `refused` against the dice the screen draws as images and `toggled` against the dice it draws as buttons, and the key route counts the same split through a different instrument, so a die a neighbour hides can no longer be absorbed into a refusal. **`BLOCKED:owner-gate` on the small tray.** At 360x760 the heap buries a die in 7 of 24 throws and the pointer route cannot reach it. The keyboard route reaches every die at every width. See the notes under this table. Three red-proofs passed. Initial JavaScript 43,390 gzip bytes, the lazy chunk 151,876, the render counters 841, 842 and 77, and `npm run perf` 203 steps with the scene digest unchanged — every one of them unchanged, because no shipping file moved. |
+
+## Fix — the pointer probe aimed where no pointer can land
+
+### What was reported
+
+`node scripts/browser.mjs --table` lost a die to the pointer route on some throws, with
+`die-at2 did not answer the click`. The keyboard route answered on the same throws. The report named
+two candidate causes and asked which one was happening.
+
+**Neither of them was.** The measurement below found a third.
+
+### The measurement that found the cause
+
+The failing runs were reproduced by sweeping seeds, because **the seed does not repeat a `--table`
+run.** `--throw-seed` replaces `Math.random`, which the vendored library draws its throw vectors
+from. Constraint 7 makes the rules core draw from `crypto.getRandomValues`, and the seed does not
+reach that. Two runs at seed 2107814439 read 20 and 24 dice the player may release. The harness
+header and `.claude/skills/run-clatter/SKILL.md` both said a red run repeats exactly. Both now say
+which half repeats.
+
+Over seeds 200 to 231 at 1440x900, 2 runs of 32 lost a die. Each fault was recorded with the
+element under the click point, the raycast answer at the aim, the raycast answer at the rounded
+aim, and the die that toggled instead.
+
+**Candidate 1, the buried die of Decision 9: ruled out.** Every failing run read `unreachable=0`,
+so the raycast found a point on every die. A scan of the whole pixels under each die measured how
+much of its own front surface it shows: over 960 dice at 1440x900 the smallest was 195 whole
+pixels, and no die was ever buried. The two dice that were lost held 1,415 and 1,820 whole pixels.
+Neither was hidden and neither was hard to reach.
+
+**Candidate 2, two overlapping die cells: ruled out.** `document.elementsFromPoint` at the aim
+returned `CANVAS` first at every fault, and a capture-phase listener recorded `CANVAS` as the target
+of every click. `pointer-events: none` of Decision 9 held. No cell took a press.
+
+**The cause is the probe, and it is a resolution fault.** The probe walked outwards from the die's
+projected centre and returned the FIRST point that belonged to the die. Where a neighbour covers the
+centre, that first point lies on the boundary between the two, by construction. The point is
+fractional. The driver rounds every pointer coordinate to a whole pixel — `Math.round` in
+`node_modules/puppeteer-core/lib/puppeteer/bidi/Input.js`, read from the installed source — and the
+WebDriver BiDi wire format carries whole numbers. The press therefore landed on the far side of the
+boundary.
+
+At seed 108 the aim read `(232.626, 495.087)`, where the raycast answers die 22. The rounded point
+`(233, 495)` answers die 7. The 3 by 3 neighbourhood of the rounded point splits between the two
+dice along the line between x=232 and x=233. `die-sk3` toggled and `die-st8` did not. The press
+reached a die. It reached the wrong one.
+
+**A probe finer than the actuator it drives proves nothing.** The old probe proved a point the
+pointer could never send an event to.
+
+### The fix, and why it is a construction
+
+`window.__clatterAim` scans the whole pixels the die's projected disc covers, keeps the ones where
+the die is the frontmost body, and answers the one furthest from any pixel that is not. The
+distance is Chebyshev, over two passes of a distance transform.
+
+- The answer is a whole pixel, so the driver's rounding is the identity and the press lands exactly
+  where the raycast proved.
+- The answer is the point deepest inside what the player can see, which is where a finger aims.
+- The scan area comes from the die's own bounding sphere and the camera, so nothing is calibrated.
+  `CLICK_PROBE_RINGS` and `CLICK_PROBE_ANGLES` are gone and nothing replaced them.
+
+One implementation answers both modes. `--affordance` drove the same driver through the same
+fractional aim and carried the same latent fault. It now calls the same function and reads the same
+numbers Unit 3.5 recorded: `refused=4`, `toggled=8`, `unreachable=0`, `reported=12 of 12`.
+
+**No shipping file changed.** The pointer route of `src/tray/affordance.ts` was already correct at
+every whole pixel of a die's own surface. The fault was in the instrument.
+
+### The counted denominators, and the two refusals
+
+The report asked that a rule lock and a hidden die stay apart. They now are.
+
+| Count | Denominator |
+|---|---|
+| `refused` | The dice the screen draws as an image, counted off the DOM before any click. A rule lock is not a button and carries no `aria-pressed`. |
+| `toggled` | The dice the screen draws as a button, which is the pool less the rule locks. |
+| `refused` and `toggled` again | The key route's own two counts, taken through a different instrument over the same pool. |
+| `unreachable` | Zero. Each die with no whole pixel of its own is named, with the number of pixels scanned. |
+| `whole` | The dice the run aimed at, against the pool. An aim between two pixels fails by name. |
+
+A hidden die can no longer be absorbed into a refusal, and the counted denominator enforces it
+without the explicit gate: a die the screen draws as a button that was never pressed makes `toggled`
+fall short of the button count, whatever the reason.
+
+### Three red-proofs
+
+Each injection landed, each failure names the gate it broke, and each was restored by editing the
+injection back. No version-control command touched a byte.
+
+1. **A fractional aim.** `x: index === 0 ? bestX + 0.5 : bestX`:
+   `FAIL table.every-aim-is-a-whole-pixel-the-pointer-can-address whole=29 of the 30 dice this run
+   aimed at ... fractional=1 [die-at1 at (912.5, 202)]`. This is the property the defect broke.
+2. **One die with no whole pixel of its own.** `if (bestX === null || index === 0)`:
+   `FAIL table.every-die-is-accounted-for-by-the-pointer-route reached=29 and unreachable=1 sum to
+   the pool of 30 ... toggled=21 against the 22 dice the screen draws as buttons and refused=8
+   against the 8 it draws as images ... faults=1 [die-at1 has no whole pixel of its own: no whole
+   pixel of its own surface is frontmost, over 6536 scanned]`. **The refusal count stayed at 8**, so
+   the hidden die was not absorbed into it.
+3. **One refusal counted twice.** `let refused = 1`:
+   `FAIL ... refused=7 against the 6 it draws as images because the rules hold them. The key route
+   read the same split as 24 and 6, through a different instrument`.
+
+The defect itself is red on the unfixed code: 2 runs of 32 at 1440x900, with the fault text quoted
+above.
+
+### The seed sweep
+
+`--table --viewport 1440x900`, one run per seed, seeds 200 to 263, on
+`AMD Radeon RX 6700 XT (radeonsi, navi22, ACO, DRM 3.64, 7.1.7-200.fc44.x86_64)` with the sandbox
+off.
+
+| Run | Seeds | Passed | Checks per run |
+|---|---|---|---|
+| Before the fix | 200 to 231 | 30 of 32 | `checks=9 failures=1` on 2 of them |
+| After the fix | 200 to 263 | **64 of 64** | `checks=10 failures=0 skipped=0` on every one |
+
+**64 seeds is enough because the rate is 1 in 16.** The unfixed code lost a die on 2 of 32 runs.
+Over 64 runs at that rate the chance of no failure by luck is under 2 per cent. Every run also read
+`aimed=30 of 30 whole=30`, so the property the fix rests on held 1,920 times.
+
+Seed 2107814439, which the report named, passes: `checks=10 failures=0 skipped=0`, `reached=30
+unreachable=0 toggled=22 refused=8 rule_held=8 pressable=22`, and the key route read the same 22 and
+8. The keyboard check was green on all 64 sweep runs.
+
+### `BLOCKED:owner-gate` — the small tray buries a die, and no pointer can reach it
+
+The report asked for a capture at 360 px, and the capture found a second defect. It is not the one
+this fix closes and it is not a regression.
+
+**A die is a fixed size on the screen at every canvas size.** The library builds it at `baseScale`
+world units and the camera frames twice the element in world units, so a die is about 91 CSS pixels
+across at 360 px and at 1440 px alike. The tray shrinks and the dice do not, so 30 dice pile up.
+
+Measured with the same instrument, one run per seed, sandbox off:
+
+| Viewport | Runs | Runs with a buried die | Buried dice | Smallest own surface |
+|---|---|---|---|---|
+| 360x760 | 24 | 7 | 8 | 1 whole pixel |
+| 800x600 | 24 | 1 | 1 | 3 whole pixels |
+| 768x1024 | 8 | 0 | 0 | 387 whole pixels |
+| 1440x900 | 72 | 0 | 0 | 193 whole pixels |
+
+`docs/design/0015-pointer-route-1440.png` and `docs/design/0015-pointer-route-360.png` are the same
+seed at the two widths. At 1440 the dice lie apart and every one shows a face a finger can land on.
+At 360 they stand in a heap several deep, some dice show a sliver of one edge, and the cages of the
+kept dice cross each other.
+
+Section 3 of `docs/design/0002-screen-design.md` counts twenty-three dice in state B as hit targets
+a player may keep or release. **At 360 px that promise does not hold for every die.**
+
+**The options, priced. None is inside the delegated authority.**
+
+| Option | What it costs |
+|---|---|
+| Spread the throw so the dice land apart | Moves `steps_to_rest_fixed_seed_scene` and the pinned scene digest in `budgets.json`. Constraint 5 forbids changing one gate to make another pass. `BLOCKED:budget`. |
+| Scale the die down with the tray | Changes the drawn screen the owner approved at Unit 2.0, and shrinks the numeral a player reads on a phone. Re-derives the 200 px floor under `.table`, which is expressed in `baseScale`. `BLOCKED:owner-gate`. |
+| Give the die cells the pointer, stacked by camera depth | Reverses Decision 9 and reopens the hazard it names: a disc is wider than a die's silhouette, so a press at the edge of one cell would toggle a die the player did not aim at. **It does not close the case either** — a small die wholly behind a larger one has a cell wholly inside the larger die's cell. |
+| Leave it, and let the keyboard carry the buried die | Costs nothing and closes nothing. The keyboard route reaches every die at every width, which `table.every-die-answers-a-key-press` reads as 30 of 30 at 360 px as well. A player with a finger still cannot reach a buried die. |
+
+**What this fix does about it: it makes the run say so.** The pointer check gates
+`unreachable === 0` and names every die with no whole pixel of its own, so the heap is a red run and
+not a silent tolerance. The mode is therefore red at 360x760 on about 3 throws in 10, and at 800x600
+on about 1 in 24. **That red is true.** The check it replaced read `unreachable=0 ... by design` and
+could not fail on this at all.
+
+The owner decides which option to take. Nothing here is chosen for them.
+
+### Reported, not fixed
+
+- **`--table` at 360x760 also failed the push check** on the unfixed code from `main`:
+  `table.the-push-put-the-die-it-added-on-the-table ... wrong=1 [die-st11 reads 3, the screen says
+  2]`. That is a separate pre-existing finding at the phone width, measured while baselining, and it
+  belongs to Unit 3.4. It is not touched here.
+- **The default viewport of the harness is 800x600.** A plain `--table` run therefore samples the
+  crowded tray, not the drawn one. Unit 3.5 measured the mode at 1440x900 and the ledger records it
+  there.
+- **`--table` does not repeat from its seed.** The sweep is the instrument for a `--table` red, not
+  one seed. `.claude/skills/run-clatter/SKILL.md` now carries a table of which modes repeat.
+
+### The probe constants, and which ones moved
+
+**Two were removed and nothing was re-calibrated.** `CLICK_PROBE_RINGS` at 6 and
+`CLICK_PROBE_ANGLES` at 12 are gone. The scan that replaced them derives its area from the die's own
+bounding sphere and the camera, and its answer from a distance transform, so it holds no number to
+tune.
+
+No die's drawn size, no die's spot and no camera moved, so every other screen-space constant still
+measures what it measured: Unit 3.5's 48-direction shape probe, Unit 3.4's 1 px kept-die bound and
+Unit 3.5's 1 px cell bound all read the numbers they recorded.
+
+### Measurements
+
+| Number | Value |
+|---|---|
+| Files changed | 4, `scripts/browser.mjs`, `.claude/skills/run-clatter/SKILL.md`, `LEDGER.md` and two captures |
+| Shipping files changed | **None.** The pointer route was already correct. |
+| Test total | 438 Vitest tests over 41 files, plus 22 node tests. Unchanged. |
+| Initial JavaScript | 43,390 gzip bytes, unchanged. Budget in `budgets.json`. |
+| Lazy 3D chunk | 151,876 gzip bytes, unchanged |
+| Render counters | 841 draw calls, 842 triangles, 77 textures. Unchanged, all three under their ceilings. |
+| `npm run perf` | 203 steps over 5 runs, spread 0, scene digest unchanged, exit 0 |
+| Harness | `--table` at 1440x900 10/0/0 over 64 seeds, `--affordance` 9/0/0, `--tray` 7/0/0. `--table` at 360x760 10/2/0, which is the finding above. |
+| Branding gate | `files_scanned=154`, `hits=0`, exit 0 |
+| Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |
 
 ## Unit 4.7 — the charts, in a third view of the history destination
 
