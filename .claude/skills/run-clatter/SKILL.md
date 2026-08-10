@@ -91,6 +91,8 @@ Measured on this host on 2026-08-09:
 | `--context-loss` | off | Force a lost WebGL context and judge the permanent fall. Needs `--url`. |
 | `--reduced-motion` | off | Throw one pool twice, tumbling and skipped, and compare the faces. Needs `--url`. |
 | `--sound` | off | Throw twice, silent then sounded, and judge the sound engine. Needs `--url`. |
+| `--shell` | off | Walk the screen with real Tab and arrow presses, and capture the three widths. Needs `--url`, and the url must be a preview server over `dist/`. |
+| `--capture-shell <dir>` | none | `--shell` only. One PNG per width, named `shell-builder-<w>x<h>.png`. |
 | `--capture-before <path>` | none | `--push` only. The frame before the push. |
 | `--offset-kept <n>` | none | `--push` only. Move kept die `n` by 3 px, to red-prove the kept-die check. |
 | `--viewport <w>x<h>[@dpr]` | `800x600` | The window the scene is built in. |
@@ -146,6 +148,22 @@ no audio file.
 ```sh
 npm run browser -- --hardware --url http://localhost:5173/clatter/ --sound --throw-seed 5
 ```
+
+`--shell` comes from Unit 2.1. It is the browser half of the keyboard order. It reads the
+before-throw list out of section 6 of `docs/design/0002-screen-design.md`, walks the screen with
+real Tab and arrow presses, and compares the two. `src/app.test.tsx` asserts the same list under
+jsdom, which runs no sequential focus navigation and enumerates the tab stops itself, so this mode
+is the half that presses the key. It builds the drawn pool by pressing the plus ends and it reads
+the live region back. It starts and stops its own preview server, so build first and run it alone.
+
+```sh
+npm run build
+npm run browser -- --shell --url http://localhost:4173/clatter/ --capture-shell /tmp
+```
+
+A browser gives a scrollable box a tab stop of its own, so a keyboard can scroll a region that
+holds no control. The run reports such a stop by name and does not count it against the authored
+list. The drawn screen earns the same stop.
 
 Exit 0 when every check passed, 1 when a check failed, 2 on a usage error.
 

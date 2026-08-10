@@ -11,6 +11,12 @@
 //                            [--capture <path>] [--browser <path>]
 //                            [--tray] [--pool] [--push] [--affordance] [--probe]
 //                            [--share] [--capture-later] [--offline]
+//                            [--shell] [--capture-shell <dir>]
+//
+// `--shell` starts and stops its own preview server, for the same reason
+// `--offline` does. Build first, then run it alone:
+//   npm run build && node scripts/browser.mjs --shell \
+//     --url http://localhost:4173/clatter/ --capture-shell docs/design
 //
 // `--offline` starts and stops its own preview server, because it has to prove
 // the server stopped. Build first, then run it alone:
@@ -119,6 +125,14 @@
 // HTTP cache into bypass at the driver, loads the page again, and then judges
 // what rendered: the named parts of the screen, the lazy 3D chunk behind the
 // tray button, and the web manifest with its icons.
+//
+// `--shell` needs `--url`, and the url must be a preview server over the built
+// output. It is the browser half of Unit 2.1. It builds the drawn pool by
+// pressing the plus ends, walks the screen with real Tab and arrow presses, and
+// compares the visits against the list section 6 of
+// `docs/design/0002-screen-design.md` states. `--capture-shell <dir>` writes one
+// PNG per width, for comparison against the renders beside
+// `docs/design/0013-screen-final.html`.
 //
 // The sandbox hides /dev/dri, so a sandboxed run gets no WebGL context at all
 // and a hardware run inside the sandbox fails by design. Run a hardware run
@@ -5063,13 +5077,17 @@ async function runShareCard(page, options, checks) {
  * selector and the count of parts found is compared against the length here.
  */
 const OFFLINE_PAGE_PARTS = [
-  { name: 'the heading', selector: 'h1', text: 'Clatter' },
-  { name: 'the tray button', selector: 'main button', text: 'Show the dice tray' },
-  { name: 'the status line', selector: '[role="status"]', text: 'The dice tray is not loaded.' },
+  { name: 'the builder heading', selector: '[data-el="collapse-button"]', text: 'Done' },
+  {
+    name: 'the first pool tile',
+    selector: '[data-el="pool-cell-attribute"] .cell-t',
+    text: 'attribute',
+  },
+  { name: 'the disclosure', selector: '[data-el="disclosure-toggle"]', text: 'More' },
 ];
 
-/** What the status line reads once the lazy 3D chunk has loaded and mounted. */
-const OFFLINE_TRAY_READY = 'The dice tray is loaded.';
+/** What the table holds once the lazy 3D chunk has loaded and mounted. */
+const OFFLINE_TRAY_READY = 'a canvas on the table';
 
 /**
  * The manifest fields a browser needs before it offers to install a site, each
@@ -5373,26 +5391,31 @@ async function runOffline(page, options, checks, server) {
   });
 
   // ---- The lazy 3D chunk, still offline. ----
-  let trayStatus;
-  try {
-    await page.click('main button');
-    await page.waitForFunction(
-      (ready) => {
-        const line = document.querySelector('[role="status"]');
-        return line !== null && (line.textContent || '').trim() === ready;
-      },
-      { timeout: 60000 },
-      OFFLINE_TRAY_READY,
-    );
-    trayStatus = OFFLINE_TRAY_READY;
-  } catch {
-    trayStatus = await page
+  //
+  // The table is the route to the tray. `Roll` collapses the builder and shows
+  // the table, and the shell then imports the tray chunk. Unit 2.1 built that
+  // route, and Unit 2.2 throws dice onto it.
+  const readTable = () =>
+    page
       .evaluate(() => {
-        const line = document.querySelector('[role="status"]');
-        return line === null ? null : (line.textContent || '').trim();
+        if (document.querySelector('canvas') !== null) return 'a canvas on the table';
+        const note = document.querySelector('[data-el="dice-table"] .table-note');
+        return note === null ? 'nothing on the table' : (note.textContent || '').trim();
       })
       .catch(() => null);
+  let trayStatus;
+  try {
+    await page.click('[data-el="roll-button"]');
+    await page.waitForFunction(
+      () =>
+        document.querySelector('canvas') !== null ||
+        document.querySelector('[data-el="dice-table"] .table-note') !== null,
+      { timeout: 60000 },
+    );
+  } catch {
+    // The read below reports what the table holds either way.
   }
+  trayStatus = await readTable();
   // Two claims sit behind that button, and only one of them can be judged on
   // every machine, so they are two checks.
   //
@@ -5535,6 +5558,236 @@ async function runOffline(page, options, checks, server) {
 }
 
 // ---------------------------------------------------------------------------
+// The shell — Unit 2.1
+//
+// Two claims, both about the screen before a throw. The keyboard order is
+// walked with real Tab presses in a real browser, and the three widths are
+// captured for comparison against the renders beside
+// `docs/design/0013-screen-final.html`.
+//
+// `src/app.test.tsx` asserts the same walk under jsdom, which runs no
+// sequential focus navigation and therefore enumerates the tab stops itself.
+// This mode is the half that presses the key.
+// ---------------------------------------------------------------------------
+
+/** The number words section 6 may count in. An unknown word is a failure. */
+const VISIT_WORDS = { eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13 };
+
+/**
+ * Read the before-throw walk out of section 6 of the screen design.
+ *
+ * The document states the same walk three ways — a count in words, a numbered
+ * list, and a sentence splitting the list into Tab stops and arrow visits — so
+ * the list carries a denominator that can fail.
+ */
+export function beforeThrowVisits(markdown) {
+  const from = markdown.indexOf('**Before the throw');
+  const to = markdown.indexOf('**After the throw');
+  if (from < 0 || to <= from) {
+    throw new Error('section 6 no longer holds a before-throw list and an after-throw list');
+  }
+  const section = markdown.slice(from, to);
+  const word = /\*\*Before the throw — (\w+) visits\.\*\*/.exec(section)?.[1];
+  const stated = VISIT_WORDS[word];
+  if (stated === undefined) {
+    throw new Error(`section 6 states the before-throw count as ${word}, which is unread`);
+  }
+  const numbered = [...section.matchAll(/^(\d+)\. `([a-z-]+)`/gm)];
+  numbered.forEach(([, index], place) => {
+    if (Number(index) !== place + 1) throw new Error(`the numbered list jumps at item ${index}`);
+  });
+  const tabText = /Tab reaches items ([\d, and]+)\./.exec(section)?.[1];
+  const arrowRange = /The arrow keys reach items (\d+) to (\d+)/.exec(section);
+  if (tabText === undefined || arrowRange === null) {
+    throw new Error('section 6 no longer names which items Tab reaches and which the arrows do');
+  }
+  const first = Number(arrowRange[1]);
+  const last = Number(arrowRange[2]);
+  return {
+    names: numbered.map(([, , name]) => name),
+    stated,
+    tab: [...tabText.matchAll(/\d+/g)].map(([digits]) => Number(digits)),
+    arrow: Array.from({ length: last - first + 1 }, (_, step) => first + step),
+  };
+}
+
+/** The three widths the renders beside the drawn screen were taken at. */
+const SHELL_WIDTHS = [
+  { name: '360x760', width: 360, height: 760 },
+  { name: '768x1024', width: 768, height: 1024 },
+  { name: '1440x900', width: 1440, height: 900 },
+];
+
+/**
+ * The pool the drawn screen holds, from section 8: five attribute, five skill,
+ * three gear, no artifact and two bonus dice, with ten stress dice beside them.
+ */
+const SHELL_DRAWN_POOL = [
+  ['attribute', 5],
+  ['skill', 5],
+  ['gear', 3],
+  ['bonus', 2],
+  ['stress', 10],
+];
+
+/**
+ * What the focused element is called, and whether the browser put it in the tab
+ * order by itself.
+ *
+ * Firefox and Chrome both give a scrollable box its own tab stop, so a keyboard
+ * can scroll a region that holds no control. Nothing in the markup asks for it
+ * and the drawn screen earns the same stop, because `.shell-m` scrolls there
+ * too. The walk reports such a stop under its own name rather than counting it
+ * against the authored list.
+ */
+async function readVisit(page, inside) {
+  return page.evaluate((within) => {
+    const element = document.activeElement;
+    if (element === null || element === document.body) return null;
+    const held = within
+      ? element.closest('[data-el]')
+      : element.closest('[data-composite]') || element.closest('[data-el]');
+    return {
+      name: held === null ? `an unnamed ${element.tagName.toLowerCase()}` : held.dataset.el,
+      implicit: !element.hasAttribute('tabindex') && element.scrollHeight > element.clientHeight,
+    };
+  }, inside);
+}
+
+const MARK = 'data-walk-mark';
+
+async function markFocus(page) {
+  await page.evaluate((attribute) => {
+    if (document.activeElement !== null) document.activeElement.setAttribute(attribute, '');
+  }, MARK);
+}
+
+async function focusMoved(page) {
+  return page.evaluate((attribute) => {
+    const still = document.activeElement !== null && document.activeElement.hasAttribute(attribute);
+    for (const held of document.querySelectorAll(`[${attribute}]`)) held.removeAttribute(attribute);
+    return !still;
+  }, MARK);
+}
+
+/**
+ * Walk the screen with the keys a player presses.
+ *
+ * At every Tab stop the walk presses one arrow key. Focus that moves means a
+ * composite the arrows walk, and the walk follows it until it comes back.
+ * Focus that stays means a control whose arrows change a value, so the press is
+ * undone and no inner visit is recorded. Nothing in the rule knows the answer.
+ */
+async function walkShell(page, cap) {
+  const visits = [];
+  let firstStop = null;
+  for (let stops = 0; stops < cap; stops += 1) {
+    await page.keyboard.press('Tab');
+    const stop = await readVisit(page, false);
+    if (stop === null) break;
+    if (stops > 0 && stop.name === firstStop) break;
+    if (firstStop === null) firstStop = stop.name;
+    visits.push({ name: stop.name, by: 'tab', implicit: stop.implicit });
+
+    await markFocus(page);
+    await page.keyboard.press('ArrowRight');
+    if (!(await focusMoved(page))) {
+      await page.keyboard.press('ArrowLeft');
+      continue;
+    }
+    // The cell the focus started on is the first inner visit.
+    await page.keyboard.press('ArrowLeft');
+    const start = await readVisit(page, true);
+    visits.push({ name: start.name, by: 'arrow', implicit: false });
+    for (let taken = 0; taken < 20; taken += 1) {
+      await page.keyboard.press('ArrowRight');
+      const inner = await readVisit(page, true);
+      if (inner === null || inner.name === start.name) break;
+      visits.push({ name: inner.name, by: 'arrow', implicit: false });
+    }
+  }
+  return visits;
+}
+
+async function runShell(page, options, checks) {
+  const design = readFileSync(join(here, '..', 'docs', 'design', '0002-screen-design.md'), 'utf8');
+  const list = beforeThrowVisits(design);
+  console.log(`browser: shell before_throw_visits=${list.names.length} stated=${list.stated}`);
+  checks.push({
+    name: 'shell.the-document-counts-its-own-list',
+    ok: list.names.length === list.stated && list.stated > 0,
+    detail:
+      `section 6 numbers ${list.names.length} items and states ${list.stated} visits in words. ` +
+      `The walk below is compared against that list, so an empty list would prove nothing.`,
+  });
+
+  // The walk runs on the screen as it opens, which is rest A with an empty
+  // pool. The roving tab index sits on the first tile there, and a press moves
+  // it, so the walk has to come before anything presses a tile.
+  const visits = await walkShell(page, list.stated + 8);
+  const named = visits.filter((visit) => !visit.implicit);
+  const implicit = visits.filter((visit) => visit.implicit).map((visit) => visit.name);
+  const walked = named.map((visit) => visit.name);
+  const positions = (by) => named.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
+  console.log(
+    `browser: shell walked=[${walked.join(', ')}] ` +
+      `implicit_scroll_stops=${implicit.length} [${implicit.join(', ')}]`,
+  );
+  checks.push({
+    name: 'shell.the-keyboard-order-before-the-throw',
+    ok:
+      walked.length === list.stated &&
+      walked.every((name, index) => name === list.names[index]) &&
+      String(positions('tab')) === String(list.tab) &&
+      String(positions('arrow')) === String(list.arrow),
+    detail:
+      `real Tab and arrow presses reached ${walked.length} authored visits against the ` +
+      `${list.stated} section 6 names. Walked [${walked.join(', ')}]. ` +
+      `Wanted [${list.names.join(', ')}]. Tab reached items [${positions('tab')}] against ` +
+      `[${list.tab}], and the arrows reached [${positions('arrow')}] against [${list.arrow}]. ` +
+      `The browser added ${implicit.length} scroll stops of its own, at ` +
+      `[${implicit.join(', ')}]. They are reported and not counted: a scrollable box earns a ` +
+      `tab stop from the browser so a keyboard can scroll it, the markup asks for none, and ` +
+      `the drawn screen earns the same ones.`,
+  });
+
+  // The drawn pool next, so the capture shows the case that fails first: every
+  // tile at its cap.
+  const built = await page.evaluate(async (plan) => {
+    let clicks = 0;
+    for (const [type, count] of plan) {
+      const end = document.querySelector(`[data-el="pool-cell-${type}"] .cell-p`);
+      if (end === null) continue;
+      for (let taken = 0; taken < count; taken += 1) {
+        end.click();
+        clicks += 1;
+      }
+    }
+    // The shell renders on a later task, so the reading waits for a frame.
+    await new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+    const line = document.querySelector('[data-el="status-line"] .sr-only');
+    return { clicks, spoken: line === null ? null : (line.textContent || '').trim() };
+  }, SHELL_DRAWN_POOL);
+  const wanted = SHELL_DRAWN_POOL.reduce((sum, [, count]) => sum + count, 0);
+  checks.push({
+    name: 'shell.the-pool-builds-under-a-pointer',
+    ok: built.clicks === wanted && (built.spoken || '').includes(`takes ${wanted} dice`),
+    detail:
+      `${built.clicks} of the ${wanted} presses the drawn pool needs landed, and the live ` +
+      `region reads ${JSON.stringify(built.spoken)}.`,
+  });
+
+  if (options.captureShell !== null) {
+    for (const size of SHELL_WIDTHS) {
+      await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: 1 });
+      const path = join(options.captureShell, `shell-builder-${size.name}.png`);
+      await page.screenshot({ path });
+      console.log(`browser: shell captured ${size.name} to ${path}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing and the run
 // ---------------------------------------------------------------------------
 
@@ -5571,6 +5824,8 @@ function parseArgs(argv) {
     settingsStore: false,
     share: false,
     offline: false,
+    shell: false,
+    captureShell: null,
     captureLater: false,
     longTaskMs: 0,
     quotaKb: null,
@@ -5610,6 +5865,8 @@ function parseArgs(argv) {
     else if (arg === '--settings-store') options.settingsStore = true;
     else if (arg === '--share') options.share = true;
     else if (arg === '--offline') options.offline = true;
+    else if (arg === '--shell') options.shell = true;
+    else if (arg === '--capture-shell') options.captureShell = next();
     else if (arg === '--capture-later') options.captureLater = true;
     else if (arg === '--long-task-ms') options.longTaskMs = Number(next());
     else if (arg === '--quota-kb') options.quotaKb = Number(next());
@@ -5663,12 +5920,17 @@ function parseArgs(argv) {
     ['--settings-store', options.settingsStore],
     ['--share', options.share],
     ['--offline', options.offline],
+    ['--shell', options.shell],
   ];
   const named = MODES.filter(([, on]) => on).map(([flag]) => flag);
   if (named.length > 0 && options.url === null) {
     throw new Error(
       `${named[0]} needs --url, and the url must be ` +
-        `${options.offline ? 'a preview server over the built output' : 'a Vite dev server'}`,
+        `${
+          options.offline || options.shell
+            ? 'a preview server over the built output'
+            : 'a Vite dev server'
+        }`,
     );
   }
   if (named.length > 1) {
@@ -5682,6 +5944,9 @@ function parseArgs(argv) {
   }
   if (options.captureLater && !options.share) {
     throw new Error('--capture-later belongs to --share');
+  }
+  if (options.captureShell !== null && !options.shell) {
+    throw new Error('--capture-shell belongs to --shell');
   }
   if (options.longTaskMs !== 0) {
     if (!options.logStore && !options.logCsv) {
@@ -5707,7 +5972,7 @@ async function run(options) {
   // a url that somebody else is serving.
   let server = null;
   try {
-    if (options.offline) {
+    if (options.offline || options.shell) {
       server = await startPreviewServer(options.url, join(here, '..'));
     }
     if (
@@ -5784,6 +6049,8 @@ async function run(options) {
       await runShareCard(page, options, checks);
     } else if (options.offline) {
       await runOffline(page, options, checks, server);
+    } else if (options.shell) {
+      await runShell(page, options, checks);
     } else if (!options.url) {
       await selfTestCentroid(page, checks);
       await selfTestUpFace(page, checks);
