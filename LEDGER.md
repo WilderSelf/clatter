@@ -6599,6 +6599,43 @@ before the merge points at a commit that never reached `main`.
 
 The tag name carries the version alone. No branding token reaches it.
 
+**Recorded after the merge**, because none of it could exist before it. This section landed in a
+second `docs:` pull request for that reason.
+
+| Fact | Value |
+|---|---|
+| Tag | `v0.1.0`, annotated object `32a2988` |
+| Commit the tag points at | `495f0e1c46962367f5d8331cd3e855fd306d69bf`, the squash merge of #23 |
+| Tag push | `git push origin v0.1.0`, exit 0. The push was not refused. A tag ref is not `main`, so the workspace deny rule did not match it. |
+| Release | `https://github.com/WilderSelf/clatter/releases/tag/v0.1.0` |
+| Release notes | Written in Simplified Technical English, and read by hand. The gate reads no release, so `node scripts/check-branding.mjs --file` was run over the notes file before publication: `files_scanned=1 hits=0`, exit 0. |
+| Deploy | `Deploy to Pages` run 31423327490 on the merge commit, success |
+
+### The live site, checked after the tag
+
+Every URL below was **read out of the returned bytes** and never guessed. `index.html` names four.
+The manifest names its two icons. `registerSW.js` names the worker. `sw.js` names the workbox
+runtime and the lazy 3D chunk. A wrong base path answers 200 with a blank screen, which is why Unit
+0.6 made this rule.
+
+| URL | Status | Bytes | Named by |
+|---|---|---|---|
+| `https://wilderself.github.io/clatter/` | 200 | 544 | the request |
+| `/clatter/assets/index-BAu952uK.css` | 200 | 18,620 | `index.html` |
+| `/clatter/assets/index-DFU4cuyh.js` | 200 | 129,474 | `index.html` |
+| `/clatter/manifest.webmanifest` | 200 | 425 | `index.html` |
+| `/clatter/registerSW.js` | 200 | 150 | `index.html` |
+| `/clatter/icons/icon-192.png` | 200 | 1,173 | the manifest |
+| `/clatter/icons/icon-512.png` | 200 | 3,674 | the manifest |
+| `/clatter/sw.js` | 200 | 1,287 | `registerSW.js` |
+| `/clatter/workbox-9c191d2f.js` | 200 | 15,112 | `sw.js` |
+| `/clatter/assets/dice-tray-Cz13SOUC.js` | 200 | 596,587 | `sw.js` |
+
+**The hashes match the build the tag points at.** `main` was confirmed to be at
+`495f0e1c46962367f5d8331cd3e855fd306d69bf` with a clean tree, `npm run build` ran, and each live
+file was compared to its built file by SHA-256. All 10 of 10 match. A status of 200 says a file
+answered. The digest says it is the same file.
+
 ### The branding gate, and which surfaces it actually reads
 
 ```
