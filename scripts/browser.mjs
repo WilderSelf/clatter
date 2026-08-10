@@ -10,7 +10,7 @@
 //                            [--sample-ms <n>] [--min-frames <n>]
 //                            [--capture <path>] [--browser <path>]
 //                            [--tray] [--pool] [--push] [--affordance] [--probe]
-//                            [--share] [--capture-later] [--offline]
+//                            [--share] [--share-controls] [--capture-later] [--offline]
 //                            [--shell] [--capture-shell <dir>] [--table] [--sheet]
 //
 // `--table` starts and stops its own preview server, because it drives the
@@ -145,12 +145,30 @@
 // `--long-task-ms <n>` blocks the main thread inside the export, so the
 // long-task check can be shown to fail.
 //
-// `--share` needs `--url`. It is the capture half of Unit 4.9. It throws a
-// mixed pool, captures the tray through `src/tray/capture.ts`, and measures the
+// `--share` needs `--url`. It is the pixel half of Unit 4.9. It throws a legal
+// pool, makes a card of it in every one of the six interface palettes through
+// `src/tray/capture.ts` and `src/shell/share-card.ts`, and measures the
 // luminance variance and the count of distinct pixel values over the decoded
-// JPEG. `--capture <path>` writes the card. `--capture-later` copies the canvas
-// in a later task than the one that drew it, which is the black-frame defect,
-// so both measures can be shown to fail.
+// JPEG **outside the panel**, because a panel of text carries both by itself.
+// It reads every run's ink and the panel ground off the drawn pixels, and it
+// measures every run against the box it had to fit. `--capture <path>` writes
+// one card, `--capture-shell <dir>` writes all six. `--capture-later` copies
+// the canvas in a later task than the one that drew it, which is the
+// black-frame defect, so both measures can be shown to fail.
+//
+// `--share-controls` needs `--url` over a **preview** server, because it drives
+// the BUILT application. It is the interface half of Unit 4.9: it throws a pool
+// on the table, opens the one disclosure, makes a card the way a player does,
+// and judges the three things only a real browser answers. It compares the file
+// the download button hands the browser BYTE FOR BYTE against the data URL the
+// preview carries, walks every control with real Tab presses, and reads the
+// browser's own `navigator.canShare` for this very file. Where the browser
+// offers no share target the send control must be absent, and the check that
+// would judge the call prints NOT JUDGED and counts in `skipped=`.
+// `--capture-shell <dir>` writes one frame of the panel.
+// Build first, then run it alone:
+//   npm run build && node scripts/browser.mjs --share-controls \
+//     --url http://localhost:4173/clatter/ --capture-shell docs/design
 //
 // `--settings-store` needs `--url`. It is the `localStorage` half of Unit 4.1.
 // It drives `src/settings/local-store.ts` against the page's own storage: a
@@ -302,22 +320,52 @@ export function readUpFace({ quaternion, faceNormals }) {
  * variance is in luma levels squared and a standard deviation reads as a number
  * of levels. The variance is taken in two passes, so no cancellation between
  * two large sums can hide a small spread.
+ *
+ * **`region` is what makes both measures still able to fail once a summary is
+ * drawn on the card.** Unit 4.9 lays an opaque panel of text over the frame,
+ * and that panel alone carries variance and thousands of distinct values. A
+ * measure over the whole card would therefore pass on a cleared drawing buffer,
+ * which is exactly the defect the two measures exist to catch. Passing
+ * `{ width, exclude }` counts only the pixels OUTSIDE the panel, which is the
+ * photograph. `pixels` is then the counted denominator of that region.
  */
-export function measureFrame(pixels) {
+export function measureFrame(pixels, region = null) {
   const luma = (i) => 0.2126 * pixels[i] + 0.7152 * pixels[i + 1] + 0.0722 * pixels[i + 2];
-  const count = Math.floor(pixels.length / 4);
-  if (count < 1) throw new Error('measureFrame: the image holds no pixels');
+  const total = Math.floor(pixels.length / 4);
+  if (total < 1) throw new Error('measureFrame: the image holds no pixels');
+  let inside = () => true;
+  if (region !== null) {
+    const { width, exclude } = region;
+    if (!Number.isInteger(width) || width < 1) {
+      throw new Error(`measureFrame: a region needs a row width, and it was given ${width}`);
+    }
+    const left = Math.floor(exclude.x);
+    const top = Math.floor(exclude.y);
+    const right = Math.ceil(exclude.x + exclude.w);
+    const bottom = Math.ceil(exclude.y + exclude.h);
+    inside = (i) => {
+      const at = i / 4;
+      const x = at % width;
+      const y = (at - x) / width;
+      return !(x >= left && x < right && y >= top && y < bottom);
+    };
+  }
   const distinct = new Set();
+  let count = 0;
   let sum = 0;
-  for (let i = 0; i < count * 4; i += 4) {
+  for (let i = 0; i < total * 4; i += 4) {
+    if (!inside(i)) continue;
+    count += 1;
     sum += luma(i);
     // One value per pixel, as a packed sRGB triple. Alpha is left out: a JPEG
     // carries none, and a channel that is 255 everywhere would add nothing.
     distinct.add((pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2]);
   }
+  if (count < 1) throw new Error('measureFrame: the region holds no pixels');
   const mean = sum / count;
   let squares = 0;
-  for (let i = 0; i < count * 4; i += 4) {
+  for (let i = 0; i < total * 4; i += 4) {
+    if (!inside(i)) continue;
     const away = luma(i) - mean;
     squares += away * away;
   }
@@ -5004,13 +5052,24 @@ async function runLogCsv(page, options, checks) {
 }
 
 // ---------------------------------------------------------------------------
-// The share card — Unit 4.9, the capture half
+// The share card — Unit 4.9
 //
 // `src/tray/capture.ts` draws one fresh frame through the exposed renderer and
-// copies it in the same task. This mode throws a mixed pool, runs that capture
-// over the settled tray, and asks the two questions the plan wrote. Neither one
-// asks what the picture is of, because "the image contains the dice" passes on
-// a frame that is half drawn.
+// copies it in the same task, and `src/shell/share-card.ts` lays the summary
+// over that copy **inside the same task**. This mode throws a mixed pool, makes
+// a card out of it in every one of the six interface palettes, and measures the
+// pixels that came back.
+//
+// **The two acceptance measures run over the PHOTOGRAPH, not over the whole
+// card.** A panel of text carries variance and thousands of distinct values all
+// by itself, so a measure over the whole card would pass on a cleared drawing
+// buffer — which is the very defect the two measures exist to catch. The panel
+// is excluded by the box the layout names, and the two pixel counts are added
+// up against the size of the card, so nothing can be excluded twice.
+//
+// **The oracle is the rules core, run in node.** The summary the page drew is
+// compared against a card this file builds from the same seed through
+// `src/shell/state.ts` and `src/shell/share-card.ts`, in another engine.
 //
 // `--capture-later` splits the render away from the copy and puts the copy in a
 // later task, which is the defect the unit exists to avoid. It is the red-proof
@@ -5031,75 +5090,317 @@ async function runLogCsv(page, options, checks) {
 const SHARE_MIN_LUMA_VARIANCE = 25;
 /** More than 1,000 distinct pixel values, as the plan's acceptance states. */
 const SHARE_MIN_DISTINCT_VALUES = 1000;
+/** WCAG 2.2 SC 1.4.3, level AA. The card is drawn, so it owes this itself. */
+const SHARE_TEXT_CONTRAST_MIN = 4.5;
 
 /**
- * Capture the tray and measure the image that comes back.
+ * The pool the card is made of.
  *
- * The measurement runs over the **decoded JPEG**, not over the canvas, so the
- * encode is inside what the two acceptance measures cover. Decoding is a check
- * and may await as much as it likes. The capture may not, which is why it is
- * one synchronous call.
+ * It is a **legal** pool, built through `src/shell/state.ts` exactly as the
+ * builder builds one, and not the every-type-every-face fixture `--pool` uses.
+ * A card carries the readings of a roll, and the rules core answers no success
+ * curve for a gear die of eight faces, so a fixture pool has no readings at
+ * all. The artifact rating of 4 puts a d12 and a d8 on the table, so the card
+ * still shows more than one face count.
  */
-async function captureShareCard(page, pageUrl, surface, laterTask) {
-  const moduleUrl = new URL('src/tray/capture.ts', pageUrl).href;
-  return page.evaluate(
-    async ({ moduleUrl, surface, laterTask }) => {
-      const box = window.__clatterTray;
-      const capture = await import(moduleUrl);
-      const drawn = box.renderer.domElement;
+const SHARE_POOL_COUNTS = { attribute: 5, skill: 5, gear: 3, artifact: 4, bonus: 2, stress: 5 };
 
-      let url;
-      if (laterTask) {
-        // THE INJECTED DEFECT. The same render and the same copy, in two tasks
-        // instead of one. The browser clears the drawing buffer once it has
-        // composited the frame, so the copy reads an empty canvas.
-        box.renderer.render(box.scene, box.camera);
-        await new Promise((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0))),
-        );
-        const flat = document.createElement('canvas');
-        flat.width = drawn.width;
-        flat.height = drawn.height;
-        const context = flat.getContext('2d');
-        context.fillStyle = surface;
-        context.fillRect(0, 0, flat.width, flat.height);
-        context.drawImage(drawn, 0, 0);
-        url = flat.toDataURL('image/jpeg', capture.SHARE_JPEG_QUALITY);
-      } else {
-        url = capture.captureTrayJpeg(box);
+/**
+ * The state the card is made from.
+ *
+ * It takes every module it needs as an argument, because its source is copied
+ * into the page as well as run here. One derivation, run in two engines, so a
+ * card built in node and a card built in the browser cannot be built two ways.
+ */
+function shareState(stateMod, seededMod, seed, counts) {
+  const built = { ...stateMod.emptyState('pool'), counts };
+  return stateMod.rollNow(built, seededMod.seededRandom(seed));
+}
+
+/**
+ * Throw that pool on the tray.
+ *
+ * The dice the tray acts out are the dice the rules core decided, so the
+ * photograph and the summary are the same roll.
+ */
+async function throwShareScene(page, pageUrl, seed) {
+  const modules = ['src/rules/seeded-random.ts', 'src/shell/state.ts', 'src/tray/throw.ts'].map(
+    (path) => new URL(path, pageUrl).href,
+  );
+  return page.evaluate(
+    async ({ modules, counts, seed, source }) => {
+      const [seededMod, stateMod, thrower] = await Promise.all(modules.map((url) => import(url)));
+      // The state is built by the SAME function node builds it with, copied
+      // into the page, so neither engine reads the other's answer.
+      const state = (0, eval)(`(${source})`)(stateMod, seededMod, seed, counts);
+      const box = window.__clatterTray;
+      const ordered = await thrower.throwPool(box, state.result, {});
+      return ordered.map((one) => ({ id: one.id, type: one.type, faces: one.faces }));
+    },
+    { modules, counts: SHARE_POOL_COUNTS, seed, source: shareState.toString() },
+  );
+}
+
+/**
+ * The widest card the readings can make.
+ *
+ * Every number is at two digits, which is the widest a reading gets: the pool
+ * caps at twenty-five dice and the stress at ten, and a push count over ninety
+ * nine is not a session anybody plays. It is measured and never drawn, so the
+ * fit check below covers the whole range of the readings rather than the one
+ * roll that was thrown. This is the shape the first draft got wrong: the run's
+ * BOX fitted the panel and the TEXT inside it did not.
+ */
+const WIDEST_SHARE_CARD = {
+  title: 'Clatter',
+  successLine: '88 successes',
+  baneLine: '88 banes',
+  readings: [
+    { key: 'dice', text: '88 dice' },
+    { key: 'kept', text: '88 kept' },
+    { key: 'inTheCup', text: '88 in the cup' },
+    { key: 'stress', text: 'stress 88' },
+    { key: 'pushes', text: '88 pushes' },
+  ],
+  alt: '',
+};
+
+/** `[r, g, b]` as the `rgb()` text `ratioOfRgb` reads. */
+function rgbText(channels) {
+  return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+}
+
+/** `#RRGGBB` as `[r, g, b]`, so a palette row and a drawn pixel compare. */
+function channelsOfHex(hex) {
+  return [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+}
+
+/**
+ * Make one card per interface palette and measure every one of them.
+ *
+ * Three things come back for each palette and each one is read off the DRAWN
+ * pixels rather than off the palette:
+ *
+ *   * the ground of the panel, as the commonest colour inside its boundary;
+ *   * the ink of every run, as the pixel inside that run's box whose luma is
+ *     furthest from the ground. The panel is opaque, so every pixel in it is a
+ *     blend of the ground and one ink and the furthest one is the ink itself.
+ *     A run the draw loop skipped leaves a box of pure ground, and its ink then
+ *     comes back as the ground, which fails by name;
+ *   * the two acceptance measures, over the decoded JPEG with the panel taken
+ *     out of the count.
+ *
+ * The pixels are read INSIDE the overlay, which is inside the task that drew
+ * the frame and copied it, and before the encode. So the colours judged are
+ * the colours drawn, and the JPEG is judged separately for what it is for.
+ */
+async function composeShareCards(page, pageUrl, seed, surface, laterTask) {
+  const modules = [
+    'src/rules/seeded-random.ts',
+    'src/shell/state.ts',
+    'src/shell/share-card.ts',
+    'src/theme/themes.ts',
+    'src/tray/capture.ts',
+  ].map((path) => new URL(path, pageUrl).href);
+  return page.evaluate(
+    async ({ modules, counts, seed, surface, laterTask, source, worst }) => {
+      const [seededMod, stateMod, cardMod, themesMod, captureMod] = await Promise.all(
+        modules.map((url) => import(url)),
+      );
+
+      // The same roll the tray is showing, rebuilt from the same seed through
+      // the rules core, by the same derivation node runs.
+      const state = (0, eval)(`(${source})`)(stateMod, seededMod, seed, counts);
+      const summary = cardMod.shareCard(state);
+
+      const box = window.__clatterTray;
+      const drawn = box.renderer.domElement;
+      const layout = cardMod.layoutShareCard(summary, drawn.width, drawn.height);
+
+      const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const read = (pixels, width, x, y) => {
+        const at = (y * width + x) * 4;
+        return [pixels[at], pixels[at + 1], pixels[at + 2]];
+      };
+
+      /** The commonest colour inside the panel, and every run's ink. */
+      const readPanel = (pixels, width, height) => {
+        const panel = layout.panel;
+        // Inside the boundary, which is drawn in a third colour.
+        const border = Math.ceil((layout.height / 900) * 4);
+        const left = Math.max(0, Math.round(panel.x) + border);
+        const top = Math.max(0, Math.round(panel.y) + border);
+        const right = Math.min(width, Math.round(panel.x + panel.w) - border);
+        const bottom = Math.min(height, Math.round(panel.y + panel.h) - border);
+        const seen = new Map();
+        for (let y = top; y < bottom; y += 1) {
+          for (let x = left; x < right; x += 1) {
+            const key = read(pixels, width, x, y).join(',');
+            seen.set(key, (seen.get(key) ?? 0) + 1);
+          }
+        }
+        let ground = null;
+        let most = -1;
+        for (const [key, count] of seen) {
+          if (count > most) {
+            most = count;
+            ground = key.split(',').map(Number);
+          }
+        }
+        const groundLuma = luma(ground[0], ground[1], ground[2]);
+        const runs = layout.runs.map((run) => {
+          const x0 = Math.max(0, Math.floor(run.box.x));
+          const y0 = Math.max(0, Math.floor(run.box.y));
+          const x1 = Math.min(width, Math.ceil(run.box.x + run.box.w));
+          const y1 = Math.min(height, Math.ceil(run.box.y + run.box.h));
+          let ink = ground;
+          let away = -1;
+          let marked = 0;
+          for (let y = y0; y < y1; y += 1) {
+            for (let x = x0; x < x1; x += 1) {
+              const pixel = read(pixels, width, x, y);
+              const distance = Math.abs(luma(pixel[0], pixel[1], pixel[2]) - groundLuma);
+              if (distance > 0.5) marked += 1;
+              if (distance > away) {
+                away = distance;
+                ink = pixel;
+              }
+            }
+          }
+          return { id: run.id, text: run.text, want: run.ink, ink, marked };
+        });
+        return { ground, groundPixels: most, runs };
+      };
+
+      const cards = [];
+      for (const name of themesMod.THEME_IDS) {
+        const palette = themesMod.INTERFACE_PALETTES[name];
+        let panel = null;
+        let fitted = null;
+        let url;
+        if (laterTask) {
+          // THE INJECTED DEFECT. The same render and the same copy, in two
+          // tasks instead of one. The browser clears the drawing buffer once it
+          // has composited the frame, so the copy reads an empty canvas. The
+          // summary is still drawn over it, which is the whole point: a card
+          // with a panel on it still looks like a card.
+          box.renderer.render(box.scene, box.camera);
+          await new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0))),
+          );
+          const flat = document.createElement('canvas');
+          flat.width = drawn.width;
+          flat.height = drawn.height;
+          const context = flat.getContext('2d');
+          context.fillStyle = surface;
+          context.fillRect(0, 0, flat.width, flat.height);
+          context.drawImage(drawn, 0, 0);
+          fitted = cardMod.drawShareCard(context, layout, palette);
+          panel = readPanel(
+            context.getImageData(0, 0, flat.width, flat.height).data,
+            flat.width,
+            flat.height,
+          );
+          url = flat.toDataURL('image/jpeg', captureMod.SHARE_JPEG_QUALITY);
+        } else {
+          url = captureMod.captureTrayJpeg(box, {
+            surface,
+            overlay: (context, size) => {
+              fitted = cardMod.drawShareCard(context, layout, palette);
+              // Read back inside the same task, after the draw and before the
+              // encode, so the colours judged are the colours drawn.
+              panel = readPanel(
+                context.getImageData(0, 0, size.width, size.height).data,
+                size.width,
+                size.height,
+              );
+            },
+          });
+        }
+        cards.push({ name, url, panel, fitted, palette });
       }
 
+      // The decoded JPEG of the first card, measured twice: over the whole
+      // frame, and over the photograph with the panel taken out.
+      const first = cards[0];
       const image = new Image();
-      image.src = url;
+      image.src = first.url;
       await image.decode();
       const back = document.createElement('canvas');
       back.width = image.naturalWidth;
       back.height = image.naturalHeight;
-      const context = back.getContext('2d');
-      context.drawImage(image, 0, 0);
-      const data = context.getImageData(0, 0, back.width, back.height).data;
+      const backContext = back.getContext('2d');
+      backContext.drawImage(image, 0, 0);
+      const data = backContext.getImageData(0, 0, back.width, back.height).data;
 
       return {
-        url,
-        mediaType: url.slice(0, url.indexOf(';')),
+        summary,
+        layout,
+        cards: cards.map((card) => ({
+          name: card.name,
+          url: card.url,
+          panel: card.panel,
+          fitted: card.fitted,
+        })),
+        // The widest card the readings can make, measured and never drawn. It
+        // is built in node and handed in, so this is a bound over the whole
+        // range of the readings rather than over the one roll that was thrown.
+        widest: (() => {
+          const wide = cardMod.layoutShareCard(worst, drawn.width, drawn.height);
+          const probe = document.createElement('canvas').getContext('2d');
+          return wide.runs.map((run) => {
+            probe.font = `${run.weight} ${run.size}px ${cardMod.CARD_FONT_STACK}`;
+            return {
+              id: run.id,
+              text: run.text,
+              width: probe.measureText(run.text).width,
+              boxWidth: run.box.w,
+            };
+          });
+        })(),
+        mediaType: first.url.slice(0, first.url.indexOf(';')),
         buffer: [drawn.width, drawn.height],
         decoded: [image.naturalWidth, image.naturalHeight],
-        measure: window.__clatter.measureFrame(data),
+        whole: window.__clatter.measureFrame(data),
+        photograph: window.__clatter.measureFrame(data, {
+          width: back.width,
+          exclude: layout.panel,
+        }),
         preserved: box.renderer.getContext().getContextAttributes().preserveDrawingBuffer,
       };
     },
-    { moduleUrl, surface, laterTask },
+    {
+      modules,
+      counts: SHARE_POOL_COUNTS,
+      seed,
+      surface,
+      laterTask,
+      source: shareState.toString(),
+      worst: WIDEST_SHARE_CARD,
+    },
   );
 }
 
 async function runShareCard(page, options, checks) {
+  // The oracle is the application's own modules, imported here as source.
+  // `scripts/ts-resolve.mjs` supplies the extension Vite would have supplied,
+  // so this file builds the same card the page built and never a copy of it.
+  register('./ts-resolve.mjs', import.meta.url);
+  const seededMod = await import('../src/rules/seeded-random.ts');
+  const stateMod = await import('../src/shell/state.ts');
+  const cardMod = await import('../src/shell/share-card.ts');
+  const themesMod = await import('../src/theme/themes.ts');
+
   // No `preserveDrawingBuffer` in the configuration. The plan rejects the flag,
   // and a run that set it would prove nothing about the order the capture runs
   // in.
   const mounted = await mountTrayScene(page, options.url, null);
   await installHelpers(page);
-  const rows = await throwPoolScene(page, options.url, POOL_SEED);
-  const expected = POOL_TYPES.length * POOL_FACES.length;
+  const rows = await throwShareScene(page, options.url, POOL_SEED);
+  // The denominator is the rules core's own answer for this pool, computed in
+  // node. A tray that dropped a die fails against it.
+  const oracleState = shareState(stateMod, seededMod, POOL_SEED, SHARE_POOL_COUNTS);
+  const expected = oracleState.result.dice.length;
   console.log(
     `browser: share pool_seed=${POOL_SEED} dice=${rows.length} css=${mounted.css.join('x')} ` +
       `buffer=${mounted.buffer.join('x')} pixel_ratio=${mounted.pixelRatio} ` +
@@ -5119,23 +5420,28 @@ async function runShareCard(page, options, checks) {
       (rest.outside.length ? ` [${rest.outside.join('; ')}]` : ''),
   });
 
-  const shot = await captureShareCard(
+  const shot = await composeShareCards(
     page,
     options.url,
+    POOL_SEED,
     mounted.surface,
     options.captureLater === true,
   );
-  const bytes = Buffer.from(shot.url.slice(shot.url.indexOf(',') + 1), 'base64');
+  const first = shot.cards[0];
+  const bytes = Buffer.from(first.url.slice(first.url.indexOf(',') + 1), 'base64');
   const header = readJpeg(bytes);
-  const { measure } = shot;
   console.log(
     `browser: share capture media_type=${shot.mediaType} bytes=${bytes.length} ` +
       `canvas=${shot.buffer.join('x')} declared=${header.ok ? `${header.width}x${header.height}` : 'none'} ` +
-      `decoded=${shot.decoded.join('x')}`,
+      `decoded=${shot.decoded.join('x')} cards=${shot.cards.length}`,
   );
   console.log(
-    `browser: share frame pixels=${measure.pixels} mean_luma=${measure.mean.toFixed(2)} ` +
-      `luma_variance=${measure.variance.toFixed(2)} distinct_values=${measure.distinct}`,
+    `browser: share frame whole_pixels=${shot.whole.pixels} ` +
+      `whole_variance=${shot.whole.variance.toFixed(2)} ` +
+      `whole_distinct=${shot.whole.distinct} photograph_pixels=${shot.photograph.pixels} ` +
+      `mean_luma=${shot.photograph.mean.toFixed(2)} ` +
+      `luma_variance=${shot.photograph.variance.toFixed(2)} ` +
+      `distinct_values=${shot.photograph.distinct}`,
   );
 
   const sized =
@@ -5154,20 +5460,207 @@ async function runShareCard(page, options, checks) {
       : `${bytes.length} bytes, and ${header.reason}`,
   });
 
+  // The panel is counted out of the photograph, and the two counts are added
+  // back up against the size of the card, so no region can be dropped or
+  // counted twice.
+  const panelPixels =
+    (Math.ceil(shot.layout.panel.x + shot.layout.panel.w) - Math.floor(shot.layout.panel.x)) *
+    (Math.ceil(shot.layout.panel.y + shot.layout.panel.h) - Math.floor(shot.layout.panel.y));
+  checks.push({
+    name: 'share.the-photograph-and-the-panel-account-for-every-pixel',
+    ok:
+      shot.photograph.pixels + panelPixels === shot.whole.pixels &&
+      shot.whole.pixels === shot.buffer[0] * shot.buffer[1] &&
+      shot.photograph.pixels > 0,
+    detail:
+      `the card holds ${shot.whole.pixels} pixels, the panel covers ${panelPixels} of them, and ` +
+      `the photograph is the other ${shot.photograph.pixels}. The two measures below run over ` +
+      `the photograph alone, because a panel of text carries variance and thousands of ` +
+      `distinct values by itself and would pass them on a cleared buffer.`,
+  });
+
   checks.push({
     name: 'share.luminance-variance-above-the-floor',
-    ok: measure.variance > SHARE_MIN_LUMA_VARIANCE,
+    ok: shot.photograph.variance > SHARE_MIN_LUMA_VARIANCE,
     detail:
-      `variance=${measure.variance.toFixed(2)} luma levels squared against a floor of ` +
-      `${SHARE_MIN_LUMA_VARIANCE}, over ${measure.pixels} pixels of the decoded JPEG, ` +
-      `mean luma ${measure.mean.toFixed(2)}. A cleared buffer is one colour and reads 0.`,
+      `variance=${shot.photograph.variance.toFixed(2)} luma levels squared against a floor of ` +
+      `${SHARE_MIN_LUMA_VARIANCE}, over ${shot.photograph.pixels} pixels of the decoded JPEG ` +
+      `outside the panel, mean luma ${shot.photograph.mean.toFixed(2)}. A cleared buffer is one ` +
+      `colour and reads 0. The whole card, panel included, reads ` +
+      `${shot.whole.variance.toFixed(2)}.`,
   });
   checks.push({
     name: 'share.distinct-pixel-values',
-    ok: measure.distinct > SHARE_MIN_DISTINCT_VALUES,
+    ok: shot.photograph.distinct > SHARE_MIN_DISTINCT_VALUES,
     detail:
-      `distinct=${measure.distinct} packed sRGB values against a floor of more than ` +
-      `${SHARE_MIN_DISTINCT_VALUES}, over ${measure.pixels} pixels of the decoded JPEG`,
+      `distinct=${shot.photograph.distinct} packed sRGB values against a floor of more than ` +
+      `${SHARE_MIN_DISTINCT_VALUES}, over ${shot.photograph.pixels} pixels of the decoded JPEG ` +
+      `outside the panel. The whole card, panel included, reads ${shot.whole.distinct}.`,
+  });
+
+  // ---- The summary equals the roll it was made from ----
+  //
+  // The oracle runs HERE, in node, over the roll rebuilt from the same seed
+  // through the rules core. The page never sees it.
+  const oracle = cardMod.shareCard(oracleState);
+  const oracleRuns = cardMod
+    .layoutShareCard(oracle, shot.buffer[0], shot.buffer[1])
+    .runs.map((run) => `${run.id}=${run.text}`);
+  const drawnRuns = shot.layout.runs.map((run) => `${run.id}=${run.text}`);
+  const wrongRuns = oracleRuns.flatMap((wanted, at) =>
+    drawnRuns[at] === wanted ? [] : [`${wanted} was drawn as ${drawnRuns[at] ?? 'nothing'}`],
+  );
+  console.log(
+    `browser: share summary runs=${drawnRuns.length} of ${oracleRuns.length} ` +
+      `[${drawnRuns.join(' | ')}]`,
+  );
+  checks.push({
+    name: 'share.the-summary-equals-the-roll',
+    ok:
+      wrongRuns.length === 0 &&
+      drawnRuns.length === oracleRuns.length &&
+      oracleRuns.length === 3 + cardMod.CARD_READING_KEYS.length &&
+      shot.summary.alt === oracle.alt,
+    detail:
+      `compared=${drawnRuns.length} of ${oracleRuns.length} runs, against a card built IN NODE ` +
+      `from the same seed through src/rules and src/shell/state.ts. The denominator is the ` +
+      `name, the two headline lines and one run per reading, and the module enumerates ` +
+      `${cardMod.CARD_READING_KEYS.length} readings. wrong=${wrongRuns.length}` +
+      `${wrongRuns.length === 0 ? '' : ` [${wrongRuns.join('; ')}]`}. The alternative text ` +
+      `${shot.summary.alt === oracle.alt ? 'matches' : 'DIFFERS FROM'} the one node built.`,
+  });
+
+  // ---- The card is legible in all six interface palettes ----
+  //
+  // The card is drawn and not styled, so this claim is measured on the drawn
+  // pixels of six real cards and never inherited from the stylesheet.
+  const groundFaults = [];
+  const inkFaults = [];
+  const contrastFaults = [];
+  let measured = 0;
+  let dimmest = Infinity;
+  for (const card of shot.cards) {
+    const palette = themesMod.INTERFACE_PALETTES[card.name];
+    const wantGround = channelsOfHex(palette.surface);
+    if (String(card.panel.ground) !== String(wantGround)) {
+      groundFaults.push(
+        `${card.name}: the panel drew ${rgbText(card.panel.ground)} against ` +
+          `${rgbText(wantGround)}`,
+      );
+    }
+    for (const run of card.panel.runs) {
+      const wantInk = channelsOfHex(palette[run.want]);
+      if (run.marked === 0) {
+        inkFaults.push(`${card.name}: ${run.id} marked no pixel of its own box`);
+      } else if (String(run.ink) !== String(wantInk)) {
+        inkFaults.push(
+          `${card.name}: ${run.id} drew ${rgbText(run.ink)} against ${rgbText(wantInk)}`,
+        );
+      }
+      const ratio = ratioOfRgb(rgbText(card.panel.ground), rgbText(run.ink));
+      if (ratio !== null && ratio < dimmest) dimmest = ratio;
+      if (ratio === null || ratio < SHARE_TEXT_CONTRAST_MIN) {
+        contrastFaults.push(
+          `${card.name}: ${run.id} reads ${ratio === null ? 'nothing' : ratio.toFixed(2)} to 1`,
+        );
+      }
+      measured += 1;
+    }
+  }
+  const runsPerCard = shot.layout.runs.length;
+  console.log(
+    `browser: share palettes cards=${shot.cards.length} runs_per_card=${runsPerCard} ` +
+      `measured=${measured} dimmest_reading=${dimmest === Infinity ? 'none' : dimmest.toFixed(2)}`,
+  );
+  checks.push({
+    name: 'share.the-panel-is-drawn-in-the-palette-in-force',
+    ok: groundFaults.length === 0 && shot.cards.length === themesMod.THEME_IDS.length,
+    detail:
+      `${shot.cards.length} cards against the ${themesMod.THEME_IDS.length} interface palettes, ` +
+      `each ground read as the commonest colour inside the panel boundary of the DRAWN card. ` +
+      `wrong=${groundFaults.length}` +
+      `${groundFaults.length === 0 ? '' : ` [${groundFaults.join('; ')}]`}`,
+  });
+  checks.push({
+    name: 'share.every-run-is-drawn-in-its-own-ink',
+    ok: inkFaults.length === 0 && measured === shot.cards.length * runsPerCard && measured > 0,
+    detail:
+      `read=${measured} of ${shot.cards.length * runsPerCard} runs, six palettes times ` +
+      `${runsPerCard} runs. Each ink is the pixel of that run's own box whose luma is furthest ` +
+      `from the ground: the panel is opaque, so every pixel in it is a blend of the ground and ` +
+      `one ink, and a run that drew nothing comes back as the ground. ` +
+      `wrong=${inkFaults.length}${inkFaults.length === 0 ? '' : ` [${inkFaults.join('; ')}]`}`,
+  });
+  checks.push({
+    name: 'share.the-card-is-legible-in-every-interface-palette',
+    ok: contrastFaults.length === 0 && measured === shot.cards.length * runsPerCard,
+    detail:
+      `measured=${measured} readings, six palettes times ${runsPerCard} runs, each one the ` +
+      `DRAWN ink against the DRAWN ground. The dimmest reads ` +
+      `${dimmest === Infinity ? 'nothing' : dimmest.toFixed(2)} to 1 against the ` +
+      `${SHARE_TEXT_CONTRAST_MIN} to 1 of WCAG 2.2 SC 1.4.3. ` +
+      `below=${contrastFaults.length}` +
+      `${contrastFaults.length === 0 ? '' : ` [${contrastFaults.join('; ')}]`}`,
+  });
+
+  // ---- Every run fits the panel, and the widest card does too ----
+  //
+  // **This is the check the first draft of this unit did not have.** The
+  // successes and the banes were one line, it ran past the side of the panel,
+  // and the last word landed on the photograph where nothing could read it.
+  // Every check was green, because the run's BOX fitted the panel and the TEXT
+  // inside the box did not, and a run's ink is only ever read inside its own
+  // box. A layout has no font and cannot know a width, so `drawShareCard`
+  // measures every run and reports what came out.
+  const overrun = [];
+  const shrunk = [];
+  let fitted = 0;
+  for (const card of shot.cards) {
+    for (const [at, run] of card.fitted.entries()) {
+      if (run.width > run.boxWidth) {
+        overrun.push(
+          `${card.name}: ${run.id} took ${run.width.toFixed(1)} px of a ${run.boxWidth.toFixed(1)} px box`,
+        );
+      }
+      const asked = shot.layout.runs[at];
+      if (asked !== undefined && run.size < asked.size) {
+        shrunk.push(`${card.name}: ${run.id} was fitted from ${asked.size} px to ${run.size} px`);
+      }
+      fitted += 1;
+    }
+  }
+  const wideOverrun = shot.widest.flatMap((run) =>
+    run.width > run.boxWidth
+      ? [
+          `${run.id} "${run.text}" takes ${run.width.toFixed(1)} px of ${run.boxWidth.toFixed(1)} px`,
+        ]
+      : [],
+  );
+  const widest = shot.widest.reduce((most, run) => Math.max(most, run.width / run.boxWidth), 0);
+  console.log(
+    `browser: share fit runs=${fitted} overrun=${overrun.length} shrunk=${shrunk.length} ` +
+      `widest_card_fill=${widest.toFixed(3)} of its box`,
+  );
+  checks.push({
+    name: 'share.every-run-is-drawn-inside-the-panel',
+    ok:
+      overrun.length === 0 &&
+      shrunk.length === 0 &&
+      wideOverrun.length === 0 &&
+      fitted === shot.cards.length * runsPerCard &&
+      shot.widest.length === runsPerCard,
+    detail:
+      `measured=${fitted} of ${shot.cards.length * runsPerCard} drawn runs, each width read off ` +
+      `the real font metrics and compared against the box it had to fit. ` +
+      `overrun=${overrun.length}${overrun.length === 0 ? '' : ` [${overrun.join('; ')}]`}, ` +
+      `fitted_smaller=${shrunk.length}` +
+      `${shrunk.length === 0 ? '' : ` [${shrunk.join('; ')}]`}. The WIDEST card the readings can ` +
+      `make, at two digits in every number, was measured as well over its ` +
+      `${shot.widest.length} runs and fills ${(widest * 100).toFixed(1)} per cent of its box at ` +
+      `most: over=${wideOverrun.length}` +
+      `${wideOverrun.length === 0 ? '' : ` [${wideOverrun.join('; ')}]`}. A run that overran ` +
+      `would put unreadable text on the photograph, and no ink check would see it, because ink ` +
+      `is only ever read inside a run's own box.`,
   });
 
   // Reported last, because it is the reason the two measures above can fail at
@@ -5184,6 +5677,438 @@ async function runShareCard(page, options, checks) {
   if (options.capture) {
     writeFileSync(options.capture, bytes);
     console.log(`browser: share card written to ${options.capture}`);
+  }
+  if (options.captureShell !== null) {
+    for (const card of shot.cards) {
+      const path = join(options.captureShell, `0020-share-card-${card.name}-1440.jpg`);
+      writeFileSync(path, Buffer.from(card.url.slice(card.url.indexOf(',') + 1), 'base64'));
+      console.log(`browser: share card written to ${path}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The share controls, inside the application — Unit 4.9
+//
+// `--share` measures the pixels of a card against the source modules. This mode
+// drives the BUILT application: it throws a pool on the table, opens the one
+// disclosure, makes a card the way a player does, and judges the three things
+// only a real browser can answer.
+//
+//   * **The download writes the bytes the composition produced.** The file the
+//     button hands the browser is intercepted at `URL.createObjectURL`, which
+//     is the browser's own call and not ours, and compared BYTE FOR BYTE
+//     against the data URL the preview carries.
+//   * **The Web Share call is offered only where the browser offers it.** The
+//     platform's own `navigator.canShare` decides. Where it offers nothing the
+//     control must be absent, and the check that would judge the call prints
+//     `NOT JUDGED` and counts itself in `skipped=`.
+//   * **The controls are reachable by keyboard alone**, each with a role, an
+//     accessible name and a state, reached by real Tab presses.
+//
+// The oracle for the summary is the SCREEN's own readings — the live region and
+// the two zone bands — which `--table` has already held against the rules core.
+// So the card is judged against the roll and never against itself.
+//
+// A machine that cannot draw the table prints every check as NOT JUDGED and
+// counts them in `skipped=`, exactly as `--table` does.
+// ---------------------------------------------------------------------------
+
+/** The pool this mode builds, by pressing the plus end of each tile. */
+const SHARE_CONTROL_POOL = [
+  ['attribute', 4],
+  ['skill', 3],
+  ['gear', 2],
+  ['stress', 3],
+];
+
+/** Everything `sheet-share` holds, as a reader and a ruler meet it. */
+async function readSharePanel(page) {
+  return page.evaluate(() => {
+    const panel = document.querySelector('[data-el="sheet-share"]');
+    if (panel === null) return null;
+    const controls = [...panel.querySelectorAll('button')].map((element) => {
+      const box = element.getBoundingClientRect();
+      return {
+        el: element.dataset.el ?? '',
+        role: element.getAttribute('role') ?? element.tagName.toLowerCase(),
+        name: (element.getAttribute('aria-label') ?? element.textContent ?? '')
+          .replace(/\s+/g, ' ')
+          .trim(),
+        state: element.getAttribute('aria-disabled'),
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      };
+    });
+    const preview = panel.querySelector('[data-el="share-preview"]');
+    return {
+      controls,
+      preview:
+        preview === null
+          ? null
+          : {
+              tag: preview.tagName,
+              alt: preview.getAttribute('alt') ?? '',
+              url: preview.getAttribute('src') ?? '',
+              tabIndex: preview.tabIndex,
+              width: Math.round(preview.getBoundingClientRect().width),
+            },
+      note: (panel.querySelector('[data-el="share-note"]')?.textContent ?? '').trim(),
+      noteRole: panel.querySelector('[data-el="share-note"]')?.getAttribute('role') ?? null,
+    };
+  });
+}
+
+/** What the screen itself says the roll is. The card is judged against this. */
+async function readScreenReadings(page) {
+  return page.evaluate(() => {
+    const spoken = document.querySelector('[data-el="status-line"] .sr-only')?.textContent ?? '';
+    const zone = (name) =>
+      document.querySelectorAll(`[data-el="${name}"] [data-el^="die-"]`).length;
+    const number = (pattern) => {
+      const found = pattern.exec(spoken);
+      return found === null ? null : Number(found[1]);
+    };
+    return {
+      spoken,
+      successes: number(/(\d+) success(?:es)?\./),
+      banes: number(/(\d+) banes?\./),
+      pushes: number(/Push (\d+)\./),
+      dice: document.querySelectorAll('[data-el^="die-"]').length,
+      kept: zone('kept-shelf'),
+      loose: zone('throw-zone'),
+    };
+  });
+}
+
+/** What the browser itself offers as a share target, for this very file. */
+async function readShareTarget(page) {
+  return page.evaluate(() => ({
+    hasShare: typeof navigator.share === 'function',
+    hasCanShare: typeof navigator.canShare === 'function',
+    takesFile:
+      typeof navigator.canShare === 'function'
+        ? (() => {
+            try {
+              return navigator.canShare({
+                files: [new File([new Uint8Array([1])], 'card.jpg', { type: 'image/jpeg' })],
+              });
+            } catch {
+              return false;
+            }
+          })()
+        : false,
+  }));
+}
+
+async function runShareControls(page, options, checks) {
+  const cardMod = await (async () => {
+    register('./ts-resolve.mjs', import.meta.url);
+    return import('../src/shell/share-card.ts');
+  })();
+
+  const opening = await page.evaluate(() => ({
+    renderer: document.querySelector('.screen')?.dataset.renderer ?? 'unknown',
+  }));
+  const onTheTable = opening.renderer === 'tray';
+  const why =
+    'the startup probe answered below the bar, so the screen draws flat dice and mounts no ' +
+    'table. A card is a picture of the table, so there is none to make. There is no WebGL ' +
+    'context inside the sandbox. Run this mode with the sandbox off.';
+  const judge = (name, ok, detail) =>
+    checks.push(
+      onTheTable
+        ? { name, ok, detail }
+        : { name, ok: true, skipped: true, detail: `NOT JUDGED: ${why}` },
+    );
+
+  if (!onTheTable) {
+    console.log(`browser: share-controls renderer=${opening.renderer} NOT JUDGED, ${why}`);
+    for (const name of [
+      'share-controls.the-panel-is-behind-the-one-disclosure',
+      'share-controls.the-card-carries-the-roll-the-screen-holds',
+      'share-controls.the-download-writes-the-bytes-the-composition-produced',
+      'share-controls.every-control-is-reachable-by-keyboard-alone',
+      'share-controls.the-web-share-call-is-offered-where-the-browser-offers-it',
+    ]) {
+      judge(name, true, '');
+    }
+    return;
+  }
+
+  // ---- The roll the card is made of ----
+  for (const [tile, presses] of SHARE_CONTROL_POOL) await pressTile(page, tile, 'p', presses);
+  await settleScreen(page);
+  await page.click('[data-el="roll-button"]');
+  await page.waitForFunction(
+    () => window.__clatterTable !== undefined && window.__clatterTable.busy === false,
+    { timeout: 60000 },
+  );
+  await settleScreen(page);
+  const screen = await readScreenReadings(page);
+  console.log(
+    `browser: share-controls renderer=${opening.renderer} dice=${screen.dice} ` +
+      `kept=${screen.kept} loose=${screen.loose} successes=${screen.successes} ` +
+      `banes=${screen.banes} pushes=${screen.pushes}`,
+  );
+
+  // ---- 1. The panel is behind the one disclosure, and it holds one control ----
+  const closed = await page.evaluate(
+    () =>
+      [...document.querySelectorAll('[data-el]')].filter(
+        (each) => each.dataset.el.startsWith('share-') || each.dataset.el === 'sheet-share',
+      ).length,
+  );
+  await openSheet(page);
+  const before = await readSharePanel(page);
+  judge(
+    'share-controls.the-panel-is-behind-the-one-disclosure',
+    closed === 0 &&
+      before !== null &&
+      before.controls.length === 1 &&
+      before.controls[0].el === 'share-card-button' &&
+      before.preview === null &&
+      before.noteRole === 'status',
+    `the roll flow at rest holds ${closed} parts of this panel, and the sheet holds ` +
+      `${before === null ? 'none' : before.controls.length} control: ` +
+      `[${(before?.controls ?? []).map((one) => one.el).join(', ')}]. The two ways out arrive ` +
+      `with the card, so there is nothing to save before one is made. The note is a live ` +
+      `region (role=${before?.noteRole}).`,
+  );
+
+  // ---- 2. One press makes a card of the roll the screen is holding ----
+  await page.click('[data-el="share-card-button"]');
+  await page.waitForSelector('[data-el="share-preview"]', { timeout: 30000 });
+  const made = await readSharePanel(page);
+  const target = await readShareTarget(page);
+
+  // The oracle: the screen's own readings, turned into the words the card must
+  // carry BY THIS FILE, not by the module under test.
+  const wanted = [
+    `${screen.successes === 1 ? '1 success' : `${screen.successes} successes`}`,
+    `${screen.banes === 1 ? '1 bane' : `${screen.banes} banes`}`,
+    `${screen.dice === 1 ? '1 die' : `${screen.dice} dice`}`,
+    `${screen.kept} kept`,
+    `${screen.loose} in the cup`,
+    `${screen.pushes === 1 ? '1 push' : `${screen.pushes} pushes`}`,
+  ];
+  const alt = made?.preview?.alt ?? '';
+  const unsaid = wanted.filter(
+    (line) => !alt.includes(`${line.charAt(0).toUpperCase()}${line.slice(1)}.`),
+  );
+  console.log(
+    `browser: share-controls card bytes=${
+      made?.preview === null ? 0 : cardMod.bytesOfDataUrl(made.preview.url).length
+    } media_type=${made?.preview === null ? 'none' : cardMod.mediaTypeOfDataUrl(made.preview.url)} ` +
+      `alt="${alt.slice(0, 80)}" wanted=${wanted.length} unsaid=${unsaid.length} ` +
+      `controls=[${(made?.controls ?? []).map((one) => one.el).join(', ')}] ` +
+      `share_target=${target.hasShare && target.takesFile}`,
+  );
+  judge(
+    'share-controls.the-card-carries-the-roll-the-screen-holds',
+    unsaid.length === 0 &&
+      wanted.length === 6 &&
+      made?.preview?.tag === 'IMG' &&
+      made.preview.tabIndex < 0 &&
+      cardMod.mediaTypeOfDataUrl(made.preview.url) === 'image/jpeg' &&
+      cardMod.bytesOfDataUrl(made.preview.url).length > 0,
+    `compared=${wanted.length - unsaid.length} of ${wanted.length} readings, each one built ` +
+      `HERE from what the screen printed — the live region for the successes, the banes and ` +
+      `the push count, and the two zones for the kept and the loose dice — and looked for in ` +
+      `the alternative text of the image the application generated. ` +
+      `unsaid=${unsaid.length}${unsaid.length === 0 ? '' : ` [${unsaid.join('; ')}]`}. The ` +
+      `preview is an ${made?.preview?.tag} carrying that text and no tab stop ` +
+      `(tabindex ${made?.preview?.tabIndex}).`,
+  );
+
+  // ---- 3. The download writes the bytes the composition produced ----
+  await page.evaluate(() => {
+    window.__download = { blobs: [], names: [], hrefs: [], types: [] };
+    const real = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (blob) => {
+      window.__download.blobs.push(blob);
+      window.__download.types.push(blob.type);
+      return real(blob);
+    };
+    HTMLAnchorElement.prototype.click = function click() {
+      window.__download.names.push(this.download);
+      window.__download.hrefs.push(this.href);
+    };
+  });
+  await page.click('[data-el="share-download-button"]');
+  await page.waitForFunction(() => window.__download.blobs.length > 0, { timeout: 30000 });
+  const offered = await page.evaluate(async () => {
+    const blob = window.__download.blobs[0];
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let hex = '';
+    for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
+    return {
+      hex,
+      size: blob.size,
+      type: blob.type,
+      name: window.__download.names[0] ?? null,
+      href: (window.__download.hrefs[0] ?? '').slice(0, 5),
+      offers: window.__download.blobs.length,
+      note: document.querySelector('[data-el="share-note"]')?.textContent ?? '',
+    };
+  });
+  // The oracle runs HERE, in node: the bytes of the data URL the preview
+  // carries, decoded by the application's own decoder run in another engine.
+  const want = Buffer.from(cardMod.bytesOfDataUrl(made.preview.url));
+  const got = Buffer.from(offered.hex, 'hex');
+  let compared = 0;
+  let firstDifference = -1;
+  if (got.length === want.length) {
+    for (let at = 0; at < got.length; at += 1) {
+      compared += 1;
+      if (got[at] !== want[at] && firstDifference < 0) firstDifference = at;
+    }
+  }
+  const header = readJpeg(got);
+  console.log(
+    `browser: share-controls download bytes=${got.length} wanted=${want.length} ` +
+      `compared=${compared} first_difference=${firstDifference} name=${offered.name} ` +
+      `href=${offered.href} type=${offered.type} offers=${offered.offers} ` +
+      `note="${offered.note.slice(0, 60)}"`,
+  );
+  judge(
+    'share-controls.the-download-writes-the-bytes-the-composition-produced',
+    offered.offers === 1 &&
+      got.length > 0 &&
+      got.length === offered.size &&
+      got.length === want.length &&
+      compared === got.length &&
+      firstDifference === -1 &&
+      header.ok &&
+      /^clatter-card-\d{4}-\d{2}-\d{2}-\d{4}\.jpg$/.test(String(offered.name)) &&
+      offered.href === 'blob:' &&
+      String(offered.type).startsWith('image/jpeg') &&
+      offered.note.includes(String(offered.name)),
+    `one press handed the browser ${offered.offers} object URL, on an anchor named ` +
+      `"${offered.name}" whose href is a ${offered.href} URL and whose blob is ${offered.type}. ` +
+      `The file measures ${got.length} bytes against the ${want.length} this file decodes IN ` +
+      `NODE from the data URL the preview carries, and against the ${offered.size} the browser ` +
+      `itself reports for the blob. The comparison is BYTE FOR BYTE and not by length: ` +
+      `${compared} bytes compared, first difference at ${firstDifference}, where -1 is none. ` +
+      `The denominator is the file itself, and a file of no bytes fails. It is a whole JPEG: ` +
+      `${header.ok ? `frame header ${header.marker}, ${header.width}x${header.height}` : header.reason}.`,
+  );
+
+  // ---- 4. Every control is reachable by keyboard alone ----
+  //
+  // Real Tab presses from the control above the panel, so the walk crosses into
+  // it the way a keyboard does. Every control it reaches carries a role, an
+  // accessible name and a state a reader can announce.
+  const walked = await page.evaluate(() => {
+    const panel = document.querySelector('[data-el="sheet-share"]');
+    return [...panel.querySelectorAll('button')].map((element) => element.dataset.el);
+  });
+  await startWalkAt(page, 'sheet-tray-renderer');
+  const reached = [];
+  for (let step = 0; step < 24 && reached.length < walked.length; step += 1) {
+    await page.keyboard.press('Tab');
+    const at = await page.evaluate(() => document.activeElement?.dataset.el ?? null);
+    if (at !== null && walked.includes(at) && !reached.includes(at)) reached.push(at);
+  }
+  const nameless = made.controls.filter((one) => one.name === '');
+  const stateless = made.controls.filter((one) => one.state === null);
+  const wrongRole = made.controls.filter((one) => one.role !== 'button');
+  const short = made.controls.filter((one) => one.height < 24 || one.width < 24);
+  console.log(
+    `browser: share-controls keyboard reached=${reached.length} of ${walked.length} ` +
+      `[${reached.join(', ')}] nameless=${nameless.length} stateless=${stateless.length} ` +
+      `wrong_role=${wrongRole.length} short=${short.length}`,
+  );
+  judge(
+    'share-controls.every-control-is-reachable-by-keyboard-alone',
+    reached.length === walked.length &&
+      walked.length >= 2 &&
+      nameless.length === 0 &&
+      stateless.length === 0 &&
+      wrongRole.length === 0 &&
+      short.length === 0,
+    `reached=${reached.length} of ${walked.length} controls by real Tab presses alone, ` +
+      `[${reached.join(', ')}]. Each one carries a role (${wrongRole.length} wrong), an ` +
+      `accessible name (${nameless.length} without one) and a state a reader can announce ` +
+      `(${stateless.length} without an aria-disabled), and none is under the 24 px floor of ` +
+      `WCAG 2.2 SC 2.5.8 (${short.length}). The denominator is the panel's own control list, ` +
+      `read off the document, so a control that grew and was never walked fails.`,
+  );
+
+  // ---- 5. The Web Share call, where the browser offers one ----
+  //
+  // **Its absence is not a failure.** Where the browser offers no target the
+  // control must be absent, and that much IS judged. Whether the call carries
+  // the card cannot be judged at all on such a browser, so it prints NOT JUDGED
+  // and counts in `skipped=`.
+  const sendDrawn = made.controls.some((one) => one.el === 'share-send-button');
+  judge(
+    'share-controls.the-web-share-call-is-offered-where-the-browser-offers-it',
+    sendDrawn === (target.hasShare && target.hasCanShare && target.takesFile),
+    `this browser reports navigator.share=${target.hasShare}, ` +
+      `navigator.canShare=${target.hasCanShare} and canShare({files})=${target.takesFile}, and ` +
+      `the panel drew the send control: ${sendDrawn}. The two agree. A browser that shares no ` +
+      `file draws no control, and that absence is not a failure: the download above is the ` +
+      `route there.`,
+  );
+  if (target.hasShare && target.hasCanShare && target.takesFile) {
+    // The call itself is intercepted, because a real one opens a platform
+    // sheet this run has no way to close.
+    await page.evaluate(() => {
+      window.__shared = [];
+      navigator.share = async (data) => {
+        window.__shared.push({
+          files: (data.files ?? []).map((file) => ({
+            name: file.name,
+            type: file.type,
+            size: file.size,
+          })),
+          text: data.text ?? '',
+        });
+      };
+    });
+    await page.click('[data-el="share-send-button"]');
+    await page.waitForFunction(() => window.__shared.length > 0, { timeout: 30000 });
+    const shared = await page.evaluate(() => ({
+      calls: window.__shared,
+      note: document.querySelector('[data-el="share-note"]')?.textContent ?? '',
+    }));
+    const call = shared.calls[0];
+    console.log(
+      `browser: share-controls share calls=${shared.calls.length} ` +
+        `files=${call?.files.length ?? 0} bytes=${call?.files[0]?.size ?? 0} ` +
+        `text="${(call?.text ?? '').slice(0, 60)}"`,
+    );
+    checks.push({
+      name: 'share-controls.the-share-target-is-handed-the-card-and-its-readings',
+      ok:
+        shared.calls.length === 1 &&
+        call.files.length === 1 &&
+        call.files[0].size === want.length &&
+        call.files[0].type === 'image/jpeg' &&
+        call.text === made.preview.alt,
+      detail:
+        `one press made ${shared.calls.length} call, carrying ${call?.files.length ?? 0} file of ` +
+        `${call?.files[0]?.size ?? 0} bytes against the ${want.length} the composition produced, ` +
+        `and the same readings in words. The target is the BROWSER's, never a service of ours.`,
+    });
+  } else {
+    checks.push({
+      name: 'share-controls.the-share-target-is-handed-the-card-and-its-readings',
+      ok: true,
+      skipped: true,
+      detail:
+        `NOT JUDGED: this browser offers no share target for a file. It reports ` +
+        `navigator.share=${target.hasShare}, navigator.canShare=${target.hasCanShare} and ` +
+        `canShare({files})=${target.takesFile}. There is no call to judge, and the check above ` +
+        `holds that the control is absent because of it.`,
+    });
+  }
+
+  if (options.captureShell !== null) {
+    const path = join(options.captureShell, '0021-share-panel-1440.png');
+    await page.screenshot({ path });
+    console.log(`browser: share-controls captured the panel to ${path}`);
   }
 }
 
@@ -10431,6 +11356,7 @@ function parseArgs(argv) {
     logCsv: false,
     settingsStore: false,
     share: false,
+    shareControls: false,
     offline: false,
     shell: false,
     sheet: false,
@@ -10478,6 +11404,7 @@ function parseArgs(argv) {
     else if (arg === '--log-csv') options.logCsv = true;
     else if (arg === '--settings-store') options.settingsStore = true;
     else if (arg === '--share') options.share = true;
+    else if (arg === '--share-controls') options.shareControls = true;
     else if (arg === '--offline') options.offline = true;
     else if (arg === '--shell') options.shell = true;
     else if (arg === '--sheet') options.sheet = true;
@@ -10542,6 +11469,7 @@ function parseArgs(argv) {
     ['--log-csv', options.logCsv],
     ['--settings-store', options.settingsStore],
     ['--share', options.share],
+    ['--share-controls', options.shareControls],
     ['--offline', options.offline],
     ['--shell', options.shell],
     ['--sheet', options.sheet],
@@ -10587,9 +11515,13 @@ function parseArgs(argv) {
     !options.shell &&
     !options.sheet &&
     !options.theme &&
-    !options.history
+    !options.history &&
+    !options.share &&
+    !options.shareControls
   ) {
-    throw new Error('--capture-shell belongs to --shell, --sheet, --theme or --history');
+    throw new Error(
+      '--capture-shell belongs to --shell, --sheet, --theme, --history, --share or --share-controls',
+    );
   }
   if (options.longTaskMs !== 0) {
     if (!options.logStore && !options.logCsv) {
@@ -10622,6 +11554,7 @@ async function run(options) {
       options.theme ||
       options.history ||
       options.blockedChunk ||
+      options.shareControls ||
       options.table
     ) {
       server = await startPreviewServer(options.url, join(here, '..'));
@@ -10635,6 +11568,7 @@ async function run(options) {
       options.reducedMotion ||
       options.sound ||
       options.share ||
+      options.shareControls ||
       options.table
     ) {
       await page.setViewport({
@@ -10699,6 +11633,8 @@ async function run(options) {
       await runSettingsStore(page, options, checks);
     } else if (options.share) {
       await runShareCard(page, options, checks);
+    } else if (options.shareControls) {
+      await runShareControls(page, options, checks);
     } else if (options.offline) {
       await runOffline(page, options, checks, server);
     } else if (options.shell) {

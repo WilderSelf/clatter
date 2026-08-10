@@ -1133,6 +1133,24 @@ body {
   }
 }
 
+/* ---------------- the share card, Unit 4.9 ----------------
+ *
+ * The card the player is about to post, drawn at the width of the sheet. It is
+ * a picture of the table, so it is wider than it is tall and the height
+ * follows the width. The boundary is the same `--line` every other control on
+ * this sheet is told from the page by. Nothing here paints the card itself:
+ * the card is drawn onto a canvas by `src/shell/share-card.ts`, in the
+ * interface palette, and this rule only frames the picture that came back. */
+
+.share-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: var(--s1) 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
 /* ---------------- the history destination — Unit 4.4 ----------------
  *
  * A second surface with its own header and its own footer. It reuses `.screen`,

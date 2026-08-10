@@ -684,3 +684,96 @@ promise the accent already had.
 The tray surface stays a shipped row. Every surface is dark by construction, and the claim that a die
 body holds 3 to 1 against a surface is measured over those six and over no other colour. A built
 surface would put that claim outside the range it was proved in.
+
+---
+
+## Decision 16 — the share card lives behind the disclosure, and it names the application only, taken by me 2026-08-10
+
+**`sheet-share` is an eleventh control behind the one disclosure. It makes one card of the roll on
+the table, shows it, and offers two ways out: a saved file, and the browser's own share target where
+the browser offers one.** Section 4 of `docs/design/0002-screen-design.md` lists it against Unit 4.9.
+I took this decision under the delegated interface authority of `CLAUDE.md`.
+
+### Where the control lives, and the two homes it was taken against
+
+**Rejected: the footer of the roll flow.** The footer is the push decision. `roll-button` and
+`push-button` are one tap each, and Decision 4 and section 3 keep that footer as tight as the screen
+gets. A control that opens a file dialogue or a platform share sheet beside Push is a mispress in the
+one place this application must not have one. It would also take rest B from five controls to six,
+add a thirty-sixth visit to the after-throw walk of section 6, and rewrite the drawn screen the owner
+approved at Unit 2.0.
+
+**Rejected: the footer of the history record, beside `export-button`.** A card is a picture of the
+dice **as they lie now**. A logged roll holds its stored readings and no tray, so a card of a record
+would be a card of an empty table. The export writes the whole log and the card holds one roll, so
+the two are not the same kind of act either.
+
+**Taken: the disclosure sheet.** Three reasons, and the budget is not one of them.
+
+1. **Making a card is rare and pushing is constant.** That is the rule Decision 11 took for the
+   saved pools. A rare act does not buy space from a constant one.
+2. **The sheet is a second surface.** It carries no share of the control budget of section 3 and
+   neither keyboard walk of section 6 names a `sheet-` control, so the screen still shows five
+   controls at rest A and five at rest B, and the walks stay at eleven visits and thirty-five.
+3. **The refusal the flat renderer meets points at the control above it.** `sheet-tray-renderer`
+   sits one row up in the same sheet, so a player told that a card is a picture of the table can see
+   the switch that draws one.
+
+### What the card says, and why that is the whole of it
+
+**A card names the application and nothing else about where it came from.** Constraint 1 forbids a
+publisher name, a game title, an engine name, a setting term, a reproduced dice colour convention
+and the words "compatible with". It forbids a "not affiliated with" line as well, because writing one
+requires naming the publisher. A bare application name is the safe answer and it is the one taken.
+
+The card carries the roll and no rule of its own:
+
+- the application name;
+- the successes and the banes, which are what the roll was for;
+- the dice count, the kept count, the count still in the cup, the stress and the push count.
+
+Every one of those comes from `readout` and `zonesOf` in `src/shell/state.ts`, which ask the rules
+core. `src/shell/share-card.test.ts` compares the drawn summary against those two functions over
+random rolls, with the five readings enumerated so a missing one is a red and not an unread cell, and
+it scans every string a card can hold through the branding gate's own tokeniser and hashes.
+
+### The summary sits on an opaque panel, and that is the contrast claim
+
+Text over a photograph answers to whatever the photograph happens to be, and a photograph of dice on
+a table is not a colour anybody chose. The summary is therefore drawn on a filled panel of the
+interface palette — `surface` as the ground, `text` and `textMuted` as the ink, `line` as the
+boundary — so the claim the card makes is the claim the stylesheet already makes: 4.5 to 1 for text,
+over all six interface palettes. The card is drawn and not styled, so that claim is measured on the
+drawn pixels of six real cards rather than inherited from Unit 4.8.
+
+The panel goes in the **upper left**. The capture half of this unit recorded that the pool spreads
+over the lower half of the frame and leaves about a third of the card empty up there. The summary
+fills the space the dice do not use.
+
+### The two ways out, and why the second one may be absent
+
+**Saving the file is the route that always exists.** It is the anchor download Unit 4.5 built, over
+the same bytes the composition produced. No second download was written.
+
+**The share target is the browser's, never a service of ours.** Constraint 4 keeps this a static
+site: `navigator.share` hands the file to whatever the platform offers and this application makes no
+network call. `share-send-button` is drawn only where `navigator.canShare` accepts **this very
+file**, so a desktop browser that shares no file simply does not draw it. **That absence is not a
+failure.** A check that cannot judge it prints `NOT JUDGED` with the reason and counts itself in
+`skipped=`.
+
+### The limit this decision accepts, priced rather than hidden
+
+**A card needs the table.** `captureTrayJpeg` draws one fresh frame through the renderer, so the flat
+dice of Unit 3.7 make no card. The panel says so and names the switch. Two alternatives were priced
+and rejected: a card of the summary alone would fail the acceptance the plan sets for this unit,
+because a panel of flat colour holds neither the luminance variance nor the thousand distinct pixel
+values that a picture of dice holds; and drawing the flat dice onto the card a second time would be a
+second renderer to keep true. A platform below the bar therefore makes no card, which is one reading
+of the plan's own trade: the share card is the first thing effort is traded from.
+
+### A card belongs to the roll it was made from
+
+Any change of the dice — a throw, a push, or a die the player keeps or releases — clears the card and
+its preview. A card left standing would be saved under readings the table no longer holds, which is
+the hazard Decision 10 closes for the cost row and Unit 4.7 closes for the statistics.

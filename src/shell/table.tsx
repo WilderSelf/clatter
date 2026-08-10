@@ -115,6 +115,14 @@ export interface TableProps {
   readonly onFall: () => void;
   /** Where each die landed, for the cells the keyboard reaches. */
   readonly onSpots: (spots: TraySpots) => void;
+  /**
+   * The tray itself, once it has mounted, and `null` while there is none.
+   *
+   * The share card of Unit 4.9 draws one fresh frame through this box and
+   * copies it in the same task, so it needs the renderer rather than a picture
+   * of it. Nothing else reads it, and the screen never draws through it.
+   */
+  readonly onBox?: (box: DiceBox | null) => void;
   /** A click on a die. The screen answers it, exactly as a key press does. */
   readonly onToggle: (id: string) => void;
   /** The dice axis in force — Unit 4.8. A change of it repaints the pool. */
@@ -141,6 +149,7 @@ export function Table({
   mount,
   onFall,
   onSpots,
+  onBox,
   onToggle,
   colours,
 }: TableProps): preact.JSX.Element {
@@ -155,11 +164,13 @@ export function Table({
   const taken = useRef(-1);
   const toggle = useRef(onToggle);
   const spotted = useRef(onSpots);
+  const boxed = useRef(onBox);
   const seam = useRef<TableSeam>({ box: null, ordered: [], throws: 0, busy: false });
   const painted = useRef(colours);
   painted.current = colours;
   toggle.current = onToggle;
   spotted.current = onSpots;
+  boxed.current = onBox;
 
   const publish = (): void => {
     seam.current.box = box.current;
@@ -234,6 +245,7 @@ export function Table({
           (_pool, clicked) => toggle.current(clicked.id),
         );
         publish();
+        boxed.current?.(box.current);
         void drain();
       })
       .catch(() => {
@@ -243,6 +255,15 @@ export function Table({
       live = false;
     };
   }, [shown, wanted]);
+
+  // The tray goes when this element does, so nothing outside holds a renderer
+  // whose canvas has left the document.
+  useEffect(
+    () => () => {
+      boxed.current?.(null);
+    },
+    [],
+  );
 
   // The listener and the marks go with the table.
   useEffect(

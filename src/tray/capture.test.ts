@@ -78,4 +78,50 @@ describe('captureTrayJpeg', () => {
     const { box } = stand(0, 0);
     expect(() => captureTrayJpeg(box)).toThrow(/measures 0 by 0/);
   });
+
+  // ---- The summary, over the frame and inside the same task — Unit 4.9 ----
+  //
+  // A composition drawn after the copy is a different defect with the same
+  // shape: the picture under the panel is gone and the panel over it still
+  // looks like a card. The order below is the guard, and the async refusal is
+  // the second one.
+  it('draws the summary over the frame and before the encode, in this same task', () => {
+    const { box, calls } = stand();
+    const surface = { width: 0, height: 0 };
+    captureTrayJpeg(box, {
+      overlay: (_context, size) => {
+        Object.assign(surface, size);
+        calls.push('overlay');
+      },
+    });
+    expect(calls).toEqual([
+      'render scene camera',
+      `fillRect 0,0,800,600 in ${TRAY_SURFACE_COLOR}`,
+      'drawImage tray',
+      'overlay',
+      `toDataURL image/jpeg at ${SHARE_JPEG_QUALITY}`,
+    ]);
+    expect(surface, 'the overlay is given the size it may draw over').toEqual({
+      width: 800,
+      height: 600,
+    });
+  });
+
+  it('refuses an async overlay, because it would draw after the canvas was cleared', () => {
+    const { box, calls } = stand();
+    expect(() =>
+      captureTrayJpeg(box, {
+        overlay: async () => {
+          calls.push('overlay');
+        },
+      }),
+    ).toThrow(/async function and it may not await/);
+    expect(calls, 'nothing was rendered, copied or encoded').toEqual([]);
+  });
+
+  it('lays down the tray surface the caller names, and its own where none is named', () => {
+    const { box, calls } = stand();
+    captureTrayJpeg(box, { surface: '#102822' });
+    expect(calls).toContain('fillRect 0,0,800,600 in #102822');
+  });
 });

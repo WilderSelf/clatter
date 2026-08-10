@@ -152,6 +152,9 @@ through the table semantics.
   every series carries a shape as well as a colour.
 - `flat-fallback-note`, the one-time notice that the dice fell to flat dice. It is a live region and
   it holds no tab stop, so neither keyboard walk of section 6 changes. Unit 3.7 added it.
+- `share-preview`, the card the player is about to post. It is an image the application generates, so
+  it carries alternative text built from the same roll the card draws. It sits inside the disclosure
+  sheet and holds no tab stop. Unit 4.9 added it.
 
 ## 4. Behind the one disclosure
 
@@ -169,6 +172,7 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | `sheet-history` | Opens the history destination. The log, its statistics and its export live there, not here. A read-only storage reading sits beside it, `sheet-storage-estimate`, which holds no tab stop. | 4.4 to 4.7 |
 | `sheet-stress-reset` | Sets the stress counter back to zero. | 2.1 |
 | `sheet-tray-renderer` | Rolls the dice on the table, or draws them flat. It clears a permanent fall to flat dice. | 3.7 |
+| `sheet-share` | Makes one card of the roll on the table, shows it with alternative text carrying the same readings, and offers two ways out: a saved file, and the browser's own share target where the browser offers one. The card names the application and nothing else about where it came from. Decision 16. | 4.9 |
 | `sheet-close` | Closes the sheet and returns focus to `disclosure-toggle`. | 2.1 |
 
 The mode switch sits here on purpose. It destroys the built pool, so it must not sit one tap away
