@@ -555,7 +555,10 @@ describe('a push', () => {
   it('re-throws the loose dice alone, and the core is the oracle', () => {
     const only = profile('pool-banes-damage-ratings');
     const pool = buildPool(poolBuilder({ attribute: 3, skill: 2, gear: 2, stress: 1 }));
-    const rolled = roll({ dice: pool, stressBefore: 0 }, seededRandom(7));
+    // Seed 8 of the first thirty gives the evenest split this fixture can
+    // hold: four dice the profile locks and four it throws again. A split with
+    // one kept die would give the kept-face check a denominator of one.
+    const rolled = roll({ dice: pool, stressBefore: 0 }, seededRandom(8));
 
     // The oracle. The same profile and the same seed the screen is given, so
     // the whole answer is computed outside the screen before it is asked.
@@ -588,7 +591,7 @@ describe('a push', () => {
     const moved = new Set(oracle.rerolled.map((id) => named.get(id)));
     const keptIds = [...before.keys()].filter((name) => !moved.has(name));
     expect(keptIds.length).toBe(pool.length - oracle.rerolled.length);
-    expect(keptIds.length).toBeGreaterThan(0);
+    expect(keptIds.length, 'the split is a mix, not one die against seven').toBe(4);
     for (const name of keptIds) {
       expect(after.get(name), `${name} kept its face across the push`).toBe(before.get(name));
     }
