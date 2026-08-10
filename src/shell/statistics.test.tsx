@@ -214,11 +214,12 @@ function mount(entries: readonly LogEntry[]): HTMLElement {
     render(
       <History
         entries={entries}
-        failure={null}
+        drawn={[null, null, null, null]}
+        onFault={() => undefined}
         onBack={() => {
           backPresses += 1;
         }}
-        onImport={() => Promise.resolve(null)}
+        onImport={() => Promise.resolve(true)}
       />,
       root as HTMLElement,
     ),

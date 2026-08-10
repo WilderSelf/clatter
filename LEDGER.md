@@ -67,6 +67,252 @@ Status table for each unit. Every unit appends one row after it lands.
 | 4.7 | Statistics view — the charts, in a third view of the history destination. **Unit 4.7 is now complete.** | Done. | #16 | Three charts over the record `summariseLog` returns, in `src/shell/statistics.tsx`, drawn in a third view of the history destination. **Decision 14 of `docs/design/0012-settled-decisions.md` records where they live and why**, and section 3 of the design carries the control table: the summary now counts four controls and the statistics view one. The rejected option is a section of the summary, and the reason is Unit 4.5's own defect: a section pushes either the list or the charts below the fold of a 360 px screen. **The screen computes no statistic.** `statistics.tsx` imports no log entry, no push profile and no rule, so there is nothing in it to re-derive a number from. The claim is measured at the CALL SITE and not at the component: the destination is handed a record that disagrees with its own log on all 24 fields, the disagreement is counted first so no field can pass by coincidence, and every drawn value follows the record. **A chart is a table, not a picture.** Every value is text in a real cell that names its row header and its column header, and every bar is `aria-hidden` decoration beside it, so one document serves a screen reader and an eye and the two readings are compared against each other. **The denominator is the record, counted a second way**: 24 values against a sum over the shape of the record, `1 + 2 pool sizes by 5 + 7 push fields + 4 cost units + 2`, so a missing bar is a red and not an unread cell. The oracle for the browser half is `summariseLog` run IN NODE over the rolls a second connection reads out of IndexedDB. **Every bar is measured against the geometry.** In the browser the bar and its track are measured in real pixels and the bound is one device pixel over the track width, 190, 172 and 722 px this run. In the test runner the drawn width is compared against the record with a bound of 0.0005 of a percentage point, taken from the three decimal places the view writes and not chosen; the smallest real difference between two bars of the fixture is 25 percentage points. **Shape carries every meaning colour carries.** Four series, and no chart holds two of one shape: a circle for a success and for a gain, a square for the outcome that did not move, a triangle for the one that went the wrong way. The engine resolved 3 shapes and 3 colours for the three push outcomes. **No chart draws a bane**, because the record holds no bane statistic. **Contrast holds over two denominators.** 13 chart colours are read out of `src/shell.css` by the rule that spends them, resolved against `:root`, and judged at 4.5 to 1 for text and 3 to 1 for a graphical object; the same 13 run over all 6 interface palettes of Unit 4.8 as a product of 78, tightest 4.40 to 1. In the browser 36 colours are read as the engine resolved them, each against the first ancestor that really paints one, 0 missed. **Three degenerate cases answer for themselves**: no roll draws a sentence and no chart, no push reads "No roll has pushed yet." and never a nought per cent, and one roll draws one row. **Keyboard alone reaches the charts and leaves them.** A real Enter on `statistics-button` opens them with the focus on `back-button`, and a real Enter on `back-button` returns to the SUMMARY and not to the dice. The charts hold 0 tab stops. Section 6 is unchanged and measured in both instruments: eleven visits before the throw and thirty-five after it, with both lists read out of the design. Vitest moves from 321 to 334 tests over 33 files. `--history` moves from 15 checks to 21 at `failures=0 skipped=0`. Initial JavaScript moves from 31,527 to 33,449 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Sixteen injections were proved red and every one was restored by editing the injection back, with the three touched files hashed against a saved copy. The captures are `docs/design/0018-history-stats-360.png` and `0018-history-stats-1440.png`. **Open, and owed by Unit 4.7:** nothing. See the notes under this table. || 3.6 | Sound — the interface half: the toggle, the volume, and the engine wired to the tray. **Unit 3.6 is now complete.** | Done | #19 | `sheet-sound` holds a checkbox and a slider, and `src/shell/table.tsx` hands the tray an `onImpact` hook that reaches the engine the screen holds. A roll in the built application started 82 voices, counted through the browser's own `AudioBufferSourceNode.start` rather than through any counter the engine writes. The level is read off the `GainNode` the engine built, at 0.75 and at 0.25, both set by real arrow presses. Decision 17 of `docs/design/0012-settled-decisions.md` records the choices and section 4 of `docs/design/0002-screen-design.md` lists both controls. Two accessibility defects were found by the checks and fixed: the slider took its name from the label around it, which reads the level twice, and it drew itself 20 px tall against a 24 px floor. See the notes under this table. |
 | 3.8 | Performance gates and the phone overlay — the overlay half. **Unit 3.8 is now complete. The owner still owes the phone reading.** | Done | #19 | `sheet-overlay` shows four readings over the screen: p95 and p99 frame duration, the long-task total, and throw-to-first-motion. **It reports and never gates**, which is what the End state of `CLAUDE.md` asks of a timing figure. Every line names its unit and its sample count, a percentile below a floor derived from its own quantile is refused, and a figure this browser cannot measure is named rather than printed as a zero. Frames are sampled inside a throw and nowhere else. Decision 18 records every choice. The desktop reading is in the notes and is NOT the phone reading the plan asks for. See the notes under this table. |
 | fix | The pointer probe aimed where no pointer can land | Done | #20 | `--table` lost a die to the pointer route on some throws, with `die-at2 did not answer the click`. **Neither candidate cause was the cause.** The die was not buried: `unreachable=0` on every failing run, and the two dice that were lost held 1,415 and 1,820 whole pixels of their own front surface. The die cells did not eat the press either: the click reached the canvas, and `pointer-events: none` of Decision 9 held at every point measured. **The cause is the probe.** It walked outwards from a die's centre and returned the FIRST point that belonged to the die, which lies on the boundary with whatever covers the centre, by construction. That point is fractional, and the driver rounds every pointer coordinate to a whole pixel — `Math.round` in `node_modules/puppeteer-core/lib/puppeteer/bidi/Input.js`. The press therefore landed across the boundary and the neighbour took it. Measured at seed 108: the aim read `(232.626, 495.087)` where the raycast answers die 22, the rounded point `(233, 495)` answers die 7, and `die-sk3` toggled instead of `die-st8`. **The fix is a construction, not a rule.** `window.__clatterAim` scans the whole pixels the die's projected disc covers, keeps the ones where the die is the frontmost body, and answers the one furthest from any pixel that is not, by a Chebyshev distance transform. The answer is a whole pixel, so rounding changes nothing, and it is the point deepest inside what the player sees. One implementation serves `--table` and `--affordance`. `CLICK_PROBE_RINGS` and `CLICK_PROBE_ANGLES` are gone and nothing replaced them: the scan has no free parameter. **No shipping file changed.** The pointer route was already correct. Over 64 throw seeds at 1440x900 the mode now reads `passed=64 of 64` at `checks=10 failures=0 skipped=0`, against 2 red in 32 before the fix, and seed 2107814439 passes. `table.every-aim-is-a-whole-pixel-the-pointer-can-address` is new. The pointer check now counts `refused` against the dice the screen draws as images and `toggled` against the dice it draws as buttons, and the key route counts the same split through a different instrument, so a die a neighbour hides can no longer be absorbed into a refusal. **`BLOCKED:owner-gate` on the small tray.** At 360x760 the heap buries a die in 7 of 24 throws and the pointer route cannot reach it. The keyboard route reaches every die at every width. See the notes under this table. Three red-proofs passed. Initial JavaScript 43,390 gzip bytes, the lazy chunk 151,876, the render counters 841, 842 and 77, and `npm run perf` 203 steps with the scene digest unchanged — every one of them unchanged, because no shipping file moved. |
+| 4.10 | Error surfaces. **Unit 4.10 is now complete.** | Done | #21 | One error surface, four rows, no control. **Decision 19 of `docs/design/0012-settled-decisions.md` settles the shape** and section 3 of `docs/design/0002-screen-design.md` lists it under the read-only parts, so the control budget of section 3 and both keyboard walks of section 6 are unchanged. `src/shell/faults.ts` holds eight faults over four slots, and the denominator is PARSED out of the union declarations of the five modules that refuse: 27 declared outcomes, 9 with a surface and 18 with a written reason for none. `node scripts/browser.mjs --faults` drives six of the eight to their real failure and reads the surface off the screen, `--faults --quota-kb` drives the seventh, and the eighth prints `NOT JUDGED` with its reason. Every recovery route is TAKEN, and two of them had the wrong words until the route was taken. Seven red-proofs. Initial JavaScript 43,390 to 44,486 gzip bytes against the budget in `budgets.json`, with the branch point measured in a throw-away worktree rather than remembered. See the notes under this table. |
+
+
+## Unit 4.10 — the error surfaces
+
+The plan names four failures: the 3D chunk fails to load, IndexedDB will not open, an import is
+malformed, and storage is full. Every one of them was already DETECTED before this unit, and each
+answered with a record rather than a throw. What was missing is what the player is TOLD, and what
+the player can do next.
+
+### The denominator is parsed, not written
+
+A list of failures written by hand agrees with itself for ever. So `src/shell/faults.test.ts` opens
+the source of the five modules that refuse, parses the union declarations with the TypeScript
+compiler, and asserts `SOURCE_REFUSALS` against them in both directions.
+
+| Union | Module | Outcomes |
+|---|---|---|
+| `OpenResult` | `src/log/store.ts` | 4 |
+| `AppendResult` | `src/log/store.ts` | 3 |
+| `ReplaceResult` | `src/log/store.ts` | 4 |
+| `ImportOutcome` | `src/log/import-file.ts` | 2 |
+| `RecordOutcome` | `src/shell/roll-log.ts` | 5 |
+| `OpenRollLogResult` | `src/shell/roll-log.ts` | 4 |
+| `FlatCause` | `src/shell/renderer.ts` | 3 |
+| `SettingsStoreResult` | `src/settings/local-store.ts` | 2 |
+
+Twenty-seven outcomes. Nine raise a fault. Eighteen raise none and every one of them carries a
+written reason, which the check holds to a length so an empty excuse cannot pass. A success is the
+commonest of those, and two are not: `ReplaceResult.gone` is a roll the ring buffer dropped between
+two throws, which the caller writes again as a new roll, and `RecordOutcome.skipped` is an automatic
+failure that puts no dice on the table. The claim is about the DECLARATION, so the declaration is
+what is read; a check over the built bundle would report what a bundler kept.
+
+**A second denominator sits under `ImportOutcome.refused`.** One outcome, twelve codes, twelve
+sentences. `CsvRejection` in `src/log/csv.ts` declares nine and `ImportRejection` in
+`src/log/import-file.ts` adds three of its own, and `IMPORT_REJECTION_WORDS` is asserted against the
+parsed union.
+
+### The fifth case, and the sixth, seventh and eighth
+
+The plan names four. The code answers eight, and the four the plan did not name are:
+
+- **Another tab holds the log** (`blocked`). It is not a full disk and it is not a refusal, and the
+  player has a different thing to do about it.
+- **The log stopped** (`error`). A connection the browser closed under the application.
+- **The browser keeps no settings.** `localSettingsStore` answered a bare null, so the refusal had
+  no name to give a surface. It is now `openSettingsStore`, which answers `open` or `refused` with a
+  reason, and `localSettingsStore` is built on it, so no caller changed.
+- **A platform that cannot draw the table at all**, which is a different sentence from a table that
+  did not load, because the toggle back cannot clear it.
+
+### One surface, four slots
+
+Decision 19 records the shape. Eight faults over four rows, because the faults inside one slot cannot
+hold at once: a log that refused to open writes nothing, so it cannot then be full. The row count on
+the screen is therefore the slot count and never the fault count, which is what bounds the surface at
+360 px.
+
+**The banner holds no control, and that is forced rather than chosen.** Both keyboard walks of
+section 6 are fixed at eleven visits and thirty-five. A control that appeared with a fault would move
+them. Every recovery route is a control that already exists, and the row names it.
+
+**The banner is the live region and the rows inside it are not.** Unit 3.7 gave the flat-dice notice
+`role="status"` when it was the only surface there was. That row keeps its name — it is the same
+notice — and gives up its role, because a live region inside a live region is announced twice.
+`--blocked-chunk` now reads the role off the banner and asserts the row carries none.
+
+### Two recovery routes had the wrong words until the route was taken
+
+Both were found by driving the route, not by reasoning about it, and both are now measured on every
+run rather than quoted from one day.
+
+1. **A refused chunk.** The first draft said "Open More to ask for the table again." Measured: the
+   toggle alone can never bring the table back. A dynamic import that failed once is remembered by
+   the module map, so the same document makes NO second request at all — after the toggle the
+   chunk's resource list still held one entry of zero bytes. The screen falls again, correctly, and
+   the player is no better off. The words now read: reload this page, then open More and switch the
+   table on. The reload has to come first, because the stored fall keeps the dice flat until the
+   toggle clears it, and the toggle is what asks the fresh document for the chunk. The whole route
+   is then taken with the keyboard alone and the state is read after it: `renderer=tray`,
+   `canvases=1`, the row empty.
+2. **A full store.** The first draft said "Export the log from the history. Then make room on this
+   device." Measured: making room is not enough. A transaction that aborts on the quota leaves the
+   connection unusable, so the next throw answers `error` and not `full`, and the log still held one
+   roll. The words now read: make room on this device, then reload this page. After the reload the
+   log moved from 1 roll to 2 and the banner is clear.
+
+Both orders are one check each, and each check measures the FIRST step alone before it measures the
+whole route, so a change that repairs either one turns the check red rather than leaving a stale
+instruction on a player's screen.
+
+### No code identifier reaches the player
+
+Unit 4.4 found `1 ratingPoint` and `pool-banes-damage-ratings` printed on a player's screen and only
+a capture caught them. This unit had the same defect waiting in it: `importCsv` throws a message
+naming a column, a line and a value, and `readImportFile` printed that message straight at the
+player. In a file the player did not write, the column name is whatever the file says it is.
+
+So every rejection now carries a CODE. `CsvRejected` is an `Error` with a `rejection` field, every
+throw site goes through one `reject` call, and every existing message is unchanged so every existing
+check still reads what it read. The screen reads its words off the code and the message stays in
+`detail`, which nothing draws.
+
+The check has two halves and both are needed:
+
+- **Shape.** Every string these surfaces can print is enumerated from the tables — the faults, the
+  twelve rejections, the four probe readings and the four sheet notes — and held against seven
+  shapes an identifier takes and prose does not: a camel-case join, an under-score join, a hyphen
+  join of three or more words, a back tick, a brace or an angle, a dotted path, a run of capitals and
+  a call. **A single lower-case word is not on that list and cannot be**: `value`, `mode` and `note`
+  are all columns of the export schema and all ordinary English, so a rule against them would ban the
+  words a player needs. What marks an identifier on a screen is that it is COMPOUND.
+- **Membership.** The compound identifiers this code actually uses — the fault kinds, the slots, the
+  row names, the export columns, the rule-set identifiers, the probe readings and the rejection codes
+  — are compared against every printed string. This is the half that names
+  `pool-banes-damage-ratings`, which the shape half can only call a hyphen join.
+
+### Constraint 8, and the case it was written for
+
+A malformed import can carry hostile text. The run feeds a real `File` through the real picker whose
+first column is `<img src=x onerror=alert(1)>`, and three things are asserted: the surface quotes no
+part of the file, the whole destination holds that string nowhere as text, and the destination holds
+no image. The file NAME is still drawn on a successful import, because a player picked it and needs
+to know which file answered, and that is user text through `textContent`. Both halves are asserted.
+
+### What was driven, and how
+
+Nothing here hands a fault to a component. A check that renders the surface with a hand-made prop
+proves the words and never the wiring.
+
+| Fault | How the run reaches it |
+|---|---|
+| `settings-refused` | `localStorage` raises the error this browser really raises on an opaque origin, read out of a sandboxed frame first |
+| `log-refused` | `indexedDB.open` raises that same measured error, which is the route Unit 4.4 built |
+| `table-absent` | every WebGL context is refused before the first line of the page runs, and the probe answers `tray=false` |
+| `table-lost` | the 3D chunk is refused at the network layer, with the service worker and every cache removed first, which is the route Unit 3.7 built |
+| `log-error` | another connection asks the browser to delete the database. The application's own `versionchange` handler closes its connection, which is its own code and not an injection |
+| `import-refused` | a real `File` through the real picker |
+| `log-full` | `--quota-kb` launches the browser with its own storage limit and the browser raises `QuotaExceededError` |
+| `log-blocked` | **NOT JUDGED**, and counted in `skipped=` |
+
+**The skip, named.** A blocked open needs an UPGRADE for another connection to hold off, and
+`DB_VERSION` is 1, so no upgrade exists to block in the shipped application. The store's own
+`blocked` answer is driven against the real mechanism by `--log-store`, which opens a second
+connection at version 1 with no `versionchange` handler and asks for version 2. The surface for it
+is asserted under jsdom. It becomes judgeable the day `DB_VERSION` rises.
+
+**The control.** The first phase of the run loads the application with a store, a database and the
+chunk all in place, and asserts the banner holds four rows, none of them with text and every one
+`display: none`. Without it every check below would pass against a banner that always said
+something.
+
+**Two of the five are real under jsdom as well**, which is why they are measured there too: jsdom
+exposes no `indexedDB`, so `openLog` answers `refused` from the real call, and `store` of null is
+what `localSettingsStore` answers where the browser refuses `localStorage`.
+
+### The captures, all read after they were written
+
+Six surfaces at 360 px: `docs/design/0024-fault-nothing-kept-360.png`,
+`0024-fault-table-absent-360.png`, `0024-fault-table-lost-360.png`, `0024-fault-log-stopped-360.png`,
+`0024-fault-import-refused-360.png` and `0024-fault-storage-full-360.png`. Every one reads at a
+phone width, the instruction sits on its own line in bold, and two faults at once still leave the
+builder usable.
+
+**Seen in the captures, and stated rather than fixed:** a fault and the seven-day storage note look
+the same — both are a shaded pad with a marked left edge at full ink. Decision 19 records that as
+deliberate: they are the same kind of thing to a player. The differences are the bold instruction and
+the announcement.
+
+### The red proofs
+
+Seven injections. Each file was copied outside the repository first and restored by editing the
+injection back, and every restored file is byte-identical to its copy. No checkout and no stash
+touched any file.
+
+| # | The injection | The gate that went red |
+|---|---|---|
+| 1 | a fifth outcome `evicted` added to `AppendResult` | `reads every declared outcome out of the source: expected [ …(27) ] to deeply equal [ …(28) ]`, and the difference names `src/log/store.ts AppendResult.evicted` |
+| 2 | a rule-set identifier put in the words for a full store | `FAULT_TEXT log-full holds a hyphen join of three or more words`, and `FAULT_TEXT log-full names pool-banes-damage-ratings` |
+| 3 | a camel-case identifier put in the words for a stopped log | `FAULT_TEXT log-error holds a camel-case join: The log stopped after 1 ratingPoint.` |
+| 4 | a tenth rejection added to `CsvRejection` with no words | `holds words for every import rejection: expected [ …(10) ] to deeply equal [ …(11) ]` |
+| 5 | a Dismiss button added to every row of the banner | under jsdom `visits the eleven named items of section 6: expected [ 'fault-dismiss', …(11) ] to deeply equal [ 'collapse-button', …(9) ]`, and `the banner holds no tab stop: expected to have a length of +0 but got 2` |
+| 6 | the log open raises no fault | in the browser `filled=[settings-refused]` and `faults.a-browser-that-keeps-nothing-says-so-and-says-what-is-lost` went red |
+| 7 | the parser's own message printed at the player | in the browser the row read `csv import: column 1 is named "<img src=x onerror=alert(1)>". The export schema holds no such column.` and `faults.a-malformed-file-is-refused-in-the-player-s-own-words` went red |
+| 8 | the route back never clears the recorded fall | in the browser `checked_after=false renderer=flat` and `faults.the-route-back-from-a-refused-chunk-works-when-it-is-taken` went red |
+| 9 | a row renamed in the design document | `one name per slot: expected 3 to be 4` |
+
+### Measurements
+
+| Command | Exit |
+|---|---|
+| `npm run lint` | 0 |
+| `npm run typecheck` | 0 |
+| `npm test` | 0, over 455 vitest tests in 42 files plus 23 node tests |
+| `npm run build` | 0 |
+| `npm run perf` | 0, 203 steps against the 224 in `budgets.json`, scene digest unchanged |
+
+Harness modes, all outside the sandbox on the graphics card, every one exit 0:
+
+    --faults            checks=15 failures=0 skipped=2
+    --faults --quota-kb checks=11 failures=0 skipped=7
+    --blocked-chunk     checks=11 failures=0 skipped=0
+    --history           checks=21 failures=0 skipped=0
+    --shell             checks=8  failures=0 skipped=0
+    --sheet             checks=11 failures=0 skipped=0
+    --table             checks=10 failures=0 skipped=0
+    --offline           checks=8  failures=0 skipped=0
+    --tray              checks=7  failures=0 skipped=0
+    --log-store         checks=13 failures=0 skipped=0
+    --log-csv           checks=11 failures=0 skipped=0
+    --settings-store    checks=6  failures=0 skipped=0
+
+The two `--faults` runs cover seven of the eight declared faults between them and each one names
+what it left to the other. The eighth is the named skip above.
+
+Section 6 reads eleven visits before the throw and thirty-five after it, in both instruments and in
+both renderers: `--shell` with the 3D table running, `--blocked-chunk` with the chunk refused, and
+`src/app.test.tsx` under jsdom. The jsdom walk now runs with TWO faults on the screen, counted before
+it walks, so it is a walk of a screen that has something on the banner and not of a clean one. Both
+lists are read out of the design.
+
+The two bundle figures are read from `dist/` by `scripts/check-bundle-size.mjs` against
+`budgets.json`: initial JavaScript 44,486 gzip bytes and the lazy 3D chunk 151,876, both inside
+their budgets. The initial figure rose by 1,096 bytes over the branch point, which was measured
+rather than remembered: `main` was built in a throw-away worktree on the same day and read 43,390.
+The rise is the fault table, the banner, the twelve rejection sentences and the rejection class.
+Nothing was widened. The
+three render counters are unchanged at 841 draw calls, 842 triangles and 77 textures against ceilings
+of 968, 969 and 89. Branding gate `files_scanned=154`, `binary_skipped=85`, `hits=0`, exit 0,
+`enumerated=239`.
+
+### Reported, not fixed
+
+- **`RollLog.rolls()` can reject and nothing catches it.** A history opened on a connection the
+  browser closed leaves an unhandled rejection and an empty list, with no fault raised. It has no
+  declared refusal type, so the denominator above does not see it, and giving it one is a change to
+  `src/shell/roll-log.ts` that no unit has asked for.
+- **An export refused by the browser is still a message and not a fault.** `downloadBlob` answers a
+  boolean rather than a named refusal, so it is outside the parsed denominator. The words are
+  already the player's and they are already in the destination.
+- **A fault and the seven-day note read alike.** Stated above and recorded in Decision 19.
+- **The import fault is cleared by the next import and by nothing else.** A player who leaves the
+  history and comes back still reads it. That is the correct behaviour for a log that did not
+  change, and it is stated here because no check asserts a lifetime for it.
+
 
 ## Fix — the pointer probe aimed where no pointer can land
 

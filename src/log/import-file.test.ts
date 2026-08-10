@@ -6,9 +6,15 @@
 // refusal must leave that count at zero.
 
 import { describe, expect, it } from 'vitest';
-import { csvParts, MAX_IMPORT_CHARS } from './csv';
+import { csvParts, CsvRejected, importCsv, MAX_IMPORT_CHARS } from './csv';
 import type { LogEntry } from './entry';
-import { fileSizeReading, MAX_IMPORT_BYTES, readImportFile } from './import-file';
+import type { ImportRejection } from './import-file';
+import {
+  fileSizeReading,
+  IMPORT_REJECTION_WORDS,
+  MAX_IMPORT_BYTES,
+  readImportFile,
+} from './import-file';
 
 /** A file that counts every read of itself. */
 function fakeFile(text: string, size = new TextEncoder().encode(text).length) {
@@ -98,22 +104,25 @@ describe('the picked file', () => {
   });
 
   it('names the cause of every other refusal, and reads the file at most once', async () => {
-    const cases: readonly (readonly [string, string, string])[] = [
-      ['an empty file', '', 'empty'],
-      ['a file that is not a log', 'name,age\r\nada,36\r\n', 'not a log this application wrote'],
-      ['a header with no roll', csvParts([]).join(''), 'holds a header and no roll'],
+    const cases: readonly (readonly [string, ImportRejection, string])[] = [
+      ['an empty file', 'empty-file', ''],
+      ['a file that is not a log', 'wrong-header', 'name,age\r\nada,36\r\n'],
+      ['a header with no roll', 'no-rolls', csvParts([]).join('')],
     ];
-    for (const [what, text, wanted] of cases) {
+    for (const [what, rejection, text] of cases) {
       const { file, reads } = fakeFile(text);
       const outcome = await readImportFile(file);
       expect(outcome.kind, what).toBe('refused');
       if (outcome.kind !== 'refused') continue;
-      expect(outcome.reason, what).toContain(wanted);
+      expect(outcome.rejection, what).toBe(rejection);
+      expect(outcome.reason, what).toBe(IMPORT_REJECTION_WORDS[rejection]);
       expect(reads.count, `${what} is read at most once`).toBeLessThanOrEqual(1);
     }
   });
 
-  it('says why a file the browser could not read did not import', async () => {
+  it('keeps the browser’s own words out of the refusal a player reads', async () => {
+    // Unit 4.10. `NotReadableError` is a code identifier, and no code
+    // identifier reaches a player. It stays in `detail`, which nothing draws.
     const outcome = await readImportFile({
       name: 'gone.csv',
       size: 10,
@@ -121,8 +130,41 @@ describe('the picked file', () => {
     });
     expect(outcome.kind).toBe('refused');
     if (outcome.kind !== 'refused') return;
-    expect(outcome.reason).toContain('could not be read');
-    expect(outcome.reason).toContain('NotReadableError');
+    expect(outcome.rejection).toBe('unreadable');
+    expect(outcome.reason).toBe(IMPORT_REJECTION_WORDS['unreadable']);
+    expect(outcome.reason, 'the player reads no error name').not.toContain('NotReadableError');
+    expect(outcome.detail, 'and the person holding the file still can').toContain(
+      'NotReadableError',
+    );
+  });
+
+  it('carries a code for every rejection the parser can raise', () => {
+    // The parser names a column, a line and a value, because a person repairing
+    // the file needs all three. The screen reads the code instead. Both halves
+    // of that split are asserted here: the code, and the message.
+    const cases: readonly (readonly [string, ImportRejection, string])[] = [
+      ['an unknown column', 'wrong-header', 'name,age\r\nada,36\r\n'],
+      ['no header at all', 'no-header', ''],
+      [
+        'a value the schema refuses',
+        'bad-value',
+        csvParts([entry(1)])
+          .join('')
+          .replace(',pool,0,0,', ',pool,x,0,'),
+      ],
+    ];
+    for (const [what, rejection, text] of cases) {
+      let raised: unknown = null;
+      try {
+        importCsv(text);
+      } catch (error) {
+        raised = error;
+      }
+      expect(raised instanceof CsvRejected, what).toBe(true);
+      if (!(raised instanceof CsvRejected)) continue;
+      expect(raised.rejection, what).toBe(rejection);
+      expect(IMPORT_REJECTION_WORDS[raised.rejection], `${what} has words`).toBeTruthy();
+    }
   });
 
   it('reads a size a player can judge, and never two equal numbers', () => {

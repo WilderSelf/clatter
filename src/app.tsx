@@ -74,14 +74,10 @@ import type { PerfRecorder } from './shell/perf';
 import { createPerfRecorder } from './shell/perf';
 import { PerfOverlay } from './shell/overlay';
 import type { RendererState } from './shell/renderer';
-import {
-  askForTray,
-  fallToFlat,
-  noticeText,
-  startRenderer,
-  trayNote,
-  withDecision,
-} from './shell/renderer';
+import { askForTray, fallToFlat, startRenderer, trayNote, withDecision } from './shell/renderer';
+import type { Fault } from './shell/faults';
+import { faultOf, faultsOf } from './shell/faults';
+import { FaultBanner } from './shell/fault-banner';
 import type { TrayMount, TraySpots } from './shell/table';
 import { NO_SPOTS, Table } from './shell/table';
 import type { AppState, DieView, PoolCell } from './shell/state';
@@ -1159,19 +1155,18 @@ function Sheet({
  * and a mount of its own.
  */
 /**
- * Why the log could not be opened, in the words a player reads.
+ * Which fault each refusal of the log raises — Unit 4.10.
  *
- * Three refusals, three sentences. `src/log/store.ts` answers them apart on
- * purpose, because a browser that refuses a database at all and a full disk
- * need different words. Unit 4.10 owns the error surfaces of the whole
- * application, and these three are the ones this unit can produce.
+ * `src/log/store.ts` answers the three apart on purpose, because a browser that
+ * refuses a database at all, a second tab holding it, and a fault of the
+ * database itself need different words and different routes back. The words
+ * live in `src/shell/faults.ts` and are not restated here.
  */
-const LOG_FAILURE_TEXT: Readonly<Record<'refused' | 'blocked' | 'error', string>> = {
-  refused:
-    'This browser keeps no log. A private window refuses storage, so the rolls are lost when the tab closes.',
-  blocked: 'Another tab of this application holds the log. Close it, then open the history again.',
-  error: 'The log did not open. The rolls of this session are not kept.',
-};
+const LOG_OPEN_FAULT = {
+  refused: 'log-refused',
+  blocked: 'log-blocked',
+  error: 'log-error',
+} as const;
 
 export function App({
   random = cryptoRandom(),
@@ -1246,7 +1241,13 @@ export function App({
   const [storage, setStorage] = useState<{ usage: number | null; quota: number | null } | null>(
     null,
   );
-  const [logFailure, setLogFailure] = useState<string | null>(null);
+  // ---- The faults the player is shown — Unit 4.10 ----
+  //
+  // One state per slot of the banner. The table slot is derived from the
+  // renderer state instead, because "says so once" already lives there and a
+  // second copy of it would fall out of step with the first.
+  const [logFault, setLogFault] = useState<Fault | null>(null);
+  const [importFault, setImportFault] = useState<Fault | null>(null);
   // ---- The sound — Unit 3.6, the interface half ----
   //
   // One engine for the life of the screen. It is built from the stored record
@@ -1564,7 +1565,7 @@ export function App({
   if (rollLog.current === null) {
     rollLog.current = openRollLog(logOptions).then((opened: OpenRollLogResult) => {
       if (opened.kind === 'open') return opened.log;
-      setLogFailure(LOG_FAILURE_TEXT[opened.kind]);
+      setLogFault(faultOf(LOG_OPEN_FAULT[opened.kind]));
       return null;
     });
   }
@@ -1589,13 +1590,12 @@ export function App({
     void rollLog.current?.then(async (held) => {
       if (held === null) return;
       const outcome = await held.record(thrown);
-      if (outcome.kind === 'full' || outcome.kind === 'error') {
-        setLogFailure(
-          outcome.kind === 'full'
-            ? 'The storage is full. This roll is not in the log. Export the log and clear some space.'
-            : LOG_FAILURE_TEXT.error,
-        );
-      }
+      // A write that lands clears the fault the write before it raised. The
+      // state is read after the recovery and never before it, so a full disk
+      // the player made room on stops being reported.
+      if (outcome.kind === 'full') setLogFault(faultOf('log-full'));
+      else if (outcome.kind === 'error') setLogFault(faultOf('log-error'));
+      else if (outcome.kind === 'wrote' || outcome.kind === 'rewrote') setLogFault(null);
     });
   }, [state.throwOrdinal]);
 
@@ -1622,17 +1622,20 @@ export function App({
    * THE STORE afterwards and never out of the rolls that went in, so what the
    * player sees is the log the database holds.
    */
-  const importLog = async (imported: readonly LogEntry[]): Promise<string | null> => {
+  const importLog = async (imported: readonly LogEntry[]): Promise<boolean> => {
     const held = await rollLog.current;
-    if (held === null) return LOG_FAILURE_TEXT.error;
+    if (held === null) {
+      setLogFault(faultOf('log-error'));
+      return false;
+    }
     const written = await held.replace(imported);
     if (written.kind !== 'written') {
-      return written.kind === 'full'
-        ? 'The storage is full. The log was not replaced. Clear some space and import again.'
-        : LOG_FAILURE_TEXT.error;
+      setLogFault(faultOf(written.kind === 'full' ? 'log-full' : 'log-error'));
+      return false;
     }
+    setLogFault(null);
     setRolls(await held.rolls());
-    return null;
+    return true;
   };
 
   // The focus on the way back from the history.
@@ -1675,6 +1678,23 @@ export function App({
     };
   }, []);
 
+  // ---- The faults, one entry per slot — Unit 4.10 ----
+  //
+  // The table slot is read off the renderer state, because "says so once" is
+  // tied to the fall itself and lives there. A settings store the browser
+  // refused is the record this screen opened with, so it holds for the whole
+  // session and is derived rather than raised.
+  //
+  // The same list is drawn on the roll flow and in the history destination. The
+  // destination REPLACES the roll flow, so a fault raised in one of them must
+  // still be readable in the other, and one list is what makes that true.
+  const drawn = faultsOf({
+    table: renderer.noticed ? renderer.choice.cause : null,
+    log: logFault,
+    imported: importFault,
+    settingsRefused: store === null,
+  });
+
   // The history is a SEPARATE DESTINATION, so it replaces the roll flow rather
   // than covering it. Section 3 of `docs/design/0002-screen-design.md` says so,
   // and Decision 3 of `docs/design/0012-settled-decisions.md` settles it: the
@@ -1686,7 +1706,8 @@ export function App({
     return (
       <History
         entries={rolls}
-        failure={logFailure}
+        drawn={drawn}
+        onFault={setImportFault}
         // The disclosure is the way back in, so the focus returns to the
         // control that led here. The effect above moves it, because the roll
         // flow is not in the document yet at this point.
@@ -1708,19 +1729,18 @@ export function App({
         class={onTheTable && !state.builderOpen ? 'shell-m stretch' : 'shell-m'}
         data-el="shell-mid"
       >
-        {/* The fall to flat dice, said once.
+        {/* Every fault the player is shown — Unit 4.10, Decision 19.
 
-            The element is in the document from the first paint and carries no
-            text, so it is a live region a reader is already watching when the
-            fall happens. A region built at the moment it fills is announced by
-            some readers and not by others. It is empty until the fall, and CSS
-            hides an empty one, so it costs the drawn screen no height.
+            One row per slot, all four in the document from the first paint and
+            all four empty until something fails. A live region built at the
+            moment it fills is announced by some readers and not by others, and
+            CSS hides an empty row, so the drawn screen is unchanged while
+            nothing has failed. The fall to flat dice is the first row and keeps
+            the name Unit 3.7 gave it.
 
-            It holds no tab stop, so neither keyboard walk of section 6 changes.
-            Section 3 lists it under the read-only parts. */}
-        <p class="fall-note" data-el="flat-fallback-note" role="status">
-          {renderer.noticed ? noticeText(renderer.choice) : ''}
-        </p>
+            The banner holds no tab stop, so neither keyboard walk of section 6
+            changes. Section 3 lists it under the read-only parts. */}
+        <FaultBanner drawn={drawn} />
         {state.builderOpen ? <Builder state={state} setState={setState} /> : null}
         {/* The dice, in whichever renderer the choice of Unit 3.7 answered.
             The table draws them and the cells lie over it, or the cells draw

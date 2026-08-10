@@ -781,6 +781,48 @@ body {
   display: none;
 }
 
+/* ---------------- the fault banner — Unit 4.10, Decision 19 ----------------
+
+   One row per slot. Every row is in the document from the first paint and
+   carries no text, so a reader is already watching the region when a fault
+   arrives, and an empty banner takes no height at all.
+
+   A fault is a warning and not a caption, so it reads at full ink over a shaded
+   pad with a marked edge, exactly as the seven-day note does. The dimmed
+   treatment of a caption is what a player skips. */
+/* A plain block, not a grid. A grid gap would draw between two rows that are
+   both `display: none`, and the banner would then take height with no fault on
+   it. The margin rides on the row instead, where an empty row removes it. */
+.faults {
+  display: block;
+}
+
+.fault {
+  margin: 0 0 8px;
+  padding: var(--s2) var(--s3);
+  background: var(--sunken);
+  border-left: 3px solid var(--mark-bane);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  /* A refusal may quote a file name the player wrote. It wraps rather than
+     pushing the layout wider than a phone. */
+  overflow-wrap: anywhere;
+}
+
+.fault:empty {
+  display: none;
+}
+
+/* What to do next. It reads as its own line at every width, because a player
+   reading a fault is looking for the instruction and not for the diagnosis. */
+.fault-n {
+  display: block;
+  margin-top: 3px;
+  font-weight: 600;
+}
+
 /* ---------------- the action bar ---------------- */
 
 .costrow {

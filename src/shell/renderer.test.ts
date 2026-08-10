@@ -187,7 +187,10 @@ describe('what the player reads', () => {
     expect(
       noticeText(fell),
       'a fall the toggle can clear names the toggle, and the other one does not',
-    ).toBe('The table did not load. The dice are flat now. Open More to ask for the table again.');
+    ).toBe(
+      'The table did not load. The dice are flat now. ' +
+        'Reload this page. Then open More and switch the table on.',
+    );
     expect(noticeText(below).includes('More')).toBe(false);
   });
 
