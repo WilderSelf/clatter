@@ -1,34 +1,51 @@
-// The application shell and the pool builder — Unit 2.1.
+// The application shell — Units 2.1 and 2.2.
 //
 // The drawn screen is `docs/design/0013-screen-final.html` and the counting
-// rules are `docs/design/0002-screen-design.md`. Three of them decide this file:
+// rules are `docs/design/0002-screen-design.md`. Four of them decide this file:
 //
 //   * The header carries status and never navigates. Decision 2.
 //   * The footer is persistent, and the difficulty rides on the roll button.
 //   * The pool bar is ONE control with a roving tab index, and the difficulty is
 //     ONE control over seven notches. Section 5 and section 2.
+//   * The tray is ONE control as well, over the kept shelf and the throw zone,
+//     with pool order inside each zone. Decision 4.
 //
-// This unit throws no dice. Units 2.2 and 2.3 do that. `Roll` collapses the
-// builder and shows the table, and `Edit pool` brings the builder back, so both
-// rest states of section 1 are reachable and drawn.
+// Unit 2.1 built the builder and both rest states. Unit 2.2 throws the pool,
+// draws the dice flat, and prices the push from `previewPush`.
+//
+// **This unit builds no history matrix.** The matrix moves into the history
+// record, where Decision 3 transposes it to one row per die. `LEDGER.md` holds
+// the deferral and names the unit that carries the acceptance with it.
 //
 // Every rule comes from `src/shell/state.ts`, which asks the rules core. No
-// count, no cap and no difficulty effect is worked out here.
+// count, no cap, no lock and no cost is worked out here.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Die } from './rules/die';
-import type { AppState, PoolCell } from './shell/state';
+import type { RandomSource } from './rules/random';
+import { cryptoRandom } from './rules/random';
+import type { AppState, DieView, PoolCell } from './shell/state';
 import {
+  canPush,
   composition,
+  costLine,
+  dieView,
   difficultyPreview,
   emptyState,
   nudge,
   poolCells,
   POOL_CAPS,
+  profileOf,
+  pushNote,
+  pushNow,
+  readout,
+  rollNow,
   signedDifficulty,
   throwDice,
+  toggleDie,
   withDifficulty,
   withMode,
+  zonesOf,
 } from './shell/state';
 import { mountTray } from './tray/scene';
 
@@ -62,12 +79,16 @@ function moveWithin(length: number, from: number, delta: number): number {
  * render, so the two cannot disagree.
  */
 function StatusLine({ state, dice }: { state: AppState; dice: readonly Die[] }) {
-  // No throw has landed. Unit 2.2 fills the result half of the line.
-  const successes = 0;
-  const banes = 0;
-  const pushes = 0;
-  const stress = state.counts.stress;
-  const spoken = `${successes} successes. ${banes} banes. Push ${pushes}. ${composition(dice)}`;
+  const { successes, banes, stress, pushes } = readout(state);
+  // Before a throw the line names what the next throw takes. After one it names
+  // what landed, so the result reaches the live region on the roll and on the
+  // push. Both sentences come from the same render as the row beside them.
+  const table =
+    state.result === null
+      ? composition(dice)
+      : `The table holds ${state.result.dice.length} ` +
+        `${state.result.dice.length === 1 ? 'die' : 'dice'}. Stress ${stress}.`;
+  const spoken = `${successes} ${successes === 1 ? 'success' : 'successes'}. ${banes} ${banes === 1 ? 'bane' : 'banes'}. Push ${pushes}. ${table}`;
   return (
     <header class="shell-h" data-el="shell-header">
       <div class="statusline" data-el="status-line" role="status" aria-live="polite">
@@ -81,7 +102,9 @@ function StatusLine({ state, dice }: { state: AppState; dice: readonly Die[] }) 
             {banes}
           </span>
           <i class="st-rule" />
-          <span class="st-item st-dim">{dice.length} dice</span>
+          <span class="st-item st-dim">
+            {state.result === null ? dice.length : state.result.dice.length} dice
+          </span>
           <span class="st-item st-dim">
             <span class={stress >= POOL_CAPS.stress ? 'st-warn' : undefined}>stress {stress}</span>
           </span>
@@ -298,6 +321,226 @@ function Builder({ state, setState }: { state: AppState; setState: (change: Chan
 }
 
 /**
+ * One die, drawn flat.
+ *
+ * Shape carries every meaning colour carries, which section 7 requires. The
+ * three lock states differ by ground and by frame: a rule lock is a solid frame
+ * on a shaded pad, a choice lock is a dashed frame, and a loose die is lifted
+ * and carries no pad. A success is a circle and a bane is a triangle. The
+ * accessible name says all of it again in words, so nothing rides on sight.
+ *
+ * A die the rules hold takes no press, so it is not a button. It still holds a
+ * place in the arrow walk, because a player who cannot press a die must still
+ * be able to read it.
+ */
+function Slot({
+  view,
+  shaken,
+  active,
+  onPress,
+}: {
+  view: DieView;
+  shaken: boolean;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const classes = ['slot', view.state];
+  if (view.die.type === 'stress') classes.push('stress');
+  if (shaken) classes.push('thrown');
+  const face =
+    view.die.faces === 6 && view.value !== null ? (
+      <span class={`die pips f${view.value}`}>
+        {view.successes > 0 ? (
+          <span class="badge s" aria-hidden="true">
+            {view.successes}
+          </span>
+        ) : null}
+        {view.bane ? (
+          <span class="badge b" aria-hidden="true">
+            bane
+          </span>
+        ) : null}
+      </span>
+    ) : (
+      // Pips read to six. A step die, a gear die of eight faces and an artifact
+      // die print the number instead, so every face count carries its value.
+      <span class="die num">
+        {view.value}
+        {view.successes > 0 ? (
+          <span class="badge s" aria-hidden="true">
+            {view.successes}
+          </span>
+        ) : null}
+        {view.bane ? (
+          <span class="badge b" aria-hidden="true">
+            bane
+          </span>
+        ) : null}
+      </span>
+    );
+  const caption = (
+    <span class="cap" aria-hidden="true">
+      <b>{view.tag}</b>
+      <em>{view.word}</em>
+    </span>
+  );
+  if (view.state === 'rule') {
+    return (
+      <div
+        class={classes.join(' ')}
+        data-el={view.element}
+        role="img"
+        tabIndex={active ? 0 : -1}
+        aria-label={view.label}
+      >
+        {face}
+        {caption}
+      </div>
+    );
+  }
+  return (
+    <button
+      class={classes.join(' ')}
+      data-el={view.element}
+      type="button"
+      tabIndex={active ? 0 : -1}
+      aria-pressed={view.state === 'choice'}
+      aria-label={view.label}
+      onClick={onPress}
+    >
+      {face}
+      {caption}
+    </button>
+  );
+}
+
+function Zone({
+  kind,
+  title,
+  note,
+  views,
+  thrown,
+  activeId,
+  onPress,
+}: {
+  kind: string;
+  title: string;
+  note: string;
+  views: readonly DieView[];
+  thrown: readonly string[];
+  activeId: string;
+  onPress: (id: string) => void;
+}) {
+  return (
+    <div class={kind === 'kept-shelf' ? 'shelf' : 'throwzone'} data-el={kind}>
+      <p class="band-h">
+        {title}{' '}
+        <span>
+          {views.length} {views.length === 1 ? 'die' : 'dice'} — {note}
+        </span>
+      </p>
+      <div class="tray">
+        {views.map((view) => (
+          // The key carries the generation of the dice that moved, so the shake
+          // plays again on every throw. A die that stayed keeps its key and
+          // therefore its element, and it does not shake.
+          <Slot
+            key={
+              thrown.includes(view.die.id)
+                ? `${view.die.id}:${view.die.values.length}`
+                : view.die.id
+            }
+            view={view}
+            shaken={thrown.includes(view.die.id)}
+            active={view.element === activeId}
+            onPress={() => onPress(view.die.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The dice as they lie, over the kept shelf and the throw zone.
+ *
+ * One control, one arrow habit, exactly like the pool bar. Section 2 counts a
+ * composite widget as one tab stop, and section 6 walks the shelf first and the
+ * zone second with pool order inside each. Decision 4 settles that split: the
+ * lock state chooses the zone and nothing else.
+ */
+function DiceTray({ state, setState }: { state: AppState; setState: (change: Change) => void }) {
+  const profile = profileOf(state);
+  const zones = zonesOf(state);
+  const kept = zones.kept.map((die) => dieView(die, profile));
+  const loose = zones.loose.map((die) => dieView(die, profile));
+  const order = [...kept, ...loose];
+  const [activeId, setActiveId] = useState(order[0]?.element ?? '');
+  const tray = useRef<HTMLDivElement>(null);
+  const active = order.some((view) => view.element === activeId)
+    ? activeId
+    : (order[0]?.element ?? '');
+
+  // A throw puts the roving tab index back on the first die of the shelf. The
+  // same twenty-five dice come back every throw, so a cell the player left it
+  // on is still a cell, and the tray would otherwise open the next throw in
+  // the middle of itself.
+  const first = order[0]?.element ?? '';
+  useEffect(() => setActiveId(first), [state.thrown]);
+
+  const onKeyDown = (event: KeyboardEvent): void => {
+    const held = tray.current;
+    const step: Record<string, number> = {
+      ArrowRight: 1,
+      ArrowDown: 1,
+      ArrowLeft: -1,
+      ArrowUp: -1,
+    };
+    const delta = step[event.key];
+    if (held === null || delta === undefined) return;
+    const cells = [...held.querySelectorAll<HTMLElement>('.slot')];
+    const from = cells.findIndex((cell) => cell.contains(held.ownerDocument.activeElement));
+    if (from < 0) return;
+    const next = cells[moveWithin(cells.length, from, delta)];
+    if (next === undefined) return;
+    event.preventDefault();
+    setActiveId(next.getAttribute('data-el') ?? '');
+    next.focus();
+  };
+
+  return (
+    <div
+      class="zones"
+      data-el="dice-tray"
+      data-composite=""
+      role="toolbar"
+      aria-label="The dice"
+      ref={tray}
+      onKeyDown={onKeyDown}
+    >
+      <Zone
+        kind="kept-shelf"
+        title="Kept"
+        note="these stay on the table"
+        views={kept}
+        thrown={state.thrown}
+        activeId={active}
+        onPress={(id) => setState((previous) => toggleDie(previous, id))}
+      />
+      <Zone
+        kind="throw-zone"
+        title="In the cup"
+        note="the push throws these"
+        views={loose}
+        thrown={state.thrown}
+        activeId={active}
+        onPress={(id) => setState((previous) => toggleDie(previous, id))}
+      />
+    </div>
+  );
+}
+
+/**
  * The table.
  *
  * It stays in the document across both rest states and hides while the builder
@@ -305,7 +548,9 @@ function Builder({ state, setState }: { state: AppState; setState: (change: Chan
  * and a hidden container measures nothing. The tray is behind a dynamic import,
  * so nothing of it is fetched until the player first closes the builder.
  *
- * No die lands here yet. Unit 2.2 throws the pool onto this table.
+ * The flat dice of this unit render in its place the moment a throw lands, so
+ * this element is the empty table and nothing else. Unit 3.7 chooses between
+ * the two renderers, and until it does the 3D route stays reachable here.
  */
 function Table({ shown }: { shown: boolean }) {
   const container = useRef<HTMLDivElement>(null);
@@ -387,8 +632,19 @@ function Sheet({
   );
 }
 
-export function App() {
-  const [state, setState] = useState<AppState>(() => emptyState('pool'));
+/**
+ * The screen.
+ *
+ * `random` is the source the throws draw from. It is `cryptoRandom` in the
+ * application, which Constraint 7 fixes, and a seeded source is injected here
+ * by a test alone. `initial` is the state a test opens the screen in, so a
+ * table with dice on it can be asserted without a search for a seed.
+ */
+export function App({
+  random = cryptoRandom(),
+  initial,
+}: { random?: RandomSource; initial?: AppState } = {}) {
+  const [state, setState] = useState<AppState>(() => initial ?? emptyState('pool'));
   const dice = throwDice(state);
   const toggle = useRef<HTMLButtonElement>(null);
   const closeSheet = (): void => {
@@ -402,13 +658,14 @@ export function App() {
 
       <main class="shell-m" data-el="shell-mid">
         {state.builderOpen ? <Builder state={state} setState={setState} /> : null}
-        <Table shown={!state.builderOpen} />
+        {state.result === null ? null : <DiceTray state={state} setState={setState} />}
+        <Table shown={!state.builderOpen && state.result === null} />
       </main>
 
       <div class="shell-f" data-el="shell-footer">
         {state.builderOpen ? null : (
           <div class="costrow" data-el="cost-row">
-            <p class="cost-t">No dice are on the table.</p>
+            <p class="cost-t">{costLine(state)}</p>
             <button
               class="icon-btn"
               type="button"
@@ -419,7 +676,7 @@ export function App() {
             </button>
           </div>
         )}
-        <div class="bar two">
+        <div class={state.result === null ? 'bar two' : 'bar'}>
           <button
             class="btn ghost"
             type="button"
@@ -433,16 +690,28 @@ export function App() {
             More
           </button>
           <button
-            class="btn go"
+            class={state.result === null ? 'btn go' : 'btn'}
             type="button"
             data-el="roll-button"
-            onClick={() => setState((previous) => ({ ...previous, builderOpen: false }))}
+            onClick={() => setState((previous) => rollNow(previous, random))}
           >
             {state.builderOpen ? 'Roll' : 'Roll again'}
             <small>
               {dice.length} dice, difficulty {signedDifficulty(state.difficulty)}
             </small>
           </button>
+          {state.result === null ? null : (
+            <button
+              class="btn go"
+              type="button"
+              data-el="push-button"
+              disabled={!canPush(state)}
+              onClick={() => setState((previous) => pushNow(previous, random))}
+            >
+              Push
+              <small>{pushNote(state)}</small>
+            </button>
+          )}
         </div>
       </div>
 

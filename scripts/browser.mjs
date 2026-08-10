@@ -5571,7 +5571,17 @@ async function runOffline(page, options, checks, server) {
 // ---------------------------------------------------------------------------
 
 /** The number words section 6 may count in. An unknown word is a failure. */
-const VISIT_WORDS = { eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13 };
+const VISIT_WORDS = {
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+};
 
 /**
  * Read the before-throw walk out of section 6 of the screen design.
@@ -5580,19 +5590,20 @@ const VISIT_WORDS = { eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirte
  * list, and a sentence splitting the list into Tab stops and arrow visits — so
  * the list carries a denominator that can fail.
  */
-export function beforeThrowVisits(markdown) {
-  const from = markdown.indexOf('**Before the throw');
-  const to = markdown.indexOf('**After the throw');
+export function beforeThrowVisits(markdown, when = 'Before') {
+  const from = markdown.indexOf(`**${when} the throw`);
+  const to =
+    when === 'Before' ? markdown.indexOf('**After the throw') : markdown.indexOf('\n## 7.');
   if (from < 0 || to <= from) {
     throw new Error('section 6 no longer holds a before-throw list and an after-throw list');
   }
   const section = markdown.slice(from, to);
-  const word = /\*\*Before the throw — (\w+) visits\.\*\*/.exec(section)?.[1];
+  const word = new RegExp(`\\*\\*${when} the throw — (\\w+) visits\\.\\*\\*`).exec(section)?.[1];
   const stated = VISIT_WORDS[word];
   if (stated === undefined) {
-    throw new Error(`section 6 states the before-throw count as ${word}, which is unread`);
+    throw new Error(`section 6 states the ${when} count as ${word}, which is unread`);
   }
-  const numbered = [...section.matchAll(/^(\d+)\. `([a-z-]+)`/gm)];
+  const numbered = [...section.matchAll(/^(\d+)\. `([a-z0-9-]+)`/gm)];
   numbered.forEach(([, index], place) => {
     if (Number(index) !== place + 1) throw new Error(`the numbered list jumps at item ${index}`);
   });
@@ -5682,7 +5693,14 @@ async function walkShell(page, cap) {
   const visits = [];
   let firstStop = null;
   for (let stops = 0; stops < cap; stops += 1) {
+    // A Tab that moves nothing is a Tab that left the document. Firefox hands
+    // the focus to its own chrome after the last control and leaves
+    // `document.activeElement` where it was, so the walk would otherwise
+    // record that last control a second time. Measured on this host on
+    // 2026-08-09.
+    await markFocus(page);
     await page.keyboard.press('Tab');
+    if (!(await focusMoved(page))) break;
     const stop = await readVisit(page, false);
     if (stop === null) break;
     if (stops > 0 && stop.name === firstStop) break;
@@ -5699,7 +5717,7 @@ async function walkShell(page, cap) {
     await page.keyboard.press('ArrowLeft');
     const start = await readVisit(page, true);
     visits.push({ name: start.name, by: 'arrow', implicit: false });
-    for (let taken = 0; taken < 20; taken += 1) {
+    for (let taken = 0; taken < 60; taken += 1) {
       await page.keyboard.press('ArrowRight');
       const inner = await readVisit(page, true);
       if (inner === null || inner.name === start.name) break;
@@ -5781,6 +5799,130 @@ async function runShell(page, options, checks) {
     for (const size of SHELL_WIDTHS) {
       await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: 1 });
       const path = join(options.captureShell, `shell-builder-${size.name}.png`);
+      await page.screenshot({ path });
+      console.log(`browser: shell captured ${size.name} to ${path}`);
+    }
+    await page.setViewport({ width: 360, height: 760, deviceScaleFactor: 1 });
+  }
+
+  // ---- The throw, and the walk of rest B — Unit 2.2 ----
+  //
+  // The dice the throw produces decide which zone each die lands in, so the
+  // after-throw list cannot be compared name for name against a document
+  // written over one drawn result. What IS compared: the count, the two
+  // non-die ends of the list by position, the die names as a set, and the
+  // order the real keys walked against the order the DOM holds. A die missing
+  // from either zone fails the set, and a zone drawn in the wrong order fails
+  // the walk.
+  const after = beforeThrowVisits(design, 'After');
+  //
+  // The drawn screen holds a table the player may push. Under the profile the
+  // application rolls, a stress die showing a bane stops every further push,
+  // and ten stress dice show one about five throws in six. The walk therefore
+  // throws again until the push is live and reports how many throws it took. A
+  // run that never reaches a live push fails and names the limit.
+  const thrown = await page.evaluate(async (limit) => {
+    const frame = () =>
+      new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+    const pushButton = () => document.querySelector('[data-el="push-button"]');
+    let taken = 0;
+    do {
+      document.querySelector('[data-el="roll-button"]').click();
+      await frame();
+      taken += 1;
+    } while (taken < limit && pushButton() !== null && pushButton().disabled);
+    const slots = (name) =>
+      [...document.querySelectorAll(`[data-el="${name}"] .slot`)].map((slot) => slot.dataset.el);
+    return {
+      tray: slots('dice-tray'),
+      kept: slots('kept-shelf'),
+      loose: slots('throw-zone'),
+      push: document.querySelector('[data-el="push-button"]') !== null,
+      pushDisabled: document.querySelector('[data-el="push-button"]')?.disabled ?? null,
+      cost: (document.querySelector('[data-el="cost-row"] .cost-t')?.textContent ?? '').trim(),
+      spoken: (
+        document.querySelector('[data-el="status-line"] .sr-only')?.textContent ?? ''
+      ).trim(),
+      taken,
+      limit,
+    };
+  }, 40);
+  const dieNames = after.names.filter((name) => name.startsWith('die-'));
+  console.log(
+    `browser: shell threw throws=${thrown.taken} dice=${thrown.tray.length} ` +
+      `kept=${thrown.kept.length} loose=${thrown.loose.length} ` +
+      `push_disabled=${thrown.pushDisabled} cost=${JSON.stringify(thrown.cost)}`,
+  );
+  checks.push({
+    name: 'shell.a-table-the-player-may-push',
+    ok: thrown.push === true && thrown.pushDisabled === false,
+    detail:
+      `${thrown.taken} of at most ${thrown.limit} throws reached a table the push button ` +
+      `takes, and the cost row reads ${JSON.stringify(thrown.cost)}. The blocker is a field ` +
+      `of the profile, not a state of the screen: a stress die showing a bane stops the push, ` +
+      `and ten stress dice show one about five throws in six. The walk below needs the live ` +
+      `push, because the section 6 list holds thirty stops and a dead button holds none.`,
+  });
+  checks.push({
+    name: 'shell.the-tray-holds-every-die-once',
+    ok:
+      thrown.tray.length === dieNames.length &&
+      thrown.kept.length + thrown.loose.length === dieNames.length &&
+      String(thrown.tray) === String([...thrown.kept, ...thrown.loose]) &&
+      String([...thrown.tray].sort()) === String([...dieNames].sort()),
+    detail:
+      `the throw put ${thrown.tray.length} dice on the table against the ${dieNames.length} ` +
+      `section 6 names, ${thrown.kept.length} on the shelf and ${thrown.loose.length} in the ` +
+      `zone, and the two sum to ${thrown.kept.length + thrown.loose.length}. The shelf comes ` +
+      `first in the tray. The names are the same set as the document's, and which die lands ` +
+      `in which zone follows this throw, not the drawn one.`,
+  });
+
+  // Put the sequential focus navigation starting point back at the top of the
+  // screen. The walk of rest A left it on the roll button, and neither `blur()`
+  // nor a click moves it, so the first Tab below would reach the footer and the
+  // walk would stop one stop later. Measured on this host on 2026-08-09, where
+  // the same call inside the evaluate above did not hold: the render that
+  // followed the throw took the focus away again, so this runs alone and last.
+  await page.evaluate(() => {
+    const head = document.querySelector('[data-el="shell-header"]');
+    head.setAttribute('tabindex', '-1');
+    head.focus();
+    head.removeAttribute('tabindex');
+  });
+  const walkedB = await walkShell(page, after.stated + 8);
+  const namedB = walkedB.filter((visit) => !visit.implicit);
+  const implicitB = walkedB.filter((visit) => visit.implicit).map((visit) => visit.name);
+  const walkB = namedB.map((visit) => visit.name);
+  const positionsB = (by) => namedB.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
+  // The list the screen must walk: the tray, then the dice in the order the
+  // DOM holds them, then the four footer stops the document names.
+  const wantedB = [after.names[0], ...thrown.tray, ...after.names.slice(after.names.length - 4)];
+  console.log(
+    `browser: shell after_throw walked=[${walkB.join(', ')}] ` +
+      `implicit_scroll_stops=${implicitB.length} [${implicitB.join(', ')}]`,
+  );
+  checks.push({
+    name: 'shell.the-keyboard-order-after-the-throw',
+    ok:
+      walkB.length === after.stated &&
+      walkB.every((name, index) => name === wantedB[index]) &&
+      String(positionsB('tab')) === String(after.tab) &&
+      String(positionsB('arrow')) === String(after.arrow),
+    detail:
+      `real Tab and arrow presses reached ${walkB.length} authored visits against the ` +
+      `${after.stated} section 6 names. Walked [${walkB.join(', ')}]. ` +
+      `Wanted [${wantedB.join(', ')}]. Tab reached items [${positionsB('tab')}] against ` +
+      `[${after.tab}], and the arrows reached [${positionsB('arrow')}] against ` +
+      `[${after.arrow}]. The tray is one Tab stop over ${thrown.tray.length} dice, and the ` +
+      `browser added ${implicitB.length} scroll stops of its own at [${implicitB.join(', ')}], ` +
+      `reported and not counted.`,
+  });
+
+  if (options.captureShell !== null) {
+    for (const size of SHELL_WIDTHS) {
+      await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: 1 });
+      const path = join(options.captureShell, `shell-roll-${size.name}.png`);
       await page.screenshot({ path });
       console.log(`browser: shell captured ${size.name} to ${path}`);
     }

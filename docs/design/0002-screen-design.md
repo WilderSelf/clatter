@@ -239,7 +239,32 @@ and the zone count must sum to the pool size, so a die lost between the zones fa
 
 A tab stop inside a composite widget is the cell that carries `tabindex="0"`. A test asserts the
 container by walking up from the focused element, so a change of the active cell does not break the
-order.
+order. A throw puts that cell back on the first die of the shelf, because the same dice come back
+on every throw and the tray must not open in the middle of itself.
+
+### The stop the browser adds, which the lists above do not hold
+
+The two lists are authored. A browser walks one more stop than the list above holds while the middle
+region scrolls, and that stop belongs to the browser.
+
+`.shell-m` scrolls, which Decision 6 requires: the layout degrades by scrolling and never by
+clipping. A browser gives a scrollable box its own tab stop, so a keyboard can scroll a region that
+holds no control. **Do not remove the scroll to make the count come out.** The stop is the cost of a
+layout that never clips, and the drawn screen earns the same one.
+
+The extra stop carries no `tabindex`, and no name in the markup asks for it. It is therefore
+identified by measure and never by name: the focused element holds no `tabindex` attribute, and its
+`scrollHeight` is greater than its `clientHeight`.
+
+**How the count is reconciled.** The walk reports such a stop under its own name and does not count
+it against the authored list. The authored counts stay eleven and thirty. A run that reports one
+extra stop and eleven authored visits agrees with this document. Unit 4.11 asserts the authored
+lists and reports the browser's stops beside them.
+
+The stop appears only while the region overflows, so the reading follows the height and the number
+of dice. Measured on 2026-08-09 through `node scripts/browser.mjs --shell`, over the built output in
+Firefox: at 360 by 660 with 25 dice on the table the walk reported one stop at `shell-mid`; at 360
+by 760 and at 800 by 600 it reported none, because the middle fits at those heights.
 
 ## 7. What the interface units inherit from this unit
 

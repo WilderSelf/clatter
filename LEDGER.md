@@ -51,6 +51,8 @@ Status table for each unit. Every unit appends one row after it lands.
 | 0.5 | CI, public repository, protection | Done | — | **Done:** Public repository created and branch protection live. History squashed to one parentless commit `1488de8` using `git commit-tree`, with three guards verified before push: tree SHA matched the pre-squash state, content diff was empty, and commit held no parent. **The owner ran `git push -u origin main`** because the permission deny list refuses the pattern, and branch protection did not yet exist to distinguish this bootstrap push from a bypass attempt. **Incident documented:** `git switch --orphan` empties the working tree while `git checkout --orphan` keeps it. A mistaken use of `switch` deleted every tracked file from the working tree. The files were gone from disk. `git add -A` then found only what remained: `node_modules` and `dist`. Recovery verified by every measure: branding gate counted 104 tracked files matching the pre-squash count, `npm ci` restored 529 packages, `npm run build` recreated the output, and `git reset --hard` restored the tree without loss. All commit objects survived. CI ran green on the pushed commit including the branding gate over four surfaces (tree, dist, commit messages, repository metadata) and bundle-size check against `budgets.json`. Branch protection installed: required status check `CI` with strict true, enforce_admins false, no required reviews, force pushes and deletions blocked, auto-merge and squash enabled, delete-on-merge enabled. Gate proved to block via test/gate-proof PR: `mergeStateStatus: BLOCKED` with `mergeable: MERGEABLE`, showing protection blocks merges while not falsely reporting conflict-detection as protection. All test branches torn down, no open PR. Incident and workaround recorded in `docs/release-checklist.md`. |
 | 0.6 | Pages deploy | Done | — | **Done:** GitHub Pages enabled with build source set to GitHub Actions workflow. The first deploy run failed because Pages was not yet enabled when `deploy.yml` ran. Pages enabled, deploy re-ran and succeeded. The site answers at `https://wilderself.github.io/clatter/` with HTTP 200. **Every referenced asset verified:** not the page alone, because a wrong base path produces HTTP 200 with a blank screen. All three asset paths answered 200: the entry script at `/clatter/assets/index-Bpwk-FIa.js`, the web manifest, and the service worker registration script. The base path `/clatter/` in `vite.config.ts` matches the repository name. No asset path was guessed or restated; every URL comes from fetching the page itself. All steps recorded in `docs/release-checklist.md`. |
 | 2.1 | Application shell and pool builder | Done | — | The Preact shell, the state store and the pool builder, drawn from `docs/design/0013-screen-final.html`. `src/shell/state.ts` holds the whole state and asks the rules core every question: the pool, the caps, the step ladder and the effect of the difficulty. The shell decides no rule. **The keyboard order is read out of the design, never restated.** `src/app.test.tsx` parses section 6 of `docs/design/0002-screen-design.md`, which states the same walk three ways, and asserts the walk against all three: 11 numbered names, the count in words, and the sentence splitting Tab from the arrow keys. Tab reached items 1, 2, 9, 10 and 11 and the arrows reached 3 to 8, in both instruments. `node scripts/browser.mjs --shell` presses the real keys in a real browser and reads the same 11. **The browser adds one tab stop of its own at `shell-mid`,** because a scrollable box earns one so a keyboard can scroll it. It is reported by name and not counted, and the drawn screen earns the same stop. The live region is the status line, and it moves from `The throw takes no dice. A roll of no dice fails.` to `The throw takes 25 dice. 5 attribute, 5 skill, 3 gear, 2 bonus, 10 stress.` A mode switch clears a pool of 25 dice, and the core is the oracle: the switched builder equals `switchMode` over the same builder. Four red-proofs passed. The three widths are captured and compared against the `0013-screen-final-builder-*` renders: the builder card, the header and the footer match at 360, 768 and 1440, and every difference is a part no throw has produced yet. Initial JavaScript moves from 7,160 to 10,663 gzip bytes against the 61,440 in `budgets.json`. The lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=115`, `hits=0`, exit 0. **Open:** the dice on the table, the push button and the difficulty on `Roll again` all wait for Unit 2.2. See the notes under this table. |
+| 2.2 | Flat dice, roll, push, readout | Done, with one acceptance deferred by a settled decision | — | `Roll` throws the built pool and the dice land flat over the kept shelf and the throw zone of Decision 4. The screen decides no rule: `src/shell/state.ts` asks `firstRoll`, `push`, `previewPush`, `isLocked` and `score`, and `src/app.tsx` renders the answer. The cost row and the push button read one `previewPush`, so the price the player commits to is the price the rules apply. **The history matrix is not built here.** Decision 3 moves it into the history record and transposes it, and the row below carries its acceptance to the unit that builds that record. Four checks, each red-proved by an injection that landed and named its gate: the push button is live below the push limit and dead at it; it is live with no stress bane showing and dead under the blocker; the thirty visits of section 6 are walked in the order the document states; and a push re-throws the loose dice alone, with the core as the oracle. The keyboard order is read out of the design and never restated, in both instruments. `node scripts/browser.mjs --shell` gains the after-throw half and passes 8 of 8 checks against the built output in Firefox. Initial JavaScript moves from 10,663 to 14,166 gzip bytes against the 61,440 in `budgets.json`. The lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=115`, `hits=0`, exit 0. **Open:** the difficulty preview after a throw, the log entry a roll should write, and the 3D renderer, which Unit 3.7 chooses between. See the notes under this table.
+| 2.2d | The history matrix, deferred with its acceptance | Deferred to the unit that builds the history record | — | **This row exists so the deferral has a home and a name.** The plan gives Unit 2.2 the matrix beside the dice, one column per die and one row per generation, with two acceptances: the matrix holds exactly `dice × generations` cells, and the blank count equals an independently computed count of locked-or-absent pairs. Decision 3 in `docs/design/0012-settled-decisions.md` moved the matrix out of the roll flow and into the history record, where it is transposed to one row per die, because 25 columns need 780 pixels of minimum content width against the 300 a phone gives. The settled decision is the authority over the plan text. **Both acceptances travel with the matrix, unchanged.** They land in the unit that builds the record view: Unit 4.5, whose open half is the record and its export control, which Decision 3 puts in the same place. Unit 4.4 builds the summary list beside it. Nothing of the pair is dropped and nothing is weakened. **One dependent item moves with it.** Unit 3.5 records that the keyboard route to a die the 3D tray buries runs through the history matrix of Unit 2.2. The flat tray of Unit 2.2 gives that route already: 25 dice, one arrow walk, every die reachable and named. The matrix route stays owed only for the 3D tray. |
 
 ## Unit 0.5 — CI, public repository, protection
 
@@ -3684,3 +3686,141 @@ footer geometry match at all three widths. Every difference is a part no throw h
 exited 0 over 5 checks, and `--offline` exited 0 over 8. The offline run is what proves the table
 still reaches the lazy 3D chunk: it clicked `Roll` with the origin stopped, the precache answered
 for `dice-tray-Cz13SOUC.js`, and the tray mounted one canvas.
+
+---
+
+## Unit 2.2 — flat dice, roll, push, readout
+
+### What landed
+
+`Roll` throws. `src/shell/state.ts` gains the throw, the push, the two zones, the readout and the
+cost sentence, and every one of them asks the rules core. `rollNow` calls `firstRoll`, `pushNow`
+calls `push`, `zonesOf` calls `isLocked`, `dieView` calls `lockState` and `score`, and `costLine`
+and `pushNote` read one `previewPush`. The shell holds no lock rule, no cost model and no success
+table. `src/app.tsx` draws the answer, and `src/shell.css` carries the zones, the dice, the pips,
+the badges and the shake from `docs/design/0013-screen-final.html`.
+
+The click that keeps or releases a die is `clickDie` from `src/tray/affordance.ts`, which Unit 3.5
+already wrote against the same core. The flat renderer duplicates none of it.
+
+**The tray is one control.** One roving tab index over the shelf and the zone, pool order inside
+each, the shelf first. A die the rules hold is not a button, because the player cannot release it,
+and it still holds its place in the arrow walk. A throw puts the roving index back on the first die
+of the shelf, because the same 25 dice come back on every throw.
+
+**Accessibility ships here, not later.** Every die carries a name that states its face, its worth
+and its state. Shape carries the same three facts to the eye. The status line is the live region and
+it now names the result. The short shake becomes a cut under `prefers-reduced-motion`.
+
+### The four acceptances, each with its denominator
+
+1. **The push button is live below the limit and dead at it.** The limit is read off the profile
+   record, not restated: `maxPushes` is 1 on the first preset, and `previewPush` reports
+   `pushesSoFar=0` before the press. The button is asserted live, then pressed, then asserted dead,
+   and the cost row names the limit.
+2. **The push button is live with no stress bane showing and dead under the blocker.** Both
+   directions, over two fixtures that differ in one face. The core answers both: `previewPush`
+   returns `available` for one and `refused` with `blocker=stressOneShowing` for the other.
+3. **The thirty visits of section 6.** The list is parsed from `docs/design/0002-screen-design.md`,
+   which states the same walk three ways and states its zone split twice more. Eleven checks run
+   before the screen is asked anything: the numbered list is as long as the prose says, the Tab
+   positions and the arrow positions partition 1 to 30, and the two zone counts sum to the pool the
+   core built, 25. The fixture states which dice the document keeps and the screen decides the
+   order.
+4. **A push re-throws the loose dice alone.** The core is the oracle. The same profile and the same
+   seed are given to the screen and to `push` outside it, and the whole pool is compared: 8 of 8
+   faces equal the core's answer, the 4 dice the core did not re-throw kept their faces and their
+   `data-el` names, and the throw zone before the press held the 4 ids the core named. The seed is
+   chosen for the split and the reason is written beside it: seed 8 of the first thirty gives four
+   dice against four, where the seed tried first gave one against seven and would have left the
+   kept-face check a denominator of one.
+
+### The four red-proofs
+
+Each injection landed, each failure named the gate it broke, and each file was restored byte for
+byte from a copy saved before the injection.
+
+- `canPush` made to ignore `atPushLimit`. The failure read `at the limit the button is dead:
+  expected false to be true`.
+- `canPush` made to ignore `blocked`. The failure read `a stress bane stops the push: expected
+  false to be true`.
+- The throw zone drawn before the kept shelf. **This one first passed.** The arrow walk is a cycle,
+  and a cycle is the same whichever zone comes first, so a rotation satisfied it. The check now
+  reads the DOM order straight, and the same injection then failed naming `die-at2` where
+  `die-at1` was wanted. A check that could not fail is recorded here rather than quietly repaired.
+- `pushNow` made to throw every die itself instead of asking the core. The failure read `die-ge1
+  kept its face across the push: expected 6 to be 1`.
+
+### Two instruments again, and what the browser half can and cannot compare
+
+`src/app.test.tsx` walks the screen under jsdom and compares name for name against the document,
+over a fixture whose lock states reproduce the drawn split. `node scripts/browser.mjs --shell`
+presses real keys in Firefox over the built output. It cannot compare name for name, because the
+dice it throws decide which zone each die lands in. It compares what it can measure: 25 dice on the
+table against the 25 names the document lists, the shelf and the zone summing to that number, the
+shelf first, and the walked order against the order the DOM holds. Both halves assert the Tab and
+arrow split.
+
+**The browser walk needs a table the player may push**, because a dead button holds no tab stop and
+the list holds thirty. Under the profile the application rolls, a stress die showing a bane stops
+the push, and ten stress dice show one about five throws in six, so the run throws again until the
+push is live and reports how many throws it took. Six runs took 1, 2, 4, 5, 8 and 16 throws of at most 40.
+A run that never reaches a live push fails and names the limit.
+
+Two harness faults were measured and fixed, both in the walk and neither in the application. The
+sequential focus navigation starting point stays where the last focused element was, so the walk of
+rest B started at the footer until the harness put it back at the top; `blur()` does not move it,
+and the same call inside the throw evaluate did not hold. And Firefox hands the focus to its own
+chrome after the last control while leaving `document.activeElement` where it was, so the walk
+recorded that control twice until it learned to stop at a Tab that moves nothing.
+
+### The stop the browser adds
+
+Measured through the same run: at 360 by 660 with 25 dice on the table the walk reported one
+implicit stop at `shell-mid`; at 360 by 760 and at 800 by 600 it reported none. The stop follows the
+overflow and not the markup. Section 6 of the screen design now records it, so a later unit does not
+remove the scroll to make the count come out.
+
+### The screen, against the drawn render
+
+Captured at 360 by 760, 768 by 1024 and 1440 by 900 from the running application and compared with
+`0013-screen-final-roll-360x760.png`. The header, the two zone bands, the shelf, the zone, the die
+size, the pips, the badges, the captions, the cost row, `Edit pool`, `More`, `Roll again` and `Push`
+all match, and the caption state word appears at 1440 exactly as the drawn file draws it. Every
+difference is the result on the table rather than a part of the screen:
+
+- The drawn screen holds 13 kept dice and 12 loose. A live throw holds whatever it threw.
+- The drawn screen holds a die kept by choice, drawn with a dashed frame. A throw nobody has clicked
+  holds none, so only two of the three lock states are drawn.
+- The drawn cost row reads a complication check. It appears only when a stress die shows a bane.
+
+**One finding about the drawn screen itself, reported and not fixed.** Its state cannot occur under
+the profile section 7 names for it. It draws four dice showing banes, two of them stress dice, and a
+live `Push` beside them. The third preset stops every further push while a stress die shows a bane,
+so that table would refuse the push it offers. The drawing is a drawing; the application follows the
+profile record.
+
+### Reported, not fixed
+
+- **A push at the stress cap can put a 26th die on the tray.** The third preset raises stress by one
+  before the re-throw and the core creates the die for it. Decision 1 caps the counter at 10 and the
+  tray at 25. The counter is capped where it lives, in the application, and the added die is not
+  refused, because refusing a push is a rule and the rule belongs to the profile record. Unit 4.2
+  owns that record.
+- **A die that changes zone under a click loses the focus**, because the cell is rebuilt inside the
+  other zone. The roving index survives and the focus does not. Unit 3.5 has the focus half of its
+  own row open and this belongs beside it.
+- **The 3D table still mounts while the table is empty.** The route Unit 5.1 measures runs through
+  it: `Roll` on an empty pool shows the table, the chunk loads, and the offline run reads it there.
+  Unit 3.7 chooses between the two renderers, and until it does the flat dice draw every throw and
+  the 3D mount point draws the empty table.
+- The difficulty is applied at the throw and the preview sentence lives in the builder, so a
+  collapsed builder shows no preview. The drawn screen does the same.
+- No roll is logged. The log store is built and unread, and Unit 4.4 owns the write.
+
+### How it was run
+
+`npm run build`, then `node scripts/browser.mjs --shell --url http://localhost:4173/clatter/` with
+the sandbox off, which passed 8 of 8 checks, and again with `--viewport 360x660` for the scroll
+measurement, which passed 8 of 8. The renderer read `AMD Radeon RX 6700 XT`. `--shell` stays out of
+`validate`, because it needs a browser.
