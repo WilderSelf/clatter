@@ -576,3 +576,51 @@ the character cap.
 to the owner. Nothing here raises a cap.
 
 ---
+
+## Decision 14 — the statistics are a third view of the history destination, taken by me 2026-08-10
+
+**The charts over the log live in their own view of the history destination. `statistics-button`
+sits in the summary footer and opens it, and `back-button` returns to the summary.** I took this
+decision under the delegated interface authority of `CLAUDE.md`. Unit 4.7 builds it.
+
+Section 4 of `docs/design/0002-screen-design.md` already fixes WHERE the statistics live: the
+`sheet-history` row reads "the log, its statistics and its export live there, not here". It does not
+say which part of the destination holds them, and there were two ways to build it.
+
+**Rejected: a section of the summary.** The summary is the list of every roll, and a player opens it
+to find one roll. Charts above the list push the list itself off a 360 px screen, and charts below
+the list are unreachable until the player has scrolled past a campaign. Unit 4.5 already met that
+failure once: its matrix drew below the fold at 360 px with every check green, and the capture is
+what found it. A section would also grow the summary's own scroll for a reading the player asked for
+only sometimes.
+
+**Taken: a third view.** The charts get the whole middle of the destination at every width, and the
+summary keeps its list at the top of the screen where a player looks for it.
+
+### Why the control sits in the summary footer
+
+The record is one roll. The charts are the whole log. An import replaces the whole log and Decision
+13 put its control in the summary footer for that reason, so the charts belong beside it. The record
+therefore keeps the two controls section 3 names, and the summary counts four.
+
+### The three views are peers, not a stack
+
+`back-button` returns to the summary from the record and from the charts. Neither view opens the
+other, so a player never has to remember how deep they are. The statistics view holds that one
+control and nothing else, because every mark in it is read-only.
+
+### What the charts draw, and what they do not
+
+The charts draw the three statistics `summariseLog` returns and nothing else: the success rate by
+pool size, what the pushes did, and how often pushing paid off. **No chart draws a bane.** The record
+holds no bane statistic, so a bane bar would be a number the log never answered.
+
+Each chart is a real table. The values are text in cells that name their row header and their column
+header, and the bar beside each value is `aria-hidden` decoration. One document therefore serves a
+screen reader and an eye, and the two readings are compared against each other rather than trusted.
+
+Every series carries a shape as well as a colour — a circle, a square or a triangle — so a greyscale
+copy still separates the three push outcomes. The circle keeps the meaning it has everywhere else in
+this application: it is the good outcome.
+
+---

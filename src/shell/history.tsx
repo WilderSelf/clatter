@@ -1,12 +1,18 @@
 // The history destination — Unit 4.4 built the summary, Unit 4.5 the record and
-// the export, Unit 4.6 the import.
+// the export, Unit 4.6 the import, and Unit 4.7 the charts.
 //
 // **It is a second surface.** Section 3 of `docs/design/0002-screen-design.md`,
 // under "The history is a separate destination": the history has its own header
 // and its own footer, and it carries no share of the control budget of section
-// 3. The summary holds `back-button`, `history-list` and `import-button`, and
-// the record holds `back-button` and `export-button`. `history-list` is a
-// composite holding one visit per logged roll, so its length follows the log.
+// 3. The destination holds THREE views and the design table names the controls
+// of each. `history-list` is a composite holding one visit per logged roll, so
+// its length follows the log.
+//
+// **The charts are the third view.** Decision 14 of
+// `docs/design/0012-settled-decisions.md` records the choice and the option it
+// was taken against. The record is one roll and the charts are the whole log,
+// so `statistics-button` sits beside `import-button` in the summary footer,
+// where the other whole-log control already is.
 //
 // The destination REPLACES the roll flow while it is open, which is what makes
 // it a destination rather than a panel. Both keyboard walks of section 6 are
@@ -39,11 +45,14 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { exportCsvInChunks } from '../log/csv';
 import type { LogEntry, LoggedDie } from '../log/entry';
 import { readImportFile } from '../log/import-file';
+import { summariseLog } from '../log/statistics';
 import type { Faces } from '../rules/die';
 import type { PushCostUnit } from '../rules/push-profile';
 import { PUSH_PROFILES } from '../rules/push-profile';
 import { downloadBlob, exportFileName } from './download';
 import { DIE_TYPE_TAG } from './state';
+import { Statistics } from './statistics';
+import { costReading, plural } from './words';
 
 /**
  * The note the plan asks this unit to put in the interface, in the plan's own
@@ -99,30 +108,14 @@ export function rollWhen(timestampIso: string): string {
   );
 }
 
-function plural(count: number, one: string, many: string): string {
-  return count === 1 ? `1 ${one}` : `${count} ${many}`;
-}
-
 /**
- * The cost unit in the words a player reads. It is keyed by the union, so a
- * fifth cost unit is a type error here until it has words.
- *
- * The stored `costAmount` is printed beside it and is never recomputed. Unit
- * 4.7 records why: the four units are different things, and a view that
- * re-priced a roll under today's profile would report a campaign that never
- * happened.
+ * The words for a cost unit live in `./words`, so `./statistics` reads them
+ * without importing this module. The stored `costAmount` is printed beside them
+ * and is never recomputed. Unit 4.7 records why: the four units are different
+ * things, and a view that re-priced a roll under today's profile would report a
+ * campaign that never happened.
  */
-const COST_NOUN: Readonly<Record<PushCostUnit, readonly [string, string]>> = {
-  ratingPoint: ['rating point', 'rating points'],
-  healthPoint: ['point of health', 'points of health'],
-  refereePoint: ['referee point', 'referee points'],
-  complicationCheck: ['complication check', 'complication checks'],
-};
-
-export function costReading(amount: number, unit: PushCostUnit): string {
-  const words = COST_NOUN[unit];
-  return plural(amount, words[0], words[1]);
-}
+export { costReading };
 
 /**
  * The name of a rule set, from the identifier the entry stores.
@@ -575,10 +568,20 @@ const BUSY_WORD: Readonly<Record<Busy, string>> = {
 };
 
 /**
+ * Which of the three views the destination is showing.
+ *
+ * The summary is the one a player arrives at. The record is one roll and the
+ * charts are the whole log, so both are peers of the summary and neither is
+ * reachable from the other. `back-button` returns to the summary from either.
+ */
+type View = 'summary' | 'record' | 'stats';
+
+/**
  * The history destination.
  *
- * `onBack` leaves it. From the record the back control returns to the summary
- * first, because the record is a view of the destination and not a third one.
+ * `onBack` leaves it. From the record and from the charts the back control
+ * returns to the summary first, because both are views of the destination and
+ * neither is a second destination.
  */
 export function History({
   entries,
@@ -600,17 +603,19 @@ export function History({
 }) {
   const rows = historyRows(entries);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [statsOpen, setStatsOpen] = useState(false);
   const open = rows.find((row) => row.rollId === openId) ?? null;
+  const view: View = statsOpen ? 'stats' : open === null ? 'summary' : 'record';
   const back = useRef<HTMLButtonElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<Busy>('none');
   const [message, setMessage] = useState('');
   // The destination takes the focus when it opens, so a keyboard lands on it
   // rather than back at the top of a screen it can no longer see. It takes the
-  // focus again when a record opens or closes, because the option the player
-  // pressed leaves the document with the focus on it, and a focus on nothing
-  // sends the next Tab back to the start of the page.
-  useEffect(() => back.current?.focus(), [openId]);
+  // focus again when a record or the charts open or close, because the control
+  // the player pressed leaves the document with the focus on it, and a focus on
+  // nothing sends the next Tab back to the start of the page.
+  useEffect(() => back.current?.focus(), [openId, statsOpen]);
 
   /**
    * Write the whole log to a file.
@@ -676,10 +681,14 @@ export function History({
         <div class="statusline">
           <span class="hist-title">History</span>
           <span class="sr-only">
-            {open === null ? logCountLine(rows.length) : `The roll of ${open.when}.`}
+            {view === 'record' && open !== null
+              ? `The roll of ${open.when}.`
+              : view === 'stats'
+                ? `The charts over the whole log. ${logCountLine(rows.length)}`
+                : logCountLine(rows.length)}
           </span>
           <span class="st-item st-dim" aria-hidden="true">
-            {open === null ? logCountLine(rows.length) : open.when}
+            {view === 'record' && open !== null ? open.when : logCountLine(rows.length)}
           </span>
         </div>
       </header>
@@ -702,21 +711,27 @@ export function History({
         <p class="hist-warn" data-el="history-storage-note" role="note">
           {SEVEN_DAY_NOTE}
         </p>
-        {open === null ? (
-          rows.length === 0 ? (
-            <p class="hist-empty" data-el="history-empty">
-              No roll is in the log. Throw the dice to fill it, or import a log you exported before.
-            </p>
-          ) : (
-            <HistoryList rows={rows} openId={openId} onOpen={setOpenId} />
-          )
-        ) : (
+        {/* The three views. The charts read the record `summariseLog` builds
+            from the entries the store answered, and the view takes that record
+            and nothing else, so there is no log inside it to re-derive a
+            statistic from. Unit 4.7. */}
+        {view === 'stats' ? (
+          <Statistics stats={summariseLog(entries)} />
+        ) : view === 'record' && open !== null ? (
           <HistoryRecord row={open} />
+        ) : rows.length === 0 ? (
+          <p class="hist-empty" data-el="history-empty">
+            No roll is in the log. Throw the dice to fill it, or import a log you exported before.
+          </p>
+        ) : (
+          <HistoryList rows={rows} openId={openId} onOpen={setOpenId} />
         )}
       </main>
 
       <div class="shell-f" data-el="history-footer">
-        <div class="bar two">
+        {/* One column per control. The summary carries three, the record two
+            and the charts one, which is the table in section 3 of the design. */}
+        <div class={view === 'summary' ? 'bar' : view === 'record' ? 'bar two' : 'bar one'}>
           <button
             class="btn go"
             type="button"
@@ -724,13 +739,28 @@ export function History({
             aria-disabled={working}
             disabled={working}
             ref={back}
-            onClick={() => (open === null ? onBack() : setOpenId(null))}
+            onClick={() => {
+              if (view === 'stats') setStatsOpen(false);
+              else if (view === 'record') setOpenId(null);
+              else onBack();
+            }}
           >
             Back
-            <small>{open === null ? 'to the dice' : 'to the list'}</small>
+            <small>{view === 'summary' ? 'to the dice' : 'to the list'}</small>
           </button>
-          {open === null ? (
+          {view === 'summary' ? (
             <>
+              <button
+                class="btn"
+                type="button"
+                data-el="statistics-button"
+                aria-disabled={working}
+                disabled={working}
+                onClick={() => setStatsOpen(true)}
+              >
+                Charts
+                <small>over the whole log</small>
+              </button>
               <button
                 class="btn"
                 type="button"
@@ -745,7 +775,7 @@ export function History({
               </button>
               {/* The picker itself is not a control of section 3. It carries no
                   tab stop and the button above opens it, so the keyboard count
-                  of the summary stays at the three the design names. */}
+                  of the summary stays at the four the design names. */}
               <input
                 class="sr-file"
                 type="file"
@@ -757,7 +787,7 @@ export function History({
                 onChange={(event) => void onPicked(event)}
               />
             </>
-          ) : (
+          ) : view === 'record' ? (
             <button
               class="btn"
               type="button"
@@ -770,7 +800,7 @@ export function History({
               Export
               <small>{plural(entries.length, 'roll', 'rolls')}, as a CSV file</small>
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
