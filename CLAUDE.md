@@ -197,7 +197,7 @@ Bash runs in a bubblewrap sandbox. The sandbox blocks network access and the dis
 
 `npm ci` and `npm install` work inside the sandbox, because `registry.npmjs.org` is an allowed domain.
 
-`gh` commands and `git push` run with sandbox exclusions as of 2026-08-09. The owner added `gh *`, `git push*` and `node scripts/browser.mjs*` to `sandbox.excludedCommands` in `~/.claude/settings.json`. Units 0.5 onward now run without sandbox exceptions for these commands. The agent cannot edit that file. It is deny-listed.
+`gh` commands and `git push` run with sandbox exclusions as of 2026-08-09. The owner added `gh *`, `git push*` and `node scripts/browser.mjs*` to `sandbox.excludedCommands` in `~/.claude/settings.json`. These commands work because the exceptions exist. Remove an exception and the command fails at the network call again. The agent cannot edit that file. It is deny-listed.
 
 `Bash(gh repo edit:*)` is denied, so the repository description and topics are set by the owner, not by an agent.
 
@@ -205,7 +205,7 @@ Bash runs in a bubblewrap sandbox. The sandbox blocks network access and the dis
 
 `git status` inside the sandbox reports untracked files that do not exist, because deny-listed paths are bind-mounted as `/dev/null` character devices. Never gitignore or delete such a path. A clean-tree check means nothing unless it runs with the sandbox disabled.
 
-**`git switch --orphan` and `git checkout --orphan` differ in one way that matters:** `switch` empties the working tree while `checkout` keeps it. The working tree is critical. An edit that accidentally used `switch` staged only `node_modules` and `dist`, leaving the source tree unstaged. Use `checkout --orphan` instead. The safer path builds a parentless commit with `git commit-tree`, verifies the tree SHA, the empty content diff and the absent parent, then pushes that commit.
+**`git switch --orphan` and `git checkout --orphan` differ in one way that matters:** `switch` empties the working tree while `checkout` keeps it. `git switch --orphan` deleted every tracked file from the working tree. The files were gone from disk. `git add -A` then found only what remained: `node_modules` and `dist`. The working tree did not survive the operation. Use `checkout --orphan` instead. The safer path builds a parentless commit with `git commit-tree`, verifies the tree SHA, the empty content diff and the absent parent, then pushes that commit.
 
 ---
 
