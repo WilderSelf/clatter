@@ -1,15 +1,17 @@
 // The plan's acceptance for Unit 4.1: an unknown stored version falls back to
 // defaults without throwing.
 //
-// The table below holds that case and the twenty-five neighbours that would
-// otherwise be found in production. The count of cases is asserted against the
+// The table below holds that case and the neighbours that would otherwise be
+// found in production. The count of cases is asserted against the
 // enumeration in `ENUMERATED_CASES`, so a case dropped from the table fails
 // here instead of going quiet. Unit 3.7 added three, because the permanent fall
 // to flat dice added a field and a migration step. Unit 3.6 added four, because
 // sound added two fields and another step. Unit 4.8 added three, because the
 // three theme axes added three fields and another step. Unit 4.3 added the last
 // six, because the saved pool presets added a list of user text, its two caps
-// and another step.
+// and another step. Units 4.1 and 4.2 added the last six, because the
+// push-profile override added a field, another step, and four ways a stored
+// override is unusable.
 //
 // The allowed values are written out again in this file. Reading them from the
 // module under test would let the module answer its own question.
@@ -62,6 +64,12 @@ const ENUMERATED_CASES = [
   'a pool preset name longer than the cap',
   'more pool presets than the cap',
   'a pool preset with a dice count out of range',
+  'a version 6 record from before the profile override existed',
+  'a profile override that is not a record',
+  'a profile override naming a field the panel cannot edit',
+  'a profile override with a value outside its domain',
+  'a profile override that repeats the preset',
+  'a profile override the panel can edit',
 ] as const;
 
 /** The six theme names, written out again for the same reason as the modes. */
@@ -150,6 +158,7 @@ const CASES: readonly Case[] = [
       artifactCurve: 'artifactEscalating',
       flatFallback: 'yes',
     },
+    expect: { presetId: 'pool-banes-damage-ratings' },
   },
   {
     name: 'a stored permanent fall of true',
@@ -160,7 +169,7 @@ const CASES: readonly Case[] = [
       artifactCurve: 'artifactEscalating',
       flatFallback: true,
     },
-    expect: { flatFallback: true },
+    expect: { presetId: 'pool-banes-damage-ratings', flatFallback: true },
   },
   {
     name: 'a version 3 record from before sound existed',
@@ -297,6 +306,84 @@ const CASES: readonly Case[] = [
       poolPresets: [{ name: 'a huge pool', counts: { attribute: 1e9 } }],
     },
   },
+  {
+    name: 'a version 6 record from before the profile override existed',
+    stored: {
+      version: 6,
+      mode: 'step',
+      presetId: 'step-banes-cost-health',
+      artifactCurve: 'artifactFlat',
+      flatFallback: true,
+      soundEnabled: true,
+      soundVolume: 0.25,
+      diceThemeId: 'void',
+      traySurfaceId: 'ember',
+      interfacePaletteId: 'cobalt',
+      poolPresets: [],
+    },
+    expect: {
+      mode: 'step',
+      presetId: 'step-banes-cost-health',
+      artifactCurve: 'artifactFlat',
+      flatFallback: true,
+      soundEnabled: true,
+      soundVolume: 0.25,
+      diceThemeId: 'void',
+      traySurfaceId: 'ember',
+      interfacePaletteId: 'cobalt',
+    },
+  },
+  {
+    name: 'a profile override that is not a record',
+    stored: { version: SETTINGS_VERSION, profileOverride: ['maxPushes', 2] },
+  },
+  {
+    // The identifier, the name and the description are the identity of a
+    // profile. No control edits them, so no stored record may either.
+    name: 'a profile override naming a field the panel cannot edit',
+    stored: {
+      version: SETTINGS_VERSION,
+      profileOverride: { id: 'a-profile-of-my-own', label: 'mine', description: 'mine' },
+    },
+  },
+  {
+    name: 'a profile override with a value outside its domain',
+    stored: {
+      version: SETTINGS_VERSION,
+      profileOverride: { cost: { unit: 'goldPiece', source: 'bane' }, maxPushes: -4 },
+    },
+  },
+  {
+    // A leaf that repeats the preset is not an override at all, so it is
+    // dropped and the reset control and the panel marks stay honest.
+    name: 'a profile override that repeats the preset',
+    stored: {
+      version: SETTINGS_VERSION,
+      presetId: 'pool-banes-damage-ratings',
+      profileOverride: { lockSuccesses: true, blockers: [] },
+    },
+    expect: { presetId: 'pool-banes-damage-ratings' },
+  },
+  {
+    name: 'a profile override the panel can edit',
+    stored: {
+      version: SETTINGS_VERSION,
+      presetId: 'pool-banes-damage-ratings',
+      profileOverride: {
+        maxPushes: 4,
+        lockOnesBy: { skill: true },
+        blockers: ['stressOneShowing'],
+      },
+    },
+    expect: {
+      presetId: 'pool-banes-damage-ratings',
+      profileOverride: {
+        maxPushes: 4,
+        lockOnesBy: { skill: true },
+        blockers: ['stressOneShowing'],
+      },
+    },
+  },
 ];
 
 /**
@@ -360,6 +447,28 @@ function assertUsable(settings: Settings, caseName: string): void {
     new Set(settings.poolPresets.map((preset) => preset.name)).size,
     `${caseName}: no name is held twice`,
   ).toBe(settings.poolPresets.length);
+  // The override is a record, it names only leaves the panel can edit, and
+  // every leaf it names really differs from the preset. The domains are written
+  // out again here, because reading them from the module under test would let
+  // the module answer its own question.
+  const override = settings.profileOverride as Record<string, unknown>;
+  expect(typeof override, `${caseName}: the override is a record`).toBe('object');
+  expect(Array.isArray(override), `${caseName}: the override is not a list`).toBe(false);
+  const preset = PUSH_PROFILES.find((each) => each.id === settings.presetId);
+  for (const key of Object.keys(override)) {
+    expect(
+      ['id', 'label', 'description'],
+      `${caseName}: the override names the identity field ${key}`,
+    ).not.toContain(key);
+    expect(
+      Object.keys(preset ?? {}),
+      `${caseName}: the override names a field of a profile`,
+    ).toContain(key);
+    expect(
+      JSON.stringify(override[key]),
+      `${caseName}: the override repeats the preset at ${key}`,
+    ).not.toBe(JSON.stringify((preset as unknown as Record<string, unknown>)[key]));
+  }
 }
 
 /**
@@ -424,7 +533,7 @@ describe('migrate', () => {
     expect(CASES.length, 'the table holds one case per enumerated case').toBe(
       ENUMERATED_CASES.length,
     );
-    expect(ENUMERATED_CASES.length, 'the enumeration holds twenty-six cases').toBe(26);
+    expect(ENUMERATED_CASES.length, 'the enumeration holds thirty-two cases').toBe(32);
   });
 
   it('cuts an over-long preset list at the cap and keeps the presets it holds', () => {
@@ -453,6 +562,7 @@ describe('migrate', () => {
       traySurfaceId: 'ember',
       interfacePaletteId: 'cobalt',
       poolPresets: [{ name: 'the quiet approach', counts: { attribute: 3, artifact: [8] } }],
+      profileOverride: { maxPushes: 3, cost: { perUnit: 2 } },
     };
     expect(migrate(stored)).toStrictEqual(stored);
     expect(stored.mode).not.toBe(DEFAULT_SETTINGS.mode);
@@ -465,6 +575,7 @@ describe('migrate', () => {
     expect(stored.traySurfaceId).not.toBe(DEFAULT_SETTINGS.traySurfaceId);
     expect(stored.interfacePaletteId).not.toBe(DEFAULT_SETTINGS.interfacePaletteId);
     expect(stored.poolPresets.length).not.toBe(DEFAULT_SETTINGS.poolPresets.length);
+    expect(stored.profileOverride).not.toStrictEqual(DEFAULT_SETTINGS.profileOverride);
   });
 
   it('raises a version 1 record through every step and keeps what it held', () => {
@@ -481,6 +592,7 @@ describe('migrate', () => {
       traySurfaceId: DEFAULT_SETTINGS.traySurfaceId,
       interfacePaletteId: DEFAULT_SETTINGS.interfacePaletteId,
       poolPresets: DEFAULT_SETTINGS.poolPresets,
+      profileOverride: DEFAULT_SETTINGS.profileOverride,
     });
   });
 });

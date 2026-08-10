@@ -22,12 +22,12 @@ import { appendValue, latestValue } from './rules/die';
 import { applyDifficulty, buildPool, firstRoll, poolBuilder } from './rules/pool';
 import { generations, previewPush, push } from './rules/push';
 import type { PushProfile } from './rules/push-profile';
-import { isLocked, PUSH_PROFILES } from './rules/push-profile';
+import { isLocked, mergeProfile, PUSH_PROFILES } from './rules/push-profile';
 import type { RandomSource } from './rules/random';
 import { seededRandom } from './rules/seeded-random';
 import type { TrayDecision } from './tray/capability';
 import type { RollResult } from './rules/roll';
-import { roll } from './rules/roll';
+import { roll, successCount } from './rules/roll';
 import type { Settings, SettingsStore } from './settings/settings';
 import { DEFAULT_SETTINGS, SETTINGS_KEY, readSettings } from './settings/settings';
 import { noticeText, startRenderer } from './shell/renderer';
@@ -1625,4 +1625,340 @@ describe('the shake of a re-throw', () => {
       'and every die of the new roll is marked as thrown',
     ).toBe(before.size);
   });
+});
+
+// ---------------------------------------------------------------------------
+// The rules the player chose — Units 4.1 and 4.2
+//
+// Three controls sit behind the one disclosure: `sheet-ruleset` picks one of
+// the four presets, `sheet-artifact-curve` picks a curve, and `sheet-overrides`
+// changes any field of the profile record on top of the chosen preset.
+//
+// **The core is the oracle for every effect below.** A stored setting that
+// round trips is not the same as a setting that reaches the rules, so each
+// check asks the core what the new rules do and compares the screen against
+// that answer, never against a number written here.
+//
+// The faces come from a stub source that answers one face, so no check waits on
+// a seed to produce the case it needs. Constraint 7 covers the shipping source
+// and a test injects its own.
+// ---------------------------------------------------------------------------
+
+/** A source that answers one face, so a fixture states its own case. */
+function alwaysFace(face: number): RandomSource {
+  return { face: () => face };
+}
+
+function sheetInput(group: string, value: string): HTMLInputElement {
+  const found = element(group).querySelector<HTMLInputElement>(`input[value="${value}"]`);
+  if (found === null) throw new Error(`${group} holds no choice of ${value}`);
+  return found;
+}
+
+/** Every die the kept shelf holds, by `data-el`. */
+function keptOnTable(): string[] {
+  return [
+    ...document.querySelectorAll<HTMLElement>('[data-el="kept-shelf"] [data-el^="die-"]'),
+  ].map((cell) => cell.dataset.el ?? '');
+}
+
+/** The rows of the override panel, by the path each one names. */
+function overrideRows(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-el="sheet-overrides"] [data-field]')];
+}
+
+/** A second walk of the record, so the panel cannot count itself. */
+function recordLeaves(value: unknown, prefix: readonly string[] = []): string[][] {
+  if (Array.isArray(value) || value === null || typeof value !== 'object') {
+    return [[...prefix]];
+  }
+  const record = value as Record<string, unknown>;
+  return Object.keys(record).flatMap((key) => recordLeaves(record[key], [...prefix, key]));
+}
+
+describe('the rule set control', () => {
+  it('changes which dice the rules keep, and the core is the oracle', () => {
+    // Two presets that answer a bane differently. The first keeps a bane on an
+    // attribute die and the second says a bane means nothing.
+    const keepsBanes = profile('pool-banes-damage-ratings');
+    const ignoresBanes = profile('pool-referee-gains-a-point');
+    expect(keepsBanes.lockOnesBy.attribute, 'the first preset keeps a bane').toBe(true);
+    expect(ignoresBanes.lockOnesBy.attribute, 'the second preset does not').toBe(false);
+
+    const store = fakeStore();
+    const opening = builtState({ attribute: 3, skill: 2 }, ignoresBanes.id);
+    mount({ store, initial: opening, random: alwaysFace(1) });
+    click(element('roll-button'));
+
+    const rolled = rollNow(opening, alwaysFace(1));
+    if (rolled.result === null) throw new Error('the fixture rolled nothing');
+    const under = (held: PushProfile): string[] =>
+      rolled.result?.dice.filter((die) => isLocked(die, held)).map(dieElement) ?? [];
+    expect(under(ignoresBanes), 'the second preset keeps nothing of this roll').toEqual([]);
+    expect(under(keepsBanes).length, 'the first preset keeps some of it').toBeGreaterThan(0);
+    expect(keptOnTable(), 'the screen follows the core it opened under').toEqual(
+      under(ignoresBanes),
+    );
+
+    click(element('disclosure-toggle'));
+    click(sheetInput('sheet-ruleset', keepsBanes.id));
+    click(element('sheet-close'));
+
+    // The table is cleared, so the same faces are thrown again under the new
+    // rules. The stub answers the same face, so the roll is the same roll.
+    click(element('roll-button'));
+    expect(keptOnTable(), 'the screen now follows the core under the chosen preset').toEqual(
+      under(keepsBanes),
+    );
+    expect(element('cost-row').textContent, 'and the price is the new price').toContain(
+      'rating point',
+    );
+    expect(readSettings(store).presetId, 'the choice reached the store').toBe(keepsBanes.id);
+  });
+
+  it('clears the roll on the table rather than pricing it again', () => {
+    // Decision 10. The player commits to a push at a price that was read before
+    // the throw, so a roll already on the table is never read under new rules.
+    const held = profile('pool-referee-gains-a-point');
+    const opening = builtState({ attribute: 3, skill: 2 }, held.id);
+    mount({ store: fakeStore(), initial: opening, random: alwaysFace(1) });
+    click(element('roll-button'));
+    expect(facesOnTable().size, 'the table holds the roll').toBe(5);
+    expect(
+      document.querySelector('[data-el="pool-builder"]'),
+      'and the builder is closed',
+    ).toBeNull();
+
+    click(element('disclosure-toggle'));
+    click(sheetInput('sheet-ruleset', 'pool-banes-damage-ratings'));
+
+    expect(facesOnTable().size, 'the table is cleared').toBe(0);
+    expect(document.querySelector('[data-el="push-button"]'), 'nothing is left to push').toBeNull();
+    expect(spoken(), 'and the live region names the next throw again, not a table').toContain(
+      'The throw takes 5 dice',
+    );
+    click(element('sheet-close'));
+    expect(
+      document.querySelector('[data-el="pool-builder"]'),
+      'the screen is back at rest A, which is the state an empty table belongs to',
+    ).not.toBeNull();
+  });
+});
+
+describe('the artifact curve control', () => {
+  it('changes what an artifact die is worth, and the core is the oracle', () => {
+    const store = fakeStore();
+    // Two d12 artifact dice and nothing else, so every success on the table is
+    // an artifact success. A face of 8 is worth 2 on the escalating curve and 1
+    // on the flat one.
+    const opening = builtState({ artifact: 6 }, 'pool-referee-gains-a-point');
+    mount({ store, initial: opening, random: alwaysFace(8) });
+    click(element('roll-button'));
+
+    const rolled = rollNow(opening, alwaysFace(8));
+    if (rolled.result === null) throw new Error('the fixture rolled nothing');
+    const escalating = successCount(rolled.result, 'artifactEscalating');
+    const flat = successCount(rolled.result, 'artifactFlat');
+    expect(escalating, 'the two curves price this roll differently').not.toBe(flat);
+    expect(element('status-line').textContent).toContain(`${escalating} success`);
+
+    click(element('disclosure-toggle'));
+    click(sheetInput('sheet-artifact-curve', 'artifactFlat'));
+    click(element('sheet-close'));
+    click(element('roll-button'));
+
+    expect(element('status-line').textContent, 'the flat curve reached the core').toContain(
+      `${flat} success`,
+    );
+    expect(readSettings(store).artifactCurve, 'the choice reached the store').toBe('artifactFlat');
+  });
+});
+
+describe('the override panel', () => {
+  it('draws one row for every field of the profile record', () => {
+    const held = profile('pool-stress-and-complications');
+    mount({ store: fakeStore(), initial: { ...emptyState('pool'), profileId: held.id } });
+    click(element('disclosure-toggle'));
+
+    // The denominator is a walk of the record made here, not the list the panel
+    // drew. A field the panel stops drawing fails this line.
+    const leaves = recordLeaves(held).map((path) => path.join('.'));
+    expect(leaves.length, 'the record holds fields at all').toBeGreaterThan(10);
+    expect(
+      overrideRows().map((row) => row.dataset.field),
+      'the panel and the record name different fields',
+    ).toEqual(leaves);
+
+    let named = 0;
+    for (const row of overrideRows()) {
+      const control = row.querySelector<HTMLElement>('input, select');
+      if (row.dataset.kind === 'text') {
+        expect(control, `${row.dataset.field ?? ''}: the identity is read-only`).toBeNull();
+      } else {
+        expect(control, `${row.dataset.field ?? ''}: the row draws no control`).not.toBeNull();
+        expect(
+          (row.textContent ?? '').trim().length,
+          `${row.dataset.field ?? ''}: the control carries no words`,
+        ).toBeGreaterThan(0);
+      }
+      named += 1;
+    }
+    expect(named, 'every row was read').toBe(leaves.length);
+  });
+
+  it('changes a field of the record and the core answers under it', () => {
+    // The preset allows one push. The override raises the limit, and the core
+    // is what allows the second push.
+    const held = profile('pool-banes-damage-ratings');
+    expect(held.maxPushes, 'the preset allows one push').toBe(1);
+    const store = fakeStore();
+    const opening = builtState({ attribute: 3, skill: 2 }, held.id);
+    mount({ store, initial: opening, random: alwaysFace(3) });
+
+    click(element('roll-button'));
+    click(pushButton());
+    expect(pushButton().disabled, 'the preset is at its push limit').toBe(true);
+
+    click(element('disclosure-toggle'));
+    const limit = element('override-max-pushes').querySelector<HTMLInputElement>('input');
+    if (limit === null) throw new Error('the panel draws no push limit');
+    act(() => {
+      limit.value = '3';
+      limit.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    click(element('sheet-close'));
+
+    expect(readSettings(store).profileOverride, 'the change reached the store').toStrictEqual({
+      maxPushes: 3,
+    });
+    click(element('roll-button'));
+    click(pushButton());
+    expect(pushButton().disabled, 'the core allows a second push under the raised limit').toBe(
+      false,
+    );
+
+    // The oracle: the same roll priced by the core under the merged profile.
+    const raised = mergeProfile(held, { maxPushes: 3 });
+    const rolled = rollNow(opening, alwaysFace(3));
+    if (rolled.result === null) throw new Error('the fixture rolled nothing');
+    const pushed = push(rolled.result, raised, alwaysFace(3));
+    if (pushed.kind !== 'pushed') throw new Error('the core refused the fixture push');
+    expect(previewPush(pushed, raised).kind, 'and the core still allows it').toBe('available');
+  });
+
+  it('marks the rows that differ and gives the preset back unchanged', () => {
+    const held = profile('pool-banes-damage-ratings');
+    const store = fakeStore();
+    mount({ store, initial: { ...emptyState('pool'), profileId: held.id } });
+    click(element('disclosure-toggle'));
+
+    const reset = element('overrides-reset') as HTMLButtonElement;
+    expect(reset.disabled, 'nothing to reset while the preset is unchanged').toBe(true);
+    expect(
+      overrideRows().filter((row) => row.classList.contains('changed')).length,
+      'and no row is marked',
+    ).toBe(0);
+
+    click(element('override-lock-successes').querySelector('input') as Element);
+    expect(
+      element('override-lock-successes').classList.contains('changed'),
+      'the row that moved is marked',
+    ).toBe(true);
+    expect(
+      overrideRows().filter((row) => row.classList.contains('changed')).length,
+      'and no other row is',
+    ).toBe(1);
+    expect(readSettings(store).profileOverride).toStrictEqual({ lockSuccesses: false });
+
+    click(element('overrides-reset'));
+    expect(
+      overrideRows().filter((row) => row.classList.contains('changed')).length,
+      'the reset takes every mark away',
+    ).toBe(0);
+    expect(readSettings(store).profileOverride, 'and the store holds no override').toStrictEqual(
+      {},
+    );
+    expect((element('overrides-reset') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('carries every choice through a reload of the screen', () => {
+    const store = fakeStore();
+    mount({ store, initial: { ...emptyState('pool'), profileId: 'pool-banes-damage-ratings' } });
+    click(element('disclosure-toggle'));
+    click(sheetInput('sheet-ruleset', 'step-banes-cost-health'));
+    click(sheetInput('sheet-artifact-curve', 'artifactFlat'));
+    click(element('override-lock-successes').querySelector('input') as Element);
+
+    // The screen is thrown away and built again over the same store, which is
+    // what a reload does.
+    act(() => render(null, root as HTMLElement));
+    root?.remove();
+    mount({ store });
+    click(element('disclosure-toggle'));
+
+    expect(sheetInput('sheet-ruleset', 'step-banes-cost-health').checked, 'the rule set').toBe(
+      true,
+    );
+    expect(sheetInput('sheet-artifact-curve', 'artifactFlat').checked, 'the curve').toBe(true);
+    expect(
+      element('override-lock-successes').querySelector<HTMLInputElement>('input')?.checked,
+      'the override',
+    ).toBe(false);
+    expect(
+      element('override-lock-successes').classList.contains('changed'),
+      'and it is still marked as a change',
+    ).toBe(true);
+  });
+});
+
+describe('the 3D tray under a change of rules', () => {
+  it(
+    'mounts the affordance again, so the marks follow the rules now in force',
+    async () => {
+      // Unit 3.5 recorded the limit this closes: the affordance reads the
+      // profile once, at the mount, and nothing could change it afterwards.
+      const ignoresBanes = profile('pool-referee-gains-a-point');
+      const keepsBanes = profile('pool-banes-damage-ratings');
+      const opening = builtState({ attribute: 3, skill: 2 }, ignoresBanes.id);
+      const mounting = fakeMount('mounts');
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        mount: mounting,
+        initial: opening,
+        random: alwaysFace(1),
+      });
+      await settle();
+      await settleTray();
+
+      const marks = (): number =>
+        mounting.tray.scene.children.filter((node) =>
+          String((node as { name?: string }).name ?? '').startsWith('clatter-lock-marker'),
+        ).length;
+
+      click(element('roll-button'));
+      await settleTray(() => mounting.tray.thrown.length > 0);
+
+      // The oracle. Every die shows a bane, so the first preset keeps none of
+      // them and the second keeps every attribute die.
+      const rolled = rollNow(opening, alwaysFace(1));
+      if (rolled.result === null) throw new Error('the fixture rolled nothing');
+      const keptUnder = (held: PushProfile): number =>
+        rolled.result?.dice.filter((die) => isLocked(die, held)).length ?? 0;
+      expect(keptUnder(ignoresBanes), 'the opening preset keeps nothing').toBe(0);
+      expect(keptUnder(keepsBanes), 'the chosen preset keeps some').toBeGreaterThan(0);
+      expect(marks(), 'the tray drew no mark under the opening preset').toBe(0);
+
+      click(element('disclosure-toggle'));
+      click(sheetInput('sheet-ruleset', keepsBanes.id));
+      click(element('sheet-close'));
+      await settleTray();
+      expect(marks(), 'a cleared table carries no mark').toBe(0);
+
+      click(element('roll-button'));
+      await settleTray(() => mounting.tray.thrown.length > 1);
+      expect(marks(), 'the tray marks the dice the new rules keep').toBe(keptUnder(keepsBanes));
+    },
+    TRAY_WAIT_MS + 5000,
+  );
 });

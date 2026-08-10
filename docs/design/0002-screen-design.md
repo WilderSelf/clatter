@@ -135,7 +135,7 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | Control | What it does | Unit |
 |---|---|---|
 | `sheet-ruleset` | Picks one of the four push profiles. | 4.1 |
-| `sheet-overrides` | Every field of the profile record: the success lock, the per-type bane locks, the push limit, the cost source, the cost unit, the amount per unit, the stress behaviour, and the blockers. | 4.2 |
+| `sheet-overrides` | Every field of the profile record: the success lock, the per-type bane locks, the push limit, the cost source, the cost unit, the amount per unit, the stress behaviour, and the blockers. Each row that differs from the preset is marked, and `overrides-reset` inside the panel returns to the preset unchanged. | 4.2 |
 | `sheet-mode` | Pool dice or step dice. A switch discards the built pool. | 2.1 |
 | `sheet-artifact-curve` | Escalating or flat. | 4.1 |
 | `sheet-theme` | Three axes — surface, accent and dice material — plus the colour builder. | 4.8 |
@@ -145,7 +145,25 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | `sheet-close` | Closes the sheet and returns focus to `disclosure-toggle`. | 2.1 |
 
 The mode switch sits here on purpose. It destroys the built pool, so it must not sit one tap away
-from the throw.
+from the throw. `sheet-ruleset`, `sheet-overrides` and `sheet-artifact-curve` sit here for the same
+reason: each of the three clears the roll on the table, which Decision 10 settles.
+
+**The sheet scrolls.** `sheet-overrides` draws one row per field of the push-profile record, so the
+sheet is taller than a phone at every width. It carries `max-height` and `overflow-y: auto`, so it
+degrades by scrolling and never by clipping, exactly as `.shell-m` does under Decision 6. Measured at
+360 by 760 through `node scripts/browser.mjs --sheet`: every hit target clears the 24 px floor of
+WCAG 2.2 SC 2.5.8, nothing sits off the side of the viewport, and the close button is reachable.
+
+**Section 6 is unchanged, and that is measured rather than assumed.** Both keyboard walks are walks
+of the main screen at rest, where the sheet is closed and holds no element at all. Neither list names
+a `sheet-` control, and the counts stay eleven visits before the throw and thirty-five after it. Both
+instruments read those lists out of this document.
+
+**The override panel is generated from the profile record.** It lists no field of its own, so a field
+added to the record appears without an edit to the screen. `src/settings/profile-fields.test.ts` and
+`src/app.test.tsx` both count the rows against a second walk of that record, so a field the panel
+stops drawing turns them red. The identifier, the name and the description of a profile are its
+identity: they are drawn read-only, and no control and no stored record can override them.
 
 ## 5. How the six pool cells fit the budget
 

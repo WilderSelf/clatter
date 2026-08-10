@@ -32,6 +32,8 @@ Status table for each unit. Every unit appends one row after it lands.
 | 4.6 | CSV import | Codec done. Wiring to the store open. Recorded order deviation. | — | `importCsv` in `src/log/csv.ts` REPLACES the log and REJECTS a duplicate `roll_id`. It caps the text at `MAX_IMPORT_CHARS`, validates the header against the exact schema, and rejects on the first unknown column. Four rejections carry four separate messages, each asserted by name. The round trip runs over 16 entries, a computed product of 4 presets, 2 modes and 2 push choices, with 2 null cells present, and compares 224 fields against a product of 16 entries and 14 fields. Two red-proofs passed and both named the field. **Open:** the call site that hands the new log to the store, which is Unit 4.4. See the notes under this table. |
 | 3.7 | Capability probe, fallback, context loss | Engine half done. Interface half open. Recorded order deviation. | — | **Done:** the startup probe, the pure decision, the persisted permanent fall, context loss and reduced motion. `src/tray/capability.ts` reads WebGL2, device memory, core count and `canvas.toBlob`, and `decideTray` decides over that record alone. The decision ran over a cross product of 64 readings against a product of four class lists, 9 above the bar and 55 below, with every reason reachable. On the graphics card the probe reads `webgl2=true device_memory_gb=null cores=16 to_blob=true` and decides `tray=true`. Inside the sandbox it reads `webgl2=false` and decides `tray=false, reasons=[no-webgl2]`, exit 0, so the probe answers rather than throws with no context at all. `Settings` gains `flatFallback` at version 3, with a 2 to 3 migration step and a store of `readSettings`, `writeSettings` and `recordFlatFallback`; the migration table runs 13 cases against a 13-item enumeration. `watchContextLoss` in `src/tray/scene.ts` records the fall on `webglcontextlost` and again on `webglcontextrestored`. Forced through `WEBGL_lose_context` on the graphics card, both handlers fired and the stored flag moved false to true. Reduced motion skips the tumble by winding the library's animation clock back: 24 of 24 faces equal the core's values in both modes and 24 of 24 agree die for die, while the tumbling throw drew 223 frames and the skipped throw 4. Three red-proofs passed. **Open:** the flat-dice renderer of Unit 2.2, the message shown once, the settings toggle back, and the plan's acceptance, a driven-browser run with the 3D chunk blocked. All four need the Phase 2 application shell, which waits at `BLOCKED:owner-gate` on Unit 2.0. **Unit 3.7 is not complete.** See the notes under this table. |
 | 3.5 | Locked-dice affordance | Tray half done. Screen half open. Recorded order deviation. | — | **Done:** the three states drawn on the dice and the click that answers them. `src/tray/affordance.ts` reads `lockState` from the rules core and derives nothing of its own. **Shape carries the state, not colour.** A rule lock draws a closed frame around the die, a player choice draws four corner blocks, and a loose die draws nothing. `scripts/browser.mjs --affordance` measures that by dropping a ray straight down onto the desk in 48 directions out from each die, so the probe reads geometry and can see no colour at all: 12 of a pool of 12 measured, rule 48 of 48 directions, choice 20, loose 0, three separated ranges, overlaps=0. The mark's own pixels are then read off the frame composited over the tray surface, at points a raycast proves are its own frontmost surface: 8 of the 8 marked dice, dimmest reading 4.91:1 against a floor of 3:1, which is what WCAG 1.4.11 asks of a graphical object. `affordance.test.ts` computes the same two contrasts from the hex values, unrendered. Every die was then clicked through the driver at a point a raycast proves belongs to it: refused=4 against the 4 the core locks by rule, toggled=8 against the 8 it does not, and the two sum to the pool size 12. Both red-proofs passed and both named what they broke. The vendored bundle exports four three.js primitives so a mark can be a mesh at all. The twelve-die render counters move from 841, 842 and 77 to 849, 906 and 77, against ceilings of 968, 969 and 89, and each mark costs one draw call and eight triangles. Initial JavaScript 6,953 gzip bytes, from 6,951. The lazy chunk 151,876, from 151,842. `npm run perf` still reads 203 steps with the scene digest unchanged. The capture is `docs/design/0008-affordance-1440.png`. Branding gate `files_scanned=89`, `hits=0`, exit 0. **Open:** roles, accessible names, `aria-pressed` state and focus order asserted in the driven browser, and the keyboard route to the same toggle through the history matrix. All of it is DOM, the history matrix is Unit 2.2, and both wait at `BLOCKED:owner-gate` on Unit 2.0. **Unit 3.5 is not complete.** See the notes under this table. |
+| 4.1 | Settings and persistence — the screen. **Unit 4.1 is now complete.** | Done | #12 | `sheet-ruleset` picks one of the four presets and `sheet-artifact-curve` picks the curve the artifact dice score on. Both reach the rules core and both survive a reload. The core is the oracle for every effect: a change of preset is asserted by comparing the kept dice on the screen against `isLocked` under the profile in force, over a stub source that answers one face, and the curve is asserted against `successCount` under each curve. Three parts of the core moved so that one answer serves every reader. `src/rules/success.ts` gains `ArtifactCurveId`, `ARTIFACT_CURVE_IDS` and `curveFor`, and `src/log/entry.ts` now reads that one function rather than its own copy. `src/rules/push-profile.ts` publishes each of its unions as a list built from a total record, so a member added to a union is a type error until the list holds it, and the blocker list is read off the record of blocker readers that already exists. **A new claim, and it is what lets a lock ignore the curve:** both artifact curves pay from a face of six upwards, asserted over every face of every artifact size, so `score(die) > 0` reads the same under either one while the successes differ. **The two defaults were one value apart and are now one value.** `DEFAULT_SETTINGS.presetId` is the preset the drawn screen holds, and `DEFAULT_PROFILE_ID` in the shell reads that field, so the screen and the store cannot open under two different rule sets. `Settings` gains `profileOverride` at version 7 with a step from version 6, and the migration table runs 32 cases against a 32-item enumeration, 6 of them new. The screen writes the record through the one writer `src/app.tsx` already held, so a later fall to flat dice cannot put an older rule set back, and the first run of that effect is skipped, because the screen writes what the player changed and never what it opened with. Initial JavaScript moves from 18,944 to 21,152 gzip bytes against the 61,440 in `budgets.json`. The lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=120`, `hits=0`, exit 0. See the notes under this table. |
+| 4.2 | Override panel | Done | #12 | `sheet-overrides` draws every field of the push-profile record and changes any of them on top of the chosen preset. **The panel is generated from the record.** `src/settings/profile-fields.ts` walks the record and lists no field of a push profile, so a field added to `PushProfile` later appears with no edit to the panel. The editor of a leaf follows the run-time type of the value the preset holds, and a text value belongs to a published domain or it is not editable at all: the identifier, the name and the description belong to no domain, so the identity of a profile is read-only by rule rather than by a list of exceptions. **The denominator is counted a second way, twice.** `src/settings/profile-fields.test.ts` and `src/app.test.tsx` each walk the record themselves and compare the rows path for path, so a field the panel stops drawing turns both red rather than going unread. The record holds 16 leaves under 9 top-level keys, which is the count Unit 4.4's profile hash already asserts: 3 read-only, 7 toggles, 2 numbers, 3 choices and 1 set. Every editable leaf is edited once and asserted to move that leaf and no other. **An override is a change on top of the preset, never a copy of one.** `mergeProfile` from Unit 1.5 applies it, no second store exists, and a leaf put back to the preset's own value leaves the override, so the row marks and the reset control cannot disagree. A stored override is read leaf by leaf through the same rule the panel draws it by. **The effect is asserted through the core:** an override that raises the push limit lets the core allow a second push, where the preset refused one. Vitest moves from 252 to 272 tests over 28 files. `node scripts/browser.mjs --sheet` is the new mode and it exits 0 at `checks=7 failures=0 skipped=0`. See the notes under this table. |
 | fix | The tray world clock ran on into the replay | Done | — | Unit 3.3's up-face check went red at random. The cause is the vendored library, not the read and not the throw. The library decides every face in a first pass, puts the bodies back at the spawn state, swaps the face labels, and replays the same fixed-step sequence. A body sleeps when `world.time` minus `timeLastSleepy` passes `sleepTimeLimit`, and 0.9 seconds is exactly 54 steps of the 1/60 second timestep, so that test lands on a step boundary. The clock ran on into the replay, where `world.time` is larger and carries different accumulated rounding, so a die slept one step earlier and the two passes came to rest in different poses. Measured for seed 44: the passes first differ at step 129 on one die at an identical position and quaternion, where the first pass reads velocity `(0.00207, 0.00842, 0.0000208)` and sleep state 1, and the replay reads velocity `(0, 0, 0)` and sleep state 2. `simulateThrow` now saves the clock and puts it back, and the replay repeats the first pass step for step. Rates over the harness, on the graphics card with the sandbox off: 1 failing run of 20 before and 0 of 20 after, plus 3 of 60 before and 0 of 60 after over a direct seed sweep. Every die now reads a pose drift of 0.000000 radians against the simulated pose, over all 60. `scripts/browser.mjs` gains `--throw-seed`, which pins the seed the tray throws from through the generator `scripts/perf.mjs` already uses. Every run prints its seed, so a red run repeats exactly. The same seed gives byte-identical captures across two processes and a different seed gives a different one. The six harness modes all exit 0 at seed 5. **Reported, not fixed:** `pool.colour-separates-the-types` fails on 6 runs of 20, before this change and after it, for an unrelated reason. The dice pile up, so the patch at a die's projected centre often reads a neighbour. Initial JavaScript 6,956 gzip bytes. The lazy chunk moves from 152,331 to 152,342. Branding gate `files_scanned=84`, `hits=0`, exit 0. See the notes under this table. |
 | fix | One check answered two questions | Done | — | The pool colour check carried two different findings under one name. It now compares in chromaticity, where brightness is divided out, so a die in the shadow of its neighbour keeps its own hue. Visibility is a separate check, `pool.every-die-shows-its-own-surface`, whose floor is the whole pool, because Unit 3.5 asks the player to click a single die and a buried die cannot be clicked. The colour check judges the visible dice and fails when the compared count and the visible count part, so no run passes with nothing to compare. Over seeds 1 to 40 on the graphics card with the sandbox off, the colour check moves from 1 red to 0 and the new visibility check goes red on seed 22 alone, which is the buried `stress-d6`. **The palette test and the render check are two claims and stay two instruments:** `src/tray/dice-colors.test.ts` measures the CIE L* ladder over the hex values and proves a greyscale copy still separates the types, and the harness check asks whether each die on the screen reads as its own type. Three red-proofs passed, one per check. No budget moved and the throw is unchanged. Branding gate `files_scanned=84`, `hits=0`, exit 0. See the notes under this table. |
 | 3.6 | Sound | Engine half done. Interface half open. Recorded order deviation. | — | **Done:** the sound engine, its stored state and the collision hook it reads. `src/tray/sound.ts` synthesises every sound with the Web Audio API. The repository holds no audio file and fetches none. A voice is a burst of noise through a band-pass filter: a die meeting a die is bright and short, a die meeting a wall or the desk is lower and longer, and the level rises with the closing speed along the contact normal. The vendored `eventCollide` reports the collision and plays nothing, and `loadSounds` and `loadAudio` are deleted with the six fields they used. `Settings` gains `soundEnabled` and `soundVolume` at version 4, with a 3 to 4 migration step; the migration table runs 17 cases against a 17-item enumeration. `scripts/browser.mjs --sound` ran on the graphics card with the sandbox off, at `--throw-seed 5`, and 7 of 7 checks passed. Over one silent throw the page built 0 audio contexts and the engine started 0 voices, while the tray reported 507 collisions and the physics world reported 181 new contacts by its own route. Over one sounded throw the engine accounted for 683 of 683 collisions as 224 voices, 246 second reports of one contact and 213 too soft to hear. The context is born suspended and a real click starts it. The stored 0.4 reaches the output gain, and a level of 0 renders a peak of exactly 0 while a context still exists. Four red-proofs passed. Initial JavaScript is 6,951 gzip bytes and the lazy chunk falls from 152,342 to 151,842. `npm run perf` reads 203 steps over 5 runs with the scene digest unchanged. Branding gate `files_scanned=86`, `hits=0`, exit 0. **Open:** the volume control, the settings toggle and the wiring that hands the engine to `mountTray` in the application. All three need the Phase 2 application shell, which waits at `BLOCKED:owner-gate` on Unit 2.0. **Unit 3.6 is not complete.** See the notes under this table. |
@@ -4291,3 +4293,162 @@ from its die. Both belong to the affordance Unit 3.5 shipped and neither is a de
 | `npm run perf` | 203 steps over 5 runs, spread 0, scene digest unchanged, exit 0 |
 | Harness | `--table` 9/0/0, `--shell` 8/0/0, `--blocked-chunk` 11/0/0, `--offline` 8/0/0, `--tray` 7/0/0, `--pool` 7/0/0, `--push` 7/0/0, `--affordance` 9/0/0, `--reduced-motion` 5/0/0 |
 | Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |
+
+## Units 4.1 and 4.2 — the rules the player chooses
+
+Two units, one surface. Unit 4.1's pure half and its `localStorage` binding were already built and
+proved. This is the screen half of Unit 4.1 and the whole of Unit 4.2, and **Unit 4.1 is now
+complete.**
+
+### The decision the units had to settle
+
+**Decision 10 of `docs/design/0012-settled-decisions.md`: a change of rules clears the roll on the
+table and returns the screen to rest A.** The pool, the difficulty and the stress counter all stay.
+
+The reason is the purpose of the application. The cost of a push is read **before** the player
+commits to it, so a roll on the table was committed to at a price read under one profile. New rules
+change that price, which dice the table keeps, and which dice a push would throw again.
+
+Two alternatives were priced and rejected, and the record names both. Pricing the roll again moves a
+die from the kept shelf to the throw zone under the player's hand and prints a price for a roll
+nobody threw at that price. Keeping the old profile alive for the roll on the table runs two rule
+sets at once, so the sheet states one and the table obeys the other, and every reader of a profile —
+the cost row, the two zones, the marks on the 3D dice, the log entry a roll will write — has to know
+which of the two it holds. One screen, one rule set.
+
+The precedent is in the rules model, which already discards the built pool on a change of mode. This
+is the smaller version of the same rule. The screen returns to rest A because section 1 names two
+rest states and a collapsed builder over an empty table is neither.
+
+### How the tray remounts
+
+Unit 3.5 recorded the limit: `mountAffordance` reads the profile once, at the mount, because it
+answers every click and draws every mark from it. `src/shell/table.tsx` now disposes the affordance
+and mounts it again under the profile in force, keyed on the profile itself. The canvas, the scene,
+the physics world and the dice bodies all stay, so nothing of the 3D chunk is fetched again and no
+context is lost. The table is cleared by the same change, so the new affordance opens over an empty
+pool and no mark of the old rules survives it.
+
+The check is an effect and not a call count: the fake tray is asked how many lock marks stand in its
+scene after a fresh roll under the new preset, and that count must equal the count the rules core
+reports as locked. Removing the remount leaves 0 marks where the core says 3.
+
+### The panel, and the trap it had to avoid
+
+**A panel generated from a record can still miss a field.** The rows are compared against a walk of
+the record written in the checking file, path for path, in two instruments. The record holds 16
+leaves under 9 top-level keys, which is the count Unit 4.4's profile hash already asserts: 3
+read-only, 7 toggles, 2 numbers, 3 choices and 1 set.
+
+Two rules decide the panel, and both come from the record rather than from a list of field names.
+The editor follows the run-time type of the value the preset holds. A text value belongs to a
+published domain or it is not editable at all — the identifier, the name and the description belong
+to no domain, so the identity of a profile is read-only by rule. That same rule refuses an identity
+override arriving from storage, so there is one rule and not two.
+
+The domains are the rules core's own lists, built there from total records, and the panel asserts
+that no two of them hold the same value by counting their members against the size of their union.
+A value therefore names one domain, which is what lets a leaf find its own control.
+
+### The effects, with the core as the oracle
+
+| The claim | How it is measured |
+|---|---|
+| A change of preset changes which dice the rules keep | The kept shelf on the screen equals `isLocked` under the profile in force, over a stub source that answers a bane on every die. The two presets keep 0 dice and 3 dice of the same roll. |
+| A change of curve changes what a die is worth | The status line equals `successCount(result, curve)` for each curve, over two d12 artifact dice showing 8. |
+| An override changes what the rules allow | The preset allows one push and the core refuses the second. The override raises the limit and the core allows it. |
+| The reset returns the preset | Every editable leaf is changed at once, and the merged profile then equals the preset again, compared as a whole record. |
+| A change of rules never re-prices a roll | The table holds the roll, then holds nothing, and the live region names the next throw again rather than a table. |
+
+### Twelve red-proofs
+
+Each injection landed, each failure names the gate it broke, and every file was restored by copying
+back a copy saved outside the repository. No version-control command touched a byte, and every
+restored file's SHA-256 matches its copy.
+
+1. **The panel skips one field.** `blockers` filtered out of `profileFields`: `the panel and the
+   record name different leaves: expected [ 'id', ... ] (12) to strictly equal (13)`, and the
+   editable count fell from 13 to 12 in a second check.
+2. **The identity becomes overridable.** The text rule removed from `normaliseOverride`:
+   `override-id: a control changed the identity: expected { id: 'a name of my own' } to strictly
+   equal {}`.
+3. **The chosen preset never reaches the rules.** `profileId` dropped from `withPreset`: `the screen
+   now follows the core under the chosen preset: expected [] to deeply equal [ 'die-at1', 'die-at2',
+   'die-at3' ]`.
+4. **The roll is priced again under new rules.** The clearing removed from `withRules`: `the table is
+   cleared: expected 5 to be +0` under jsdom, and in the browser `FAIL
+   sheet.a-change-of-rules-clears-the-table ... it holds 3 after the rule set changed`.
+5. **The artifact curve never reaches the score.** The curve dropped from `readout`: `the flat curve
+   reached the core: expected '...4 successes...' to contain '2 success'`.
+6. **The override never reaches the profile in force.** `mergeProfile` dropped from `profileOf`: `the
+   core allows a second push under the raised limit: expected true to be false`.
+7. **The reset keeps the override.** `withoutOverride` made a no-op: `the reset takes every mark
+   away: expected 1 to be +0`.
+8. **The stored rule set is ignored when the screen opens.** `stateFromSettings` made to keep the
+   opening id: `the rule set: expected false to be true`.
+9. **Nothing is written at all.** The settings effect made a no-op, in the browser: `FAIL
+   sheet.every-choice-survives-a-reload ... The record crossed the reload as 0 bytes`.
+10. **The tray keeps the profile it mounted under.** The remount key pinned to a constant: `the tray
+    marks the dice the new rules keep: expected +0 to be 3`.
+11. **The two artifact curves stop agreeing about a lock.** The flat curve's first threshold moved
+    from 6 to 8: `a d8 showing 6 is a success on one curve and not on the other: expected true to be
+    false`.
+12. **A control loses the label that is its hit target and its name.** The `label` around the toggle
+    replaced by a `span`, in the browser: `FAIL sheet.every-control-carries-a-role-a-name-and-a-state
+    ... 7 of them without an accessible name` and `FAIL sheet.the-panel-is-usable-at-360-px ... 7
+    under the 24 px floor ... the shortest one measures 14 px`. A thirteenth injection was tried
+    first and is recorded below, because it did not land.
+
+**An injection that did not land, and why it is recorded.** Shrinking `min-height` on the choice rows
+from 44 px to 20 px left `under_floor=0`, because the natural line box of the label is already over
+the floor. The check was not blind: the target it measures is the label a press lands on, and the
+defect it must catch is a control with no label at all. The injection above is that defect, and it
+went red. A run that had stopped at the first injection would have recorded a check that cannot fail.
+
+### What the captures show
+
+`docs/design/0015-sheet-top-360.png`, `0015-sheet-overrides-360.png`, `0015-sheet-top-1440.png` and
+`0015-sheet-overrides-1440.png`, from the running application. **For the owner, not for the gate.**
+
+At 360 px the sheet fills the screen and scrolls. The rule-set picker holds four radio buttons, each
+on its own 44 px row, with the description of the chosen preset under them. The panel opens with the
+three identity rows, drawn as read-only text, and every editable row below them stacks its label over
+its control, so nothing is squeezed side by side. A changed row carries a shaded ground and the word
+CHANGED beside it, so the mark is never colour alone. The reset button sits at the end of the panel
+and reads as a button rather than as another row. At 1440 px the same rows put the label and the
+control side by side and the whole panel is in view at once.
+
+**Reported, not fixed.** The push limit of the third preset is `Number.MAX_SAFE_INTEGER`, so its
+number field prints sixteen digits. It is honest and it fits, because the field scrolls, but a player
+reading it learns nothing except that there is no limit. A word for "no limit" belongs to the panel's
+own vocabulary and is a change to the record's meaning, not to its shape.
+
+### Where each claim is judged, and why
+
+The browser mode judges what only a browser can: the roles, the names and the states, the clearing of
+the table, a real reload through the page's own `localStorage`, and the layout at 360 px. **It does
+not judge whether a setting reaches the rules core**, because the built bundle exposes no rules
+module and a check there could only compare against an expectation written by hand. That claim is
+asserted under jsdom, where the core itself answers.
+
+### Measurements
+
+| Number | Value |
+|---|---|
+| New tests | 20: 11 in `src/settings/profile-fields.test.ts`, 7 in `src/app.test.tsx`, 1 in `src/rules/success.test.ts`, 1 more migration test path |
+| Test total | 252 to 272 vitest tests over 28 files, plus 20 node tests |
+| Migration cases | 32 exercised, against an enumeration of 32 |
+| Panel rows | 16 leaves under 9 top-level keys, counted a second way in two instruments |
+| Initial JavaScript | 18,944 to 21,152 gzip bytes. Budget in `budgets.json`. |
+| Lazy 3D chunk | 151,876 gzip bytes, unchanged |
+| `npm run perf` | 203 steps over 5 runs, spread 0, scene digest unchanged, exit 0 |
+| Harness | `--sheet` 7/0/0, `--shell` 8/0/0, `--table` 9/0/0, `--blocked-chunk` 11/0/0, `--settings-store` 6/0/0 |
+| Branding gate | `files_scanned=120`, `binary_skipped=49`, `hits=0`, exit 0 |
+| Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |
+
+### Open
+
+- **Unit 4.2 is complete.** Nothing of it is deferred.
+- Unit 4.1 is complete. The stress reset, the mode switch and the renderer toggle already sat on the
+  same sheet, and the theme picker of Unit 4.8 and the history of Units 4.4 to 4.7 are still owed
+  there by their own units.

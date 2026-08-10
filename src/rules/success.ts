@@ -108,6 +108,32 @@ export function defaultCurve(type: DieType, faces: Faces): CurveId {
 }
 
 /**
+ * The two curves an artifact die may take. Every other type has one curve, so
+ * this is the only choice the player is offered. Unit 4.1 stores it.
+ */
+export type ArtifactCurveId = Extract<CurveId, 'artifactEscalating' | 'artifactFlat'>;
+
+/** Both artifact curves, as a list. A settings control walks it. */
+export const ARTIFACT_CURVE_IDS: readonly ArtifactCurveId[] = [
+  'artifactEscalating',
+  'artifactFlat',
+];
+
+/**
+ * The curve one die takes under a chosen artifact curve, or `undefined` where
+ * the die takes its own default.
+ *
+ * One answer, read by the screen, by the log and by the roll. Two readers with
+ * two copies of this rule would price one artifact die two ways.
+ */
+export function curveFor(
+  die: Die,
+  artifactCurve: ArtifactCurveId | undefined,
+): CurveId | undefined {
+  return die.type === 'artifact' ? artifactCurve : undefined;
+}
+
+/**
  * The successes the die's newest face is worth, read from the table.
  * A die that has not rolled scores nothing.
  */

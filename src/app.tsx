@@ -26,9 +26,13 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Die } from './rules/die';
 import type { RandomSource } from './rules/random';
 import { cryptoRandom } from './rules/random';
+import { PUSH_PROFILES } from './rules/push-profile';
+import type { ArtifactCurveId } from './rules/success';
+import { ARTIFACT_CURVE_IDS } from './rules/success';
 import { localSettingsStore } from './settings/local-store';
-import type { SettingsStore } from './settings/settings';
+import type { Settings, SettingsStore } from './settings/settings';
 import { readSettings, writeSettings } from './settings/settings';
+import { OverridePanel } from './shell/overrides';
 import type { RendererState } from './shell/renderer';
 import {
   askForTray,
@@ -47,20 +51,26 @@ import {
   costLine,
   dieView,
   difficultyPreview,
-  emptyState,
   nudge,
   poolCells,
   POOL_CAPS,
+  presetOf,
   profileOf,
   pushNote,
   pushNow,
   readout,
   rollNow,
+  settingsFromState,
   signedDifficulty,
+  stateFromSettings,
   throwDice,
   toggleDie,
+  withArtifactCurve,
   withDifficulty,
   withMode,
+  withOverride,
+  withoutOverride,
+  withPreset,
   zonesOf,
 } from './shell/state';
 import type { TrayDecision } from './tray/capability';
@@ -70,6 +80,18 @@ import { mountTray } from './tray/scene';
 export type { TrayMount, TraySpots } from './shell/table';
 
 export const APP_NAME = 'Clatter';
+
+/**
+ * What each artifact curve pays, in the words a player reads.
+ *
+ * The thresholds are the rules core's own and are stated in
+ * `specs/0001-rules-model.md`. The sentence names them so the player can choose
+ * between two curves rather than between two words.
+ */
+const ARTIFACT_CURVE_NOTE: Readonly<Record<ArtifactCurveId, string>> = {
+  artifactEscalating: 'A face of 6 pays 1, 8 pays 2, 10 pays 3 and 12 pays 4.',
+  artifactFlat: 'A face of 6 pays 1, and 10 pays 2.',
+};
 
 /**
  * The startup probe, as the screen takes it.
@@ -566,8 +588,8 @@ function DiceTray({
 }) {
   const profile = profileOf(state);
   const zones = zonesOf(state);
-  const kept = zones.kept.map((die) => dieView(die, profile));
-  const loose = zones.loose.map((die) => dieView(die, profile));
+  const kept = zones.kept.map((die) => dieView(die, profile, state.artifactCurve));
+  const loose = zones.loose.map((die) => dieView(die, profile, state.artifactCurve));
   const order = [...kept, ...loose];
   const [activeId, setActiveId] = useState(order[0]?.element ?? '');
   const tray = useRef<HTMLDivElement>(null);
@@ -669,6 +691,35 @@ function Sheet({
           if (event.key === 'Escape') onClose();
         }}
       >
+        {/* The rule set, and every field of it.
+
+            `sheet-ruleset` picks one of the four presets the rules core ships
+            and `sheet-overrides` changes any field of the record on top of it.
+            Both clear the table: Decision 10 of
+            `docs/design/0012-settled-decisions.md` holds the reason, which is
+            that a roll on the table was committed to at one price. */}
+        <fieldset class="field" data-el="sheet-ruleset">
+          <legend>Rule set</legend>
+          {PUSH_PROFILES.map((profile) => (
+            <label key={profile.id} class="choice">
+              <input
+                type="radio"
+                name="ruleset"
+                value={profile.id}
+                checked={state.profileId === profile.id}
+                onChange={() => setState((previous) => withPreset(previous, profile.id))}
+              />
+              {profile.label}
+            </label>
+          ))}
+          <p class="sheet-note">{profileOf(state).description}</p>
+        </fieldset>
+        <OverridePanel
+          base={presetOf(state)}
+          override={state.override}
+          onChange={(next) => setState((previous) => withOverride(previous, next))}
+          onReset={() => setState(withoutOverride)}
+        />
         <fieldset class="field" data-el="sheet-mode">
           <legend>Dice</legend>
           {(['pool', 'step'] as const).map((mode) => (
@@ -684,6 +735,26 @@ function Sheet({
             </label>
           ))}
           <p class="sheet-note">A change of mode clears the pool.</p>
+        </fieldset>
+        {/* Both artifact curves ship. On a d12 the escalating curve is worth
+            more than the flat one, so this is a real setting and not a
+            preference. `specs/0001-rules-model.md` holds both thresholds and
+            the rules core scores from them. */}
+        <fieldset class="field" data-el="sheet-artifact-curve">
+          <legend>Artifact dice</legend>
+          {ARTIFACT_CURVE_IDS.map((curve) => (
+            <label key={curve} class="choice">
+              <input
+                type="radio"
+                name="artifact-curve"
+                value={curve}
+                checked={state.artifactCurve === curve}
+                onChange={() => setState((previous) => withArtifactCurve(previous, curve))}
+              />
+              {curve === 'artifactEscalating' ? 'Escalating' : 'Flat'}
+            </label>
+          ))}
+          <p class="sheet-note">{ARTIFACT_CURVE_NOTE[state.artifactCurve]}</p>
         </fieldset>
         {/* The way back from a permanent fall to flat dice, which the plan asks
             Unit 3.7 for. The sheet is a second surface and carries no share of
@@ -754,10 +825,12 @@ export function App({
   probe?: TrayProbe;
   mount?: TrayMount;
 } = {}) {
-  const [state, setState] = useState<AppState>(() => initial ?? emptyState('pool'));
-  const [renderer, setRenderer] = useState<RendererState>(() =>
-    startRenderer(null, readSettings(store)),
-  );
+  // The stored record is read once, and it opens both the rules the screen
+  // rolls under and the renderer choice. One read, so the two cannot open under
+  // two different records.
+  const [stored] = useState<Settings>(() => readSettings(store));
+  const [state, setState] = useState<AppState>(() => initial ?? stateFromSettings(stored));
+  const [renderer, setRenderer] = useState<RendererState>(() => startRenderer(null, stored));
   // Where the 3D dice landed, so the cells the keyboard reaches lie over them.
   // The flat renderer reads none of it and the record stays empty there.
   const [spots, setSpots] = useState<TraySpots>(NO_SPOTS);
@@ -782,6 +855,24 @@ export function App({
     if (next.settings !== previous.settings) writeSettings(store, next.settings);
     setRenderer(next);
   };
+
+  // The rules the player chose are written to the same record the renderer
+  // choice lives in, through the same one writer, so a later fall to flat dice
+  // cannot put an older ruleset back.
+  //
+  // The first run is skipped. The screen writes what the player changed, never
+  // what it opened with, so opening the app records nothing.
+  const openedWith = useRef(true);
+  useEffect(() => {
+    if (openedWith.current) {
+      openedWith.current = false;
+      return;
+    }
+    apply((previous) => {
+      const settings = settingsFromState(previous.settings, state);
+      return settings === previous.settings ? previous : { ...previous, settings };
+    });
+  }, [state.mode, state.profileId, state.artifactCurve, state.override]);
 
   // The probe runs once, at startup, and the screen draws flat dice until it
   // answers. A probe that answered below the bar records the permanent fall and

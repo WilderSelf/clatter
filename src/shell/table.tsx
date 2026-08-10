@@ -247,6 +247,37 @@ export function Table({
     [],
   );
 
+  // A change of rules remounts the affordance — Units 4.1 and 4.2.
+  //
+  // `mountAffordance` reads the profile once and holds it, because it answers
+  // every click and draws every mark from it. Unit 3.5 recorded that as a
+  // limit: the profile was read at the mount and nothing could change it. The
+  // rules are now a control on the sheet, so the affordance is disposed and
+  // mounted again under the profile in force. The canvas, the scene and the
+  // physics world all stay: only the listener and the marks are rebuilt.
+  //
+  // A change of rules also clears the table, which Decision 10 settles, so the
+  // new affordance opens over an empty pool and the marks of the roll before it
+  // are gone. The next throw fills it again.
+  const inForce = JSON.stringify(profileOf(state));
+  useEffect(() => {
+    const held = box.current;
+    if (held === null || affordance.current === null) return;
+    affordance.current.dispose();
+    affordance.current = null;
+    let live = true;
+    const pool = state.result === null ? [] : ordered.current;
+    void mountAffordance(held, pool, profileOf(state), (_pool, clicked) =>
+      toggle.current(clicked.id),
+    ).then((handle) => {
+      if (live) affordance.current = handle;
+      else handle.dispose();
+    });
+    return () => {
+      live = false;
+    };
+  }, [inForce]);
+
   // One throw per ordinal. A throw that arrives while another runs replaces
   // whatever was waiting, so the tray never falls further than one throw
   // behind the screen.

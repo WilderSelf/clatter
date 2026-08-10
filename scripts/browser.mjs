@@ -11,7 +11,7 @@
 //                            [--capture <path>] [--browser <path>]
 //                            [--tray] [--pool] [--push] [--affordance] [--probe]
 //                            [--share] [--capture-later] [--offline]
-//                            [--shell] [--capture-shell <dir>] [--table]
+//                            [--shell] [--capture-shell <dir>] [--table] [--sheet]
 //
 // `--table` starts and stops its own preview server, because it drives the
 // built application. Build first, then run it alone:
@@ -19,6 +19,15 @@
 //     --url http://localhost:4173/clatter/ --viewport 1440x900 \
 //     --capture-before docs/design/0014-table-throw-1440.png \
 //     --capture docs/design/0014-table-push-1440.png
+//
+// `--sheet` needs `--url` and starts its own preview server too. It is the
+// browser half of Units 4.1 and 4.2: it drives the rule set, the artifact curve
+// and the override panel behind the one disclosure, proves that a change of
+// rules clears the table, reloads the page to prove every choice survives, and
+// measures the panel at 360 px. `--capture-shell <dir>` writes four frames.
+// Build first, then run it alone:
+//   npm run build && node scripts/browser.mjs --sheet \
+//     --url http://localhost:4173/clatter/ --capture-shell docs/design
 //
 // `--shell` starts and stops its own preview server, for the same reason
 // `--offline` does. Build first, then run it alone:
@@ -7140,6 +7149,326 @@ async function pushOnTheTable(page, throwsBefore) {
 }
 
 // ---------------------------------------------------------------------------
+// The rule set, the artifact curve and the override panel — Units 4.1 and 4.2
+//
+// The three controls sit behind the one disclosure. This mode judges what only
+// a browser can judge:
+//
+//   * the roles, the names and the states the controls carry;
+//   * that a change of rules clears the table, which is Decision 10;
+//   * that every choice survives a real reload through the page's own
+//     `localStorage`, which is the plan's acceptance for Unit 4.1;
+//   * that the panel is usable at 360 px, which is the target this project has.
+//
+// **What this mode does not judge, and where that is judged instead.** Whether
+// a setting reaches the rules core is asserted in `src/app.test.tsx`, where the
+// core itself is the oracle. The built bundle exposes no rules module, so a
+// check here could only compare against an expectation written by hand, and a
+// hand-written expectation is what the jsdom instrument exists to avoid.
+// ---------------------------------------------------------------------------
+
+/** The floor a hit target clears, from WCAG 2.2 SC 2.5.8. */
+const HIT_TARGET_FLOOR = 24;
+
+/** Everything the sheet holds, as a reader meets it. */
+async function readSheet(page) {
+  return page.evaluate(() => {
+    const control = (element) => {
+      const label = element.closest('label');
+      const role =
+        element.tagName === 'SELECT'
+          ? 'combobox'
+          : element.type === 'radio'
+            ? 'radio'
+            : element.type === 'checkbox'
+              ? 'checkbox'
+              : element.type === 'number'
+                ? 'spinbutton'
+                : element.tagName.toLowerCase();
+      // The hit target of a labelled control is the label, because a press
+      // anywhere inside it reaches the control. The box of the input itself is
+      // reported beside it, so a run says which one it measured.
+      const target = (label ?? element).getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      return {
+        role,
+        name: ((label ?? element).textContent ?? '').replace(/\s+/g, ' ').trim(),
+        state:
+          element.type === 'number' || element.tagName === 'SELECT'
+            ? element.value
+            : String(element.checked),
+        width: Math.round(target.width),
+        height: Math.round(target.height),
+        inputHeight: Math.round(box.height),
+      };
+    };
+    const group = (name) =>
+      [...document.querySelectorAll(`[data-el="${name}"] input`)].map(control);
+    const sheet = document.querySelector('[data-el="disclosure-sheet"]');
+    const rows = [...document.querySelectorAll('[data-el="sheet-overrides"] [data-field]')];
+    return {
+      ruleset: group('sheet-ruleset'),
+      curve: group('sheet-artifact-curve'),
+      rows: rows.map((row) => ({
+        field: row.dataset.field,
+        kind: row.dataset.kind,
+        changed: row.classList.contains('changed'),
+        controls: [...row.querySelectorAll('input, select')].map(control),
+      })),
+      reset: {
+        present: document.querySelector('[data-el="overrides-reset"]') !== null,
+        disabled: document.querySelector('[data-el="overrides-reset"]')?.disabled ?? null,
+      },
+      sheetScrolls: sheet === null ? null : sheet.scrollHeight > sheet.clientHeight,
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+      stored: localStorage.getItem('clatter.settings'),
+    };
+  });
+}
+
+async function openSheet(page) {
+  await page.click('[data-el="disclosure-toggle"]');
+  await page.waitForSelector('[data-el="sheet-overrides"]', { timeout: 15000 });
+}
+
+async function closeSheet(page) {
+  await page.click('[data-el="sheet-close"]');
+  await page.waitForFunction(
+    () => document.querySelector('[data-el="disclosure-sheet"]') === null,
+    { timeout: 15000 },
+  );
+}
+
+/** How many dice the table holds, counted off the cells the screen draws. */
+async function diceOnTable(page) {
+  return page.evaluate(() => document.querySelectorAll('[data-el^="die-"]').length);
+}
+
+async function runSheet(page, options, checks) {
+  // The run starts from the defaults, so nothing an earlier run stored decides
+  // what this one reads.
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // A browser that refuses storage answers the defaults anyway.
+    }
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="disclosure-toggle"]', { timeout: 30000 });
+
+  // ---- 1. A change of rules clears the table. Decision 10. ----
+  for (let press = 0; press < 3; press += 1) {
+    await page.click('[data-el="pool-cell-attribute"] .cell-p');
+  }
+  await page.click('[data-el="roll-button"]');
+  const thrown = await diceOnTable(page);
+  await openSheet(page);
+  const opening = await readSheet(page);
+  const chosen = opening.ruleset.find((each) => each.state === 'false');
+  await page.click(`[data-el="sheet-ruleset"] input:not(:checked)`);
+  const afterChange = await diceOnTable(page);
+  const builder = await page.evaluate(
+    () => document.querySelector('[data-el="pool-builder"]') !== null,
+  );
+  console.log(
+    `browser: sheet cleared thrown=${thrown} after_change=${afterChange} ` +
+      `builder_open=${builder} chose="${chosen === undefined ? 'nothing' : chosen.name}"`,
+  );
+  checks.push({
+    name: 'sheet.a-change-of-rules-clears-the-table',
+    ok: thrown > 0 && afterChange === 0 && builder,
+    detail:
+      `the table held ${thrown} dice, and it holds ${afterChange} after the rule set changed. ` +
+      `The builder is ${builder ? 'open' : 'closed'}, and it must be open, because an empty ` +
+      `table belongs to rest A. A roll on the table is never priced again under new rules: ` +
+      `Decision 10 of docs/design/0012-settled-decisions.md.`,
+  });
+
+  // ---- 2. Every control carries a role, a name and a state. ----
+  const named = await readSheet(page);
+  const controls = [...named.ruleset, ...named.curve, ...named.rows.flatMap((row) => row.controls)];
+  const unnamed = controls.filter((each) => each.name.length === 0);
+  const checkedRuleset = named.ruleset.filter((each) => each.state === 'true');
+  const checkedCurve = named.curve.filter((each) => each.state === 'true');
+  console.log(
+    `browser: sheet controls=${controls.length} unnamed=${unnamed.length} ` +
+      `ruleset=${named.ruleset.length} checked=${checkedRuleset.length} ` +
+      `curve=${named.curve.length} checked=${checkedCurve.length} rows=${named.rows.length}`,
+  );
+  checks.push({
+    name: 'sheet.every-control-carries-a-role-a-name-and-a-state',
+    ok:
+      controls.length > 0 &&
+      unnamed.length === 0 &&
+      named.ruleset.length > 1 &&
+      checkedRuleset.length === 1 &&
+      named.curve.length === 2 &&
+      checkedCurve.length === 1 &&
+      named.rows.length > 0,
+    detail:
+      `${controls.length} controls, ${unnamed.length} of them without an accessible name. ` +
+      `The rule set holds ${named.ruleset.length} choices with ${checkedRuleset.length} ` +
+      `chosen, the artifact curve holds ${named.curve.length} with ${checkedCurve.length} ` +
+      `chosen, and the panel holds ${named.rows.length} rows. ` +
+      `Unnamed: [${unnamed.map((each) => each.role).join(', ')}].`,
+  });
+
+  // ---- 3. The panel is the record's shape, whichever preset is chosen. ----
+  //
+  // One shape, four presets. The row list must not change with the preset, and
+  // the values must, or the panel is not reading the preset at all.
+  const shapes = [];
+  for (let index = 0; index < named.ruleset.length; index += 1) {
+    await page.evaluate((at) => {
+      const inputs = [...document.querySelectorAll('[data-el="sheet-ruleset"] input')];
+      inputs[at]?.click();
+    }, index);
+    const held = await readSheet(page);
+    shapes.push({
+      fields: held.rows.map((row) => row.field).join(','),
+      values: held.rows.map((row) => row.controls.map((each) => each.state).join('/')).join(','),
+    });
+  }
+  const oneShape = new Set(shapes.map((each) => each.fields));
+  const values = new Set(shapes.map((each) => each.values));
+  console.log(
+    `browser: sheet presets=${shapes.length} shapes=${oneShape.size} value_sets=${values.size}`,
+  );
+  checks.push({
+    name: 'sheet.the-panel-follows-the-preset-and-keeps-its-shape',
+    ok: shapes.length > 1 && oneShape.size === 1 && values.size === shapes.length,
+    detail:
+      `${shapes.length} presets drew ${oneShape.size} row list and ${values.size} different ` +
+      `sets of values. The row list is the shape of the profile record and does not follow ` +
+      `the preset. The values do, so a panel that ignored the preset would read one value set.`,
+  });
+
+  // ---- 4. Every choice survives a real reload. ----
+  const wanted = { ruleset: 1, curve: 1 };
+  await page.evaluate((at) => {
+    [...document.querySelectorAll('[data-el="sheet-ruleset"] input')][at]?.click();
+  }, wanted.ruleset);
+  await page.evaluate((at) => {
+    [...document.querySelectorAll('[data-el="sheet-artifact-curve"] input')][at]?.click();
+  }, wanted.curve);
+  // One override, taken off the panel rather than named here: the first row
+  // that draws a checkbox.
+  const toggled = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('[data-el="sheet-overrides"] [data-field]')].find(
+      (each) => each.dataset.kind === 'toggle',
+    );
+    const input = row?.querySelector('input');
+    input?.click();
+    return row?.dataset.field ?? null;
+  });
+  const before = await readSheet(page);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="disclosure-toggle"]', { timeout: 30000 });
+  await openSheet(page);
+  const after = await readSheet(page);
+  const sameRuleset =
+    before.ruleset.map((each) => each.state).join(',') ===
+    after.ruleset.map((each) => each.state).join(',');
+  const sameCurve =
+    before.curve.map((each) => each.state).join(',') ===
+    after.curve.map((each) => each.state).join(',');
+  const changedRows = (held) =>
+    held.rows
+      .filter((row) => row.changed)
+      .map((row) => row.field)
+      .join(',');
+  console.log(
+    `browser: sheet reload override=${toggled} before_changed=[${changedRows(before)}] ` +
+      `after_changed=[${changedRows(after)}] stored_bytes=${(after.stored ?? '').length}`,
+  );
+  checks.push({
+    name: 'sheet.every-choice-survives-a-reload',
+    ok:
+      toggled !== null &&
+      sameRuleset &&
+      sameCurve &&
+      changedRows(before) === toggled &&
+      changedRows(after) === toggled &&
+      after.reset.disabled === false,
+    detail:
+      `the rule set read back ${sameRuleset ? 'the same' : 'DIFFERENTLY'}, the curve read back ` +
+      `${sameCurve ? 'the same' : 'DIFFERENTLY'}, and the override on ${toggled} is marked as ` +
+      `a change before the reload ([${changedRows(before)}]) and after it ` +
+      `([${changedRows(after)}]). The record crossed the reload as ` +
+      `${(after.stored ?? '').length} bytes of the page's own localStorage.`,
+  });
+
+  // ---- 5. The panel is usable on a phone. ----
+  await closeSheet(page);
+  await page.setViewport({ width: 360, height: 760, deviceScaleFactor: 1 });
+  await openSheet(page);
+  const phone = await readSheet(page);
+  const phoneControls = [
+    ...phone.ruleset,
+    ...phone.curve,
+    ...phone.rows.flatMap((row) => row.controls),
+  ];
+  const short = phoneControls.filter(
+    (each) => each.height < HIT_TARGET_FLOOR || each.width < HIT_TARGET_FLOOR,
+  );
+  const reachable = await page.evaluate(() => {
+    const close = document.querySelector('[data-el="sheet-close"]');
+    if (close === null) return false;
+    close.scrollIntoView({ block: 'end' });
+    const box = close.getBoundingClientRect();
+    return box.top >= 0 && box.bottom <= window.innerHeight + 1 && box.height >= 24;
+  });
+  console.log(
+    `browser: sheet phone controls=${phoneControls.length} under_floor=${short.length} ` +
+      `document_width=${phone.documentWidth} viewport=${phone.viewportWidth} ` +
+      `sheet_scrolls=${phone.sheetScrolls} close_reachable=${reachable}`,
+  );
+  checks.push({
+    name: 'sheet.the-panel-is-usable-at-360-px',
+    ok:
+      phoneControls.length > 0 &&
+      short.length === 0 &&
+      phone.documentWidth <= phone.viewportWidth &&
+      reachable,
+    detail:
+      `${phoneControls.length} hit targets, ${short.length} under the ${HIT_TARGET_FLOOR} px ` +
+      `floor of WCAG 2.2 SC 2.5.8 ` +
+      `[${short.map((each) => `${each.name}: ${each.width}x${each.height}px`).join('; ')}]. ` +
+      `A target is the label a press lands on, and the shortest one measures ` +
+      `${Math.min(...phoneControls.map((each) => each.height))} px. ` +
+      `The document is ${phone.documentWidth} px wide against a viewport of ` +
+      `${phone.viewportWidth}, so nothing is off the side. The sheet ` +
+      `${phone.sheetScrolls ? 'scrolls' : 'does not scroll'} and the close button is ` +
+      `${reachable ? 'reachable' : 'NOT reachable'}: the layout degrades by scrolling and ` +
+      `never by clipping.`,
+  });
+
+  if (options.captureShell !== null) {
+    // Two frames per width: the sheet as it opens, and the override panel. The
+    // sheet scrolls, so a frame of one is not a frame of the other.
+    for (const width of [360, 1440]) {
+      await page.setViewport({ width, height: width === 360 ? 760 : 900, deviceScaleFactor: 1 });
+      for (const [name, target] of [
+        ['top', '[data-el="sheet-ruleset"]'],
+        ['overrides', '[data-el="overrides-reset"]'],
+      ]) {
+        await page.evaluate((selector) => {
+          document.querySelector(selector)?.scrollIntoView({ block: 'end' });
+        }, target);
+        await new Promise((done) => setTimeout(done, 200));
+        writeFileSync(
+          join(options.captureShell, `0015-sheet-${name}-${width}.png`),
+          await page.screenshot({ type: 'png' }),
+        );
+      }
+    }
+    console.log(`browser: sheet captures written to ${options.captureShell}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing and the run
 // ---------------------------------------------------------------------------
 
@@ -7177,6 +7506,7 @@ function parseArgs(argv) {
     share: false,
     offline: false,
     shell: false,
+    sheet: false,
     blockedChunk: false,
     table: false,
     captureShell: null,
@@ -7220,6 +7550,7 @@ function parseArgs(argv) {
     else if (arg === '--share') options.share = true;
     else if (arg === '--offline') options.offline = true;
     else if (arg === '--shell') options.shell = true;
+    else if (arg === '--sheet') options.sheet = true;
     else if (arg === '--blocked-chunk') options.blockedChunk = true;
     else if (arg === '--table') options.table = true;
     else if (arg === '--capture-shell') options.captureShell = next();
@@ -7277,6 +7608,7 @@ function parseArgs(argv) {
     ['--share', options.share],
     ['--offline', options.offline],
     ['--shell', options.shell],
+    ['--sheet', options.sheet],
     ['--blocked-chunk', options.blockedChunk],
     ['--table', options.table],
   ];
@@ -7285,7 +7617,7 @@ function parseArgs(argv) {
     throw new Error(
       `${named[0]} needs --url, and the url must be ` +
         `${
-          options.offline || options.shell || options.blockedChunk || options.table
+          options.offline || options.shell || options.sheet || options.blockedChunk || options.table
             ? 'a preview server over the built output'
             : 'a Vite dev server'
         }`,
@@ -7306,8 +7638,8 @@ function parseArgs(argv) {
   if (options.captureLater && !options.share) {
     throw new Error('--capture-later belongs to --share');
   }
-  if (options.captureShell !== null && !options.shell) {
-    throw new Error('--capture-shell belongs to --shell');
+  if (options.captureShell !== null && !options.shell && !options.sheet) {
+    throw new Error('--capture-shell belongs to --shell or --sheet');
   }
   if (options.longTaskMs !== 0) {
     if (!options.logStore && !options.logCsv) {
@@ -7333,7 +7665,13 @@ async function run(options) {
   // a url that somebody else is serving.
   let server = null;
   try {
-    if (options.offline || options.shell || options.blockedChunk || options.table) {
+    if (
+      options.offline ||
+      options.shell ||
+      options.sheet ||
+      options.blockedChunk ||
+      options.table
+    ) {
       server = await startPreviewServer(options.url, join(here, '..'));
     }
     if (
@@ -7413,6 +7751,8 @@ async function run(options) {
       await runOffline(page, options, checks, server);
     } else if (options.shell) {
       await runShell(page, options, checks);
+    } else if (options.sheet) {
+      await runSheet(page, options, checks);
     } else if (options.blockedChunk) {
       await runBlockedChunk(page, options, checks, server);
     } else if (options.table) {

@@ -874,6 +874,11 @@ body {
   padding: var(--s4) var(--s4) calc(var(--s4) + var(--safe-b));
   display: grid;
   gap: var(--s3);
+  /* The sheet holds every field of the profile record, so it is taller than a
+     phone. It scrolls, exactly as the middle of the screen does under Decision
+     6: the layout degrades by scrolling and never by clipping. */
+  max-height: 88vh;
+  overflow-y: auto;
 }
 
 .field {
@@ -904,6 +909,92 @@ body {
 .sheet-note {
   margin: 0;
   font-size: 13px;
+  color: var(--ink-dim);
+}
+
+/* ---------------- the override panel, Unit 4.2 ---------------- */
+
+.ovr-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--s2);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ovr-row:last-of-type {
+  border-bottom: 0;
+}
+
+/* A changed row carries the word beside it as well as the ground under it, so
+   the mark is never colour alone. Section 7 of the screen design. */
+.ovr-row.changed {
+  background: var(--raised);
+  border-radius: 6px;
+  padding-left: var(--s1);
+  padding-right: var(--s1);
+}
+
+.ovr-tag {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.ovr-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s1) var(--s2);
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.ovr-read {
+  margin: 0;
+  cursor: default;
+}
+
+.ovr-label {
+  flex: 1 1 8rem;
+}
+
+.ovr-text {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.ovr-input {
+  flex: 0 1 11rem;
+  min-height: 44px;
+  min-width: 6rem;
+  max-width: 100%;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 var(--s2);
+  font: inherit;
+}
+
+.ovr-set {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+
+.ovr-set legend {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--ink-dim);
 }
 
