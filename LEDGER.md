@@ -68,7 +68,254 @@ Status table for each unit. Every unit appends one row after it lands.
 | 3.8 | Performance gates and the phone overlay — the overlay half. **Unit 3.8 is now complete. The owner still owes the phone reading.** | Done | #19 | `sheet-overlay` shows four readings over the screen: p95 and p99 frame duration, the long-task total, and throw-to-first-motion. **It reports and never gates**, which is what the End state of `CLAUDE.md` asks of a timing figure. Every line names its unit and its sample count, a percentile below a floor derived from its own quantile is refused, and a figure this browser cannot measure is named rather than printed as a zero. Frames are sampled inside a throw and nowhere else. Decision 18 records every choice. The desktop reading is in the notes and is NOT the phone reading the plan asks for. See the notes under this table. |
 | fix | The pointer probe aimed where no pointer can land | Done | #20 | `--table` lost a die to the pointer route on some throws, with `die-at2 did not answer the click`. **Neither candidate cause was the cause.** The die was not buried: `unreachable=0` on every failing run, and the two dice that were lost held 1,415 and 1,820 whole pixels of their own front surface. The die cells did not eat the press either: the click reached the canvas, and `pointer-events: none` of Decision 9 held at every point measured. **The cause is the probe.** It walked outwards from a die's centre and returned the FIRST point that belonged to the die, which lies on the boundary with whatever covers the centre, by construction. That point is fractional, and the driver rounds every pointer coordinate to a whole pixel — `Math.round` in `node_modules/puppeteer-core/lib/puppeteer/bidi/Input.js`. The press therefore landed across the boundary and the neighbour took it. Measured at seed 108: the aim read `(232.626, 495.087)` where the raycast answers die 22, the rounded point `(233, 495)` answers die 7, and `die-sk3` toggled instead of `die-st8`. **The fix is a construction, not a rule.** `window.__clatterAim` scans the whole pixels the die's projected disc covers, keeps the ones where the die is the frontmost body, and answers the one furthest from any pixel that is not, by a Chebyshev distance transform. The answer is a whole pixel, so rounding changes nothing, and it is the point deepest inside what the player sees. One implementation serves `--table` and `--affordance`. `CLICK_PROBE_RINGS` and `CLICK_PROBE_ANGLES` are gone and nothing replaced them: the scan has no free parameter. **No shipping file changed.** The pointer route was already correct. Over 64 throw seeds at 1440x900 the mode now reads `passed=64 of 64` at `checks=10 failures=0 skipped=0`, against 2 red in 32 before the fix, and seed 2107814439 passes. `table.every-aim-is-a-whole-pixel-the-pointer-can-address` is new. The pointer check now counts `refused` against the dice the screen draws as images and `toggled` against the dice it draws as buttons, and the key route counts the same split through a different instrument, so a die a neighbour hides can no longer be absorbed into a refusal. **`BLOCKED:owner-gate` on the small tray.** At 360x760 the heap buries a die in 7 of 24 throws and the pointer route cannot reach it. The keyboard route reaches every die at every width. See the notes under this table. Three red-proofs passed. Initial JavaScript 43,390 gzip bytes, the lazy chunk 151,876, the render counters 841, 842 and 77, and `npm run perf` 203 steps with the scene digest unchanged — every one of them unchanged, because no shipping file moved. |
 | 4.10 | Error surfaces. **Unit 4.10 is now complete.** | Done | #21 | One error surface, four rows, no control. **Decision 19 of `docs/design/0012-settled-decisions.md` settles the shape** and section 3 of `docs/design/0002-screen-design.md` lists it under the read-only parts, so the control budget of section 3 and both keyboard walks of section 6 are unchanged. `src/shell/faults.ts` holds eight faults over four slots, and the denominator is PARSED out of the union declarations of the five modules that refuse: 27 declared outcomes, 9 with a surface and 18 with a written reason for none. `node scripts/browser.mjs --faults` drives six of the eight to their real failure and reads the surface off the screen, `--faults --quota-kb` drives the seventh, and the eighth prints `NOT JUDGED` with its reason. Every recovery route is TAKEN, and two of them had the wrong words until the route was taken. Seven red-proofs. Initial JavaScript 43,390 to 44,486 gzip bytes against the budget in `budgets.json`, with the branch point measured in a throw-away worktree rather than remembered. See the notes under this table. |
+| 4.11 | Accessibility gate. **Unit 4.11 is now complete. Phase 4 is closed.** | Done | #22 | A keyboard-only run from an empty pool to a pushed result, in CI, with N read out of the design and never restated. `node scripts/browser.mjs --a11y` presses real Tab, arrow, Enter and Escape keys at both drawn widths and takes no pointer at all, counted by the page itself. `src/app.test.tsx` runs the same journey under jsdom. The audit is **axe-core 4.13.0, MPL-2.0, pinned exactly**, and Decision 20 of `docs/design/0012-settled-decisions.md` settles the licence: MPL obligations attach to distribution, this repository distributes none of the covered files, and `scripts/check-bundle-size.mjs` proves it with a calibrated marker. It ran 90 rules and found **two real defects, both fixed here**: seven buttons nested inside the `role="slider"` difficulty, and the cost row outside every landmark. **The disclosure sheet is a real modal at last** — it carried `aria-modal="true"` with no hold on the Tab key from Unit 2.1 to Unit 4.10. The two stale count sentences in section 6 of the screen design are corrected, and a check now reads every sentence of that document that states a walk count. CI judges the whole gate on the flat dice and prints the 3D half as NOT JUDGED, `skipped=1`. See the notes under this table. |
 
+
+## Unit 4.11 — the accessibility gate
+
+The plan asks for two things and says which one matters: "a pinned, named automated audit in CI,
+plus a scripted keyboard-only run asserting focus visits *N* named elements in order, from empty
+pool to pushed result", and then, "an axe-core run on a canvas app passes even when the app is
+unusable by keyboard, so the scripted run is the real check." Both landed. The audit found two real
+defects on its first run anyway.
+
+### What the gate is, and which half CI judges
+
+| Instrument | Where it runs | What it judges |
+|---|---|---|
+| `src/app.test.tsx` | `npm test`, so every pull request | The whole journey under jsdom: both walks, the live region after the roll and after the push, the sheet as a modal, and every sentence of the design that states a walk count. |
+| `src/a11y/audit.test.tsx` | `npm test` | axe-core over six states of the screen. |
+| `src/a11y/shape.test.tsx` | `npm test` | Shape against hue, over a denominator that grows by itself. |
+| `node scripts/browser.mjs --a11y --no-webgl` | CI, a new step | The same journey with REAL key presses, at both drawn widths, plus the sheet driven off both ends and the audit over a laid-out page. |
+| `node scripts/browser.mjs --a11y --hardware` | The owner's machine | The same run again with the 3D table mounted. CI cannot: it has no graphics card. |
+
+**CI judges everything but the 3D table.** The walk is one list in both renderers, which section 6
+states and Decision 9 settles, so a run on the flat dice walks the same names. The table half prints
+`NOT JUDGED` and counts in `skipped=1`. On this host with `--hardware` the same run reads
+`window.__clatterTable` and judges it: 33 checks, 0 failures, 0 skipped, with the table mounted at
+both widths.
+
+### N is fixed where the design states it
+
+Both lists are read out of section 6 of `docs/design/0002-screen-design.md` by every instrument, and
+neither one restates them. The document states each walk three ways — a count in words, a numbered
+list, and a sentence splitting the list into Tab stops and arrow visits — and all three are compared
+against each other before the screen is asked anything. A visit added, removed or reordered fails
+against a number nothing in the screen wrote.
+
+### The journey, and what jsdom cannot do
+
+Everything before this unit walked ONE state: the screen mounted at rest A, or mounted at rest B over
+a fixture. Two walks of two mounted states say nothing about the journey between them. The gate now
+builds the pool with the arrow keys, throws with Enter on the roll button, walks the table, and
+pushes with Enter on the push button, in one run.
+
+jsdom runs no sequential focus navigation and no default activation behaviour, so a Tab press and an
+Enter press both do nothing there. The jsdom half therefore enumerates the tab stops the way the
+specification defines them, and an activation asserts the focused element is a `<button>` — which is
+what makes Enter activate it — before it clicks. The browser half presses the real keys, and it
+counts the pointer events the page saw: 0 over the whole journey, at both widths, read off the page's
+own listeners rather than claimed by the runner.
+
+### A harness fault that would have made every later keyboard run a lie
+
+**A walk that presses Tab past the last control hands the focus to the browser's own chrome, and
+after that no key activates anything.** The page keeps its `document.activeElement` and still takes
+key events, so a walk carries on working and a Tab press still moves the focus ring. But
+`document.hasFocus()` is then false, and a browser performs no DEFAULT ACTION for a document that
+does not hold the focus. Measured on this host on 2026-08-10: 40 Enter presses on a focused, enabled
+roll button produced **0 click events**, with no error anywhere, and the same button took 6 clicks
+from 6 presses once the focus was back.
+
+Six ways of asking for the focus back were measured. `bringToFront`, `window.focus()` and a real
+mouse press in the content area all left it false. A reload, a navigation, and a resize followed by a
+navigation each worked sometimes and not others — four navigations in a row failed once. A new tab
+always works, because a new tab is the active tab. So every phase of this mode opens a tab of its
+own and closes the one before it, and every phase reads `document.hasFocus()` and reports it as a
+check of its own. A run that cannot press a key now says so, instead of failing as though the screen
+were wrong.
+
+The walks are also BOUNDED now: `walkShell` takes the number of authored visits a caller expects and
+stops ON the last one rather than one press past it. The press past the end is what costs the focus,
+so it is asked once, in a phase of its own, as the last thing the mode does with the keys —
+`a11y.rest-a-ends-where-the-design-ends` and `a11y.rest-b-ends-where-the-design-ends`. Without that
+phase the bound would have hidden a control appended after the last stop.
+
+### The four items handed to this unit, and what became of each
+
+**1. The stale count. Fixed, and a check now reads every such sentence.** Section 6 said "The
+authored counts stay eleven and thirty" in TWO places, not one: the browser-stop paragraph and the
+3D-table paragraph under it. Both said thirty while the same section listed thirty-five. The list was
+re-derived at the draw target of 30 dice before Unit 2.2 shipped and these two sentences kept the old
+figure. No check read them, so both instruments passed over a false statement for eight units, and
+Units 2.3 and 3.7 each reported it. The check that now reads them takes every sentence of the
+document that names a walk, keeps every number word of nine or more in it, and holds each one against
+the set the two numbered lists derive — the two counts, their sum, and the two zone lengths. Eleven
+such numbers are checked today and the check states its own count. A third sentence cannot drift
+alone.
+
+**2. The sheet was not a modal. It is one now.** `aria-modal="true"` is a promise made to a screen
+reader: it tells the reader to ignore everything outside the dialog. It tells the Tab key nothing.
+The sheet carried the attribute from Unit 2.1 and nothing held the keyboard, so a Tab off the last
+control landed on the roll button behind a sheet a reader had been told was hidden. Units 4.1, 4.2,
+4.3, 4.8, 4.9, 3.6 and 3.8 each added controls behind that promise. `src/shell/focus-trap.ts` now
+answers which elements inside a container the Tab key reaches, and the sheet wraps at both ends.
+Decision 21 records the option it was taken against, which was `inert`.
+
+Proved by measurement rather than by claim: 80 Tab presses and 80 Shift and Tab presses inside the
+open sheet, every one landing inside it, 36 distinct stops reached in each direction. 80 is more than
+the sheet holds stops, so the walk wrapped several times rather than running out. The enumeration is
+a claim about the browser, so `src/app.test.tsx` also asserts that every `sheet-` control the design
+lists is inside it — a control missing from the enumeration would be unreachable, which is the
+failure a trap introduces. Closing returns the focus to `disclosure-toggle`, by Escape and by
+`sheet-close`, which section 4 already required.
+
+**3. `--history` was run 26 times and did not fail once.** Unit 4.7 recorded one run in nine
+reporting `failures=1` with the name lost to an output filter. Every run here kept its whole output,
+so a repeat would have named its check. All 26 read `checks=21 failures=0 skipped=0`, exit 0.
+
+**What 26 clean runs rule out, stated honestly.** They do not find the fault and they do not prove it
+absent. At a true rate of one in nine, the chance of 26 clean runs is `(8/9)^26`, which is 4.7 per
+cent, so a one-in-nine fault is ruled out at about 95 per cent confidence. A rate of one in fifty
+would give 59 per cent, and is not ruled out at all. The honest reading: whatever failed once in Unit
+4.7 is rarer than one run in nine, and this is as far as 40 minutes of runs can settle it. The item
+is closed as bounded, not as fixed.
+
+**4. The viewport, and a run that skips quietly.** Two decisions, 22 and 23. The gate sets its own
+viewport and runs the whole journey at 360 by 760 and at 1440 by 900, which are the widths the design
+is drawn at; the harness default of 800 by 600 is neither. The default itself is unchanged, because
+every other mode carries recorded numbers taken at it — the scroll-stop readings in section 6 among
+them — and moving it would silently re-measure all of them. And `--a11y` refuses to run unless the
+run DECLARES what the machine can draw: `--hardware` or `--no-webgl`. Unit 4.10 recorded a sandboxed
+run that reported `renderer unreadable`, skipped its 3D checks and exited 0. That is now a failure by
+name.
+
+### The audit, the licence, and the two defects it found
+
+**axe-core 4.13.0, MPL-2.0, pinned to an exact version.** Decision 20 settles the licence in full and
+prices four alternatives from figures read off the npm registry on 2026-08-10. The short form: MPL-2.0
+is a file-level licence whose obligations attach to DISTRIBUTING the covered files; this repository
+distributes none of them; running a tool is not copying from it; Constraint 2 forbids copying from a
+GPL-3.0 source, which is a different act against a different licence. The installed tree already
+carries three MPL-2.0 packages and one CC-BY-4.0 package, all from Vite 8, so the rule as practised
+covers what ships. The alternatives each trip a different clause: `html_codesniffer` is BSD-3-Clause
+and six years without a release, `accessibility-checker` is Apache-2.0 and pulls `chromedriver`,
+`puppeteer` and a telemetry package, and `pa11y` is LGPL-3.0-only.
+
+**The claim that it never ships is checked, and the check calibrates itself first.**
+`scripts/check-bundle-size.mjs` reads two markers out of the tool's own file, fails loudly if either
+one is no longer there, then scans every file of `dist/` for them. The package name alone is not a
+marker: the vendored physics writes `axes:`, and a marker that matches by accident is as bad as one
+that matches nothing.
+
+**It found two real defects, both fixed here rather than declared.**
+
+1. `nested-interactive`, serious, on `.track`: seven notch buttons inside the `role="slider"`
+   difficulty control. A notch is a hit target and never a control — the arrow keys change the value
+   and the slider itself takes them — so the notches are spans now.
+2. `region`, on `.cost-t`: the cost row sat outside every landmark, because the footer was a plain
+   div. It is a `<footer>` now, so the header, the middle and the action bar are the three regions of
+   the screen.
+
+After both fixes: 0 violations over six states under jsdom and over two states in a real browser,
+with at least 90 rules running in each. The one rule jsdom cannot decide, `color-contrast`, is
+declared in the file with the three instruments that judge the same claim for real, and the
+comparison is set equality, so a second undecided rule is a red.
+
+### Shape carries every meaning colour carries, over one denominator
+
+Units 3.5, 4.4, 4.5 and 4.7 each proved their own surface. Four proofs cover four surfaces and say
+nothing about a fifth. `src/a11y/shape.test.tsx` asserts the rule once, over two denominators that do
+not read each other:
+
+- **The stylesheet.** Every rule that spends `--mark-success` or `--mark-bane` is collected. A mark is
+  a FILLED glyph, so a rule where the meaning colour is the background must carry a shape
+  declaration. Every rule that spends the colour on text or on one edge is named with its reason —
+  three of them, all warnings and not marks — and the comparison is exact.
+- **The document.** Every element the screen draws carrying one of the classes the stylesheet just
+  named must be owned by one of four declared surfaces: the status line, a flat die, the history
+  summary list and the history record matrix. Each surface must be found, and each must draw BOTH
+  marks.
+
+The chart glyphs spend the chart inks rather than the two mark colours, so they carry their own rule
+and their series come from `CHART_SERIES` rather than a list typed here. The 3D table draws no mark
+at all: the cell over the table draws no die, because the die under it is the one the player reads,
+so the check there is that every cell's accessible name states the face and what it is worth.
+
+### Every roll result reaches a live region, read rather than asserted to exist
+
+The region is READ after the roll and after the push, in both instruments, and every figure in it is
+compared against a figure written elsewhere in the same render: the successes and the banes against
+the sum over the dice on the table, the dice count against the design's own list, and the stress
+against the value the keys put on the stress tile. The two sentences must also differ, so a region
+that never updated fails.
+
+**One limitation, stated.** The draw target needs every tile at its cap, so the stress tile is at its
+cap before the push, and `pushNow` holds the counter there while the core adds the die. The rise is
+therefore read off the table — 30 dice become 31 — and not off the counter. Section 8 of the design
+draws that state and says the reading is at its cap and is marked.
+
+### The red proofs
+
+Every check added here was shown to fail on the defect it was written for, by an injection that was
+edited back afterwards. No saved bytes were restored by a version-control command.
+
+1. **The stale count.** Injection: the sentence put back to "eleven and thirty". Failure:
+   `every count the document states about its walk is one of its own: expected [ Array(1) ] to deeply equal []`
+   with `"30 is not one of [9, 11, 21, 35, 46] in \"The authored counts stay eleven and thirty.\""`.
+2. **The keyboard walk.** Injection: `tabIndex={0}` on the status line. Failure:
+   `the walk of the empty pool: expected [ 'status-line', …(11) ] to deeply equal [ 'collapse-button', 'pool-bar', …(9) ]`.
+3. **The live region.** Injection: the spoken sentence printed `successes + 1`. Failure:
+   `the roll reached the live region: expected '6 successes. 4 banes...' to be '5 successes. 4 banes...'`.
+4. **The focus trap, under jsdom.** Injection: the Tab branch of the sheet's handler returned early.
+   Failure: `a Tab at the last stop is refused: expected false to be true`.
+5. **The focus trap, in the browser.** The same injection, rebuilt and re-run. Failure:
+   `a11y.the-focus-cannot-leave-the-sheet-in-either-direction 80 Tab presses and 80 Shift and Tab presses landed inside the sheet every time: 12 escaped forwards and 12 backwards`,
+   against 0 and 0 with the trap in place, and 43 distinct stops instead of 36 because the walk
+   reached the screen behind.
+6. **Shape against hue.** Injection: `.tally-s` and `.tally-b` added to the stylesheet, each spending
+   a meaning colour with no shape. Failure:
+   `every mark carries a shape and not a hue alone: expected [ '.tally-s', '.tally-b' ] to deeply equal []`.
+7. **The audit.** Injection: the notches put back to buttons. Failure:
+   `the audit reports no finding it can decide: expected [ …(2) ] to deeply equal []` naming
+   `rest A, the empty pool: nested-interactive (serious) x1 at .track`.
+8. **The audit never ships.** Injection: `<!-- axe.version -->` appended to `dist/index.html`.
+   Failure: `bundle-size: FAIL dev_only_tool axe-core@4.13.0 markers=2 files_scanned=10 hits=1` and
+   `dist/index.html holds "axe.version"`, exit 1.
+
+### Measurements
+
+**Validation.** `npm run lint` 0, `npm run typecheck` 0, `npm test` 0 over 466 vitest tests in 44
+files plus the node suites, `npm run build` 0.
+
+**The harness.**
+
+```
+node scripts/browser.mjs --a11y --no-webgl   checks=33 failures=0 skipped=1
+node scripts/browser.mjs --a11y --hardware   checks=33 failures=0 skipped=0
+node scripts/browser.mjs --history           checks=21 failures=0 skipped=0, 26 runs
+```
+
+**The bundle.** Initial JavaScript 44,828 gzip bytes and the lazy 3D chunk 151,876 gzip bytes, both
+inside the ceilings `budgets.json` holds. The initial figure rose by 342 bytes over Unit 4.10, which
+is the focus trap and the footer element. **The audit is 3,113,323 bytes unpacked and adds nothing
+to either figure**, which is the whole reason it can be taken.
+
+**The render counters and steps to rest.** `npm run perf` exit 0: steps 203 over five runs with a
+spread of 0, against the budget, and the scene digest unchanged.
+
+**The branding gate.** `files_scanned` moved with the new files and `hits=0`.
+
+### Reported, not fixed
+
+- **`--history` reports `renderer unreadable` on this host and skips nothing.** That mode needs no
+  graphics card, so the reading costs it nothing. It is noted because item 4 of this unit is about
+  exactly that reading meaning less than it looks: in `--a11y` it is now a failure by name, and every
+  other mode keeps the behaviour it had.
+- **The harness default viewport is still 800 by 600.** Decision 22 says why it was not moved.
+- **`.claude/skills/run-clatter/SKILL.md` does not name the `--a11y` mode.** That path is deny-listed
+  to the agent, so the owner has to add it. The usage block at the head of `scripts/browser.mjs`
+  carries the whole description in the meantime.
 
 ## Unit 4.10 — the error surfaces
 

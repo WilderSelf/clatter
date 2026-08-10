@@ -57,6 +57,7 @@ import {
   UNUSABLE_POOL_TEXT,
 } from './shell/presets';
 import { canShareFile, downloadBlob, shareFile } from './shell/download';
+import { wrapFocus } from './shell/focus-trap';
 import type { MadeCard, MakeCardOutcome } from './shell/share-state';
 import { makeShareCard } from './shell/share-state';
 import {
@@ -393,16 +394,20 @@ function Difficulty({ state, setState }: { state: AppState; setState: (change: C
         aria-valuetext={`${shown}. ${preview}`}
         onKeyDown={onKeyDown}
       >
+        {/* A notch is a hit target and never a control. It was a button until
+            Unit 4.11, and a button inside a widget role is an interactive
+            control nested inside another one, which the audit reports and a
+            reader meets as an unnamed stop. The value is changed here by the
+            arrow keys, which the slider itself takes, so the notch owes the
+            keyboard nothing and carries the pointer alone. */}
         {NOTCHES.map((value) => {
           const classes = ['tk-n'];
           if (value === 0) classes.push('centre');
           if (value === state.difficulty) classes.push('on');
           return (
-            <button
+            <span
               key={value}
               class={classes.join(' ')}
-              type="button"
-              tabIndex={-1}
               aria-hidden="true"
               onClick={() => setState((previous) => withDifficulty(previous, value))}
             />
@@ -913,6 +918,7 @@ function Sheet({
   onClose: () => void;
 }) {
   const close = useRef<HTMLButtonElement>(null);
+  const sheet = useRef<HTMLDivElement>(null);
   useEffect(() => close.current?.focus(), []);
   return (
     <div class="scrim" onClick={onClose}>
@@ -922,9 +928,25 @@ function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label="More"
+        ref={sheet}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') onClose();
+          if (event.key === 'Escape') {
+            onClose();
+            return;
+          }
+          // The sheet holds the Tab key, because `aria-modal` holds only the
+          // reader. Section 4 of `docs/design/0002-screen-design.md` states
+          // it. The wrap is decided outside this file, and it answers null
+          // everywhere but the two ends, so a press in the middle of the sheet
+          // keeps the browser's own behaviour.
+          if (event.key !== 'Tab') return;
+          const held = sheet.current;
+          if (held === null) return;
+          const next = wrapFocus(held, document.activeElement, event.shiftKey);
+          if (next === null) return;
+          event.preventDefault();
+          next.focus();
         }}
       >
         {/* The rule set, and every field of it.
@@ -1800,7 +1822,10 @@ export function App({
         )}
       </main>
 
-      <div class="shell-f" data-el="shell-footer">
+      {/* A landmark, so the cost row is inside one. The header, the middle
+          and this bar are the three regions of the screen, and a reader that
+          walks landmarks reaches every word without walking the dice. */}
+      <footer class="shell-f" data-el="shell-footer">
         {state.builderOpen ? null : (
           <div class="costrow" data-el="cost-row">
             <p class="cost-t">{costLine(state)}</p>
@@ -1872,7 +1897,7 @@ export function App({
             </button>
           )}
         </div>
-      </div>
+      </footer>
 
       {/* The performance overlay — Unit 3.8.
 

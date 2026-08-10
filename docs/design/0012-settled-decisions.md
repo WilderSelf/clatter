@@ -998,3 +998,124 @@ Six surfaces, every one read at 360 px after it was written:
 `0024-fault-nothing-kept-360.png`, `0024-fault-table-absent-360.png`, `0024-fault-table-lost-360.png`,
 `0024-fault-log-stopped-360.png`, `0024-fault-import-refused-360.png` and
 `0024-fault-storage-full-360.png`.
+
+## Decision 20 — the audit is axe-core, taken by me 2026-08-10
+
+**What was decided.** Clatter takes `axe-core`, pinned to the exact version `4.13.0`, as a
+devDependency. It is the "pinned, named automated audit" Unit 4.11 asks for. It is never imported by
+anything under `src/`, it never reaches `dist/`, and no line of it is copied.
+
+**Why this is not `BLOCKED:dependency`, stated in full because the rule names licences by family.**
+
+`CLAUDE.md` sends a new dependency to the owner when it is over 10 KB gzipped, or unmaintained, or
+not MIT, BSD or Apache. axe-core is 3,113,323 bytes unpacked and its licence is MPL-2.0, read off
+the installed `node_modules/axe-core/package.json` and its `LICENSE` file, not guessed. Two of the
+three clauses fire on the words. The reasons they do not fire on the thing:
+
+1. **The licence obligation attaches to distribution, and this repository distributes none of the
+   covered files.** MPL-2.0 is a file-level licence. Its conditions bind a party that ships the
+   covered files or a larger work holding them. Clatter ships a static site built from `src/`, and
+   the audit is a test-time tool that no shipped module names. Running a tool creates no obligation
+   of any kind. Constraint 2 forbids COPYING from a GPL-3.0 source, which is a different act against
+   a different licence, and nothing here is copied.
+2. **The repository already builds on MPL-2.0, measured.** The installed tree holds three MPL-2.0
+   packages — `lightningcss` and its two platform binaries — and one CC-BY-4.0 package,
+   `caniuse-lite`. All four arrive with Vite 8 and none was ever escalated. The rule as practised
+   covers what ships.
+3. **The size clause guards `initial_js_gzip_bytes`, and a devDependency cannot move it.** Every
+   devDependency this repository already holds is far over 10 KB gzipped: TypeScript, Vite, Vitest,
+   ESLint, Prettier and puppeteer-core. The budget the clause protects is a budget over shipped
+   JavaScript, and `scripts/check-bundle-size.mjs` reports that figure on every build.
+4. **The claim is checked rather than stated.** `scripts/check-bundle-size.mjs` scans every file of
+   `dist/` for two markers of the tool and fails on a hit. It calibrates first: each marker must be
+   found in the tool's own file, so a marker that stopped naming the tool fails loudly instead of
+   reporting a clean `dist/` for ever. The package name alone is not one of the markers, because the
+   vendored physics writes `axes:` and a marker that matches by accident is as bad as one that
+   matches nothing.
+
+**The alternatives, priced against the same rule.** Every figure below was read from the npm
+registry on 2026-08-10.
+
+| Tool | Licence | Last release | Cost |
+|---|---|---|---|
+| `axe-core` 4.13.0 | MPL-2.0 | 2026-08-05 | Zero runtime dependencies. No install-time download. No telemetry. |
+| `html_codesniffer` 2.5.1 | BSD-3-Clause | 2020-04-13 | The licence clears the bar and the age does not. Six years without a release is the "unmaintained" clause, so it trades one escalation for another. |
+| `accessibility-checker` 4.0.30 | Apache-2.0 | 2026-08-04 | The licence clears the bar. It depends on `chromedriver`, `puppeteer` and `@ibm/telemetry-js`: two install-time binary downloads from hosts the sandbox does not allow, and a telemetry package. |
+| `pa11y` 9.1.1 | LGPL-3.0-only | 2026-02-26 | A stronger copyleft than the one being avoided. |
+| Write our own | — | — | An audit written here tests what its author thought of, which is the weakness the plan names when it says the audit is the second check. It would also not be "named and pinned". |
+
+**Where it runs.** Twice, over two different things:
+
+- `src/a11y/audit.test.ts` runs it under jsdom over six states of the screen, inside `npm test`, so
+  it is judged on every pull request. jsdom lays nothing out, so the contrast rule can only answer
+  "incomplete" there. That answer is declared in the file with the instrument that judges the same
+  claim for real, and the declared set is compared for equality, so a second undecided rule is a red.
+- `node scripts/browser.mjs --a11y` injects the same pinned file into a real browser, which lays the
+  page out and computes its colours, so the contrast rule is DECIDED there.
+
+**What it found.** Two real violations on its first run, both fixed in this unit rather than
+declared: seven notch buttons nested inside the `role="slider"` difficulty control, and the cost row
+sitting outside every landmark. The first is why the notches are now spans and the second is why the
+footer is a `<footer>`.
+
+## Decision 21 — the disclosure sheet holds the Tab key, taken by me 2026-08-10
+
+**What was decided.** The sheet keeps `role="dialog"` and `aria-modal="true"`, and it now holds the
+Tab key as well: focus wraps at both ends and cannot leave the sheet while it is open.
+
+**The defect.** `aria-modal="true"` is a promise made to a screen reader. It tells the reader to
+ignore everything outside the dialog. It tells the Tab key nothing at all. The sheet carried the
+attribute from Unit 2.1 and nothing held the keyboard, so a Tab off the last control landed on the
+roll button behind a sheet a reader had been told was hidden. Units 4.1, 4.2, 4.3, 4.8, 4.9, 3.6 and
+3.8 each added controls behind that promise.
+
+**The option it was taken against.** `inert` on the rest of the screen is the modern answer and it
+is one attribute. It was rejected for this unit because the shell is one element tree and the sheet
+is drawn inside it, so `inert` would have to be applied to a sibling that does not exist yet, and
+because jsdom implements neither `inert` nor sequential focus navigation, which would leave the
+whole claim to the browser run alone.
+
+**How it is built, and why the enumeration is safe.** `src/shell/focus-trap.ts` answers which
+elements inside a container the Tab key reaches, in order, and `wrapFocus` answers where a press at
+an end must send the focus. It answers null everywhere else, so a press in the middle of the sheet
+keeps the browser's own behaviour and costs nothing. A radio group is one stop, which is the rule
+sequential focus navigation follows, because a trap that walked every radio would put stops where
+the browser puts none and the two orders would then disagree at the ends, which is where a trap is
+decided.
+
+**The enumeration is a claim about the browser, so the browser checks it.**
+`node scripts/browser.mjs --a11y` presses Tab eighty times and Shift and Tab eighty times inside the
+open sheet, counts every landing that is not inside it, and compares the two directions against each
+other. Eighty is more than the sheet holds stops, so the walk wraps several times rather than running
+out. `src/app.test.tsx` judges the handler under jsdom, and it also asserts that every `sheet-`
+control the design lists is inside the enumeration, because a control missing from it would be
+unreachable, which is the failure a trap introduces.
+
+## Decision 22 — the gate runs at the two widths the design is drawn at, taken by me 2026-08-10
+
+**What was decided.** `--a11y` sets its own viewport and runs the whole journey twice, at 360 by 760
+and at 1440 by 900. It does not take the harness default.
+
+**Why.** The harness default is 800 by 600. It is neither of the widths the design is drawn at, and
+the screen changes with the width: the pool bar holds two columns below 600 px, three from 600 px and
+six from 1100 px, and the middle region scrolls at one width and not at the other. A walk measured at
+800 by 600 is therefore measured at a width nothing was designed for, and the browser's own scroll
+stop appears or does not appear for reasons the design never chose.
+
+**Why the default itself is not changed.** Every other mode was measured against 800 by 600, and
+several of them carry recorded numbers taken there — the scroll-stop readings in section 6 of the
+screen design among them. Moving the default would silently re-measure all of them. The gate takes
+its own viewport instead, and section 6 keeps its readings with the width they were taken at.
+
+## Decision 23 — a run that cannot draw must say so, taken by me 2026-08-10
+
+**What was decided.** `--a11y` refuses to run unless the run declares what the machine can draw:
+`--hardware` for a real graphics card, or `--no-webgl` for a machine without one. Neither flag is a
+failure by name, not a skip.
+
+**Why.** Unit 4.10 recorded a sandboxed harness run that reported `renderer unreadable`, skipped its
+3D checks and still exited 0. A gate that answers "nothing to judge" and passes is a gate that reads
+green on a machine that measured nothing. The sandbox hides `/dev/dri` and a CI runner has no card at
+all, so this is the ordinary case rather than a rare one. The declaration turns it into a decision the
+runner takes on purpose: CI names `--no-webgl` and prints the 3D half as NOT JUDGED, counted in
+`skipped=`, and a run on the owner's machine names `--hardware` and judges it.

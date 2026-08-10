@@ -45,6 +45,7 @@ import {
   UNUSABLE_POOL_TEXT,
 } from './shell/presets';
 import { storageLine } from './shell/history';
+import { focusStops } from './shell/focus-trap';
 import { noticeText, startRenderer } from './shell/renderer';
 import { FAULT_SLOT_ELEMENT, FAULT_SLOTS, faultLine, faultOf } from './shell/faults';
 import { shareCard } from './shell/share-card';
@@ -58,7 +59,9 @@ import {
 import type { AppState, Counts } from './shell/state';
 import {
   builderOf,
+  DEFAULT_PROFILE_ID,
   dieElement,
+  POOL_CAPS,
   emptyState,
   pushNow,
   readout,
@@ -3147,5 +3150,446 @@ describe('the fault banner', () => {
     expect(inTheHistory).toEqual(onTheDice);
     expect(inTheHistory.filter((each) => each !== '').length).toBe(2);
     expect(tabStops(element('fault-banner'))).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The accessibility gate — Unit 4.11
+//
+// Everything above walks ONE state: the screen is mounted at rest A, or mounted
+// at rest B over a fixture. The plan asks for something else — a run that goes
+// "from empty pool to pushed result" without leaving the keyboard — because two
+// separate walks of two mounted states say nothing about the journey between
+// them. A pool built by the keys, a throw taken from the roll button, and a push
+// taken from the push button is the run a player makes.
+//
+// **N is fixed where the design states it.** Both lists are read out of section
+// 6 of `docs/design/0002-screen-design.md` by `walkList` above, and the two
+// counts are pinned there to 11 and 35, so a visit added, removed or reordered
+// fails against a number nothing in the screen wrote.
+//
+// **What jsdom cannot do, and who does it instead.** jsdom runs no sequential
+// focus navigation and no default activation behaviour, so a Tab press and an
+// Enter press both do nothing here. The walk therefore enumerates the tab stops
+// the way the specification defines them, and an activation asserts the focused
+// element is a `<button>` — which is what makes Enter activate it — before it
+// clicks. `node scripts/browser.mjs --a11y` presses the real keys.
+// ---------------------------------------------------------------------------
+
+/**
+ * The number of arrow presses each tile takes, at the draw target.
+ *
+ * Every tile goes to its cap, which is what section 8 of the design draws. The
+ * artifact tile steps a rating rather than a count, so six presses put two d12
+ * dice on the table. `worstCaseState` derives the resulting pool and the check
+ * below counts the two against each other.
+ */
+const GATE_TILES: readonly [string, number][] = [
+  ['pool-cell-attribute', 5],
+  ['pool-cell-skill', 5],
+  ['pool-cell-gear', 3],
+  ['pool-cell-artifact', 6],
+  ['pool-cell-bonus', 2],
+  ['pool-cell-stress', 10],
+];
+
+/** What the stress tile holds after the walk above, which is the counter. */
+const STRESS_TILE = 10;
+
+/**
+ * Activate the element the focus is on, the way Enter does.
+ *
+ * The assertion is the point: a native button is activated by Enter and by
+ * Space with no script at all, and an element that is not one would need a key
+ * handler nothing here has read. So the type is asserted before the click that
+ * stands in for the key.
+ */
+function activate(): void {
+  const held = document.activeElement as HTMLElement | null;
+  if (held === null) throw new Error('nothing holds the focus');
+  expect(held.tagName, `${String(held.dataset.el)} is a button, so Enter activates it`).toBe(
+    'BUTTON',
+  );
+  click(held);
+}
+
+/** Put the focus on a named control, as the walk above would have left it. */
+function focusOn(name: string): HTMLElement {
+  const held = element(name);
+  held.focus();
+  expect(document.activeElement, `the focus reached ${name}`).toBe(held);
+  return held;
+}
+
+/**
+ * The whole table, summed off the dice themselves.
+ *
+ * The status line is one rendering of the state and each die is another, and
+ * both are written in the same render. Summing the parts is therefore a second
+ * reading of the same throw, and it is the reading that catches a summary line
+ * that counts its own table wrong. The faces come from the rules core: the
+ * screen decides no value.
+ */
+function sumOfTheDice(): { successes: number; banes: number; dice: number } {
+  let successes = 0;
+  let banes = 0;
+  let dice = 0;
+  for (const cell of document.querySelectorAll<HTMLElement>('[data-el^="die-"]')) {
+    const label = cell.getAttribute('aria-label') ?? '';
+    dice += 1;
+    if (/ A bane\./.test(label)) banes += 1;
+    if (/ One success\./.test(label)) successes += 1;
+    const many = / (\d+) successes\./.exec(label);
+    if (many !== null) successes += Number(many[1]);
+  }
+  return { successes, banes, dice };
+}
+
+/** The sentence the live region holds, built from figures it did not write. */
+function liveSentence(
+  sum: { successes: number; banes: number; dice: number },
+  pushes: number,
+  stress: number,
+): string {
+  return (
+    `${sum.successes} ${sum.successes === 1 ? 'success' : 'successes'}. ` +
+    `${sum.banes} ${sum.banes === 1 ? 'bane' : 'banes'}. Push ${pushes}. ` +
+    `The table holds ${sum.dice} dice. Stress ${stress}.`
+  );
+}
+
+describe('the keyboard-only run, from an empty pool to a pushed result', () => {
+  it('walks both lists of section 6 in one run, and presses nothing else', () => {
+    const before = walkList(DESIGN, 'Before');
+    const after = walkList(DESIGN, 'After');
+    // N is the design's number, and the two lists count themselves three ways
+    // before the screen is asked anything.
+    expect(before.names.length).toBe(before.stated);
+    expect(after.names.length).toBe(after.stated);
+
+    // Seed 21 is the seed this run was fixed at. The profile the screen opens
+    // in blocks a push once a stress die shows a bane, so the run throws again
+    // until the push is live and reports how many throws that took.
+    mount({ random: seededRandom(21) });
+
+    // ---- Rest A, by the keys alone ----
+    const first = walk(document);
+    expect(
+      first.map((visit) => visit.name),
+      'the walk of the empty pool',
+    ).toEqual(before.names);
+    expect(first.length, 'N before the throw is the number the design states').toBe(before.stated);
+
+    // The pool is built with the arrow keys, from the pool bar, exactly as
+    // section 5 says a composite widget is worked. Nothing is clicked.
+    focusOn('pool-cell-attribute');
+    for (const [cell, wanted] of GATE_TILES) {
+      expect(
+        (document.activeElement as HTMLElement).dataset.el,
+        'the right arrow walked to the next tile',
+      ).toBe(cell);
+      for (let taken = 0; taken < wanted; taken += 1) {
+        act(() => press(document.activeElement as Element, 'ArrowUp'));
+      }
+      act(() => press(document.activeElement as Element, 'ArrowRight'));
+    }
+    // The difficulty is one value over seven positions, so its arrows change
+    // the value and never move the focus. Three presses take it to +3.
+    const track = focusOn('difficulty-track');
+    for (let taken = 0; taken < 3; taken += 1) {
+      act(() => press(document.activeElement as Element, 'ArrowRight'));
+      expect(document.activeElement, 'the difficulty keeps the focus').toBe(track);
+    }
+
+    // The pool the keys built is the pool the design draws, counted by the core.
+    const wanted = throwDice(worstCaseState());
+    const dieNames = after.names.filter((name) => name.startsWith('die-'));
+    expect(wanted.length, 'the draw target is the length of the die list').toBe(dieNames.length);
+    expect(spoken(), 'the live region says what the next throw takes').toContain(
+      `The throw takes ${wanted.length} dice`,
+    );
+
+    // ---- The throw, from the roll button ----
+    focusOn('roll-button');
+    let throws = 0;
+    do {
+      focusOn('roll-button');
+      activate();
+      throws += 1;
+    } while (throws < 40 && (element('push-button') as HTMLButtonElement).disabled);
+    expect(
+      (element('push-button') as HTMLButtonElement).disabled,
+      `${String(throws)} throws of at most 40 reached a table the push takes`,
+    ).toBe(false);
+
+    // The result reaches the live region. The region is READ, not asserted to
+    // exist, and every figure in it is compared against a figure written
+    // somewhere else in the same render: the successes and the banes against
+    // the sum over the dice, the dice count against the design's own list, and
+    // the stress against the value the keys put on the stress tile.
+    const afterRoll = sumOfTheDice();
+    expect(afterRoll.dice, 'the throw put the drawn pool on the table').toBe(wanted.length);
+    expect(spoken(), 'the roll reached the live region').toBe(
+      liveSentence(afterRoll, 0, STRESS_TILE),
+    );
+
+    // ---- Rest B, by the keys alone ----
+    const second = walk(document);
+    const names = second.map((visit) => visit.name);
+    expect(names.length, 'N after the throw is the number the design states').toBe(after.stated);
+    // The two ends of the list are the document's, by position. Which die lands
+    // in which zone follows this throw and not the drawn one, so the dice are
+    // compared as a SET and their ORDER against the tray the screen drew.
+    expect(names[0]).toBe(after.names[0]);
+    expect(names.slice(-4)).toEqual(after.names.slice(-4));
+    const walkedDice = names.slice(1, names.length - 4);
+    expect([...walkedDice].sort(), 'every die of the design is walked once').toEqual(
+      [...dieNames].sort(),
+    );
+    const inTheTray = [...element('dice-tray').querySelectorAll<HTMLElement>('.slot')].map(
+      (slot) => slot.dataset.el,
+    );
+    expect(walkedDice, 'the keys walked the tray in the order the tray holds').toEqual(inTheTray);
+    const positions = (by: 'tab' | 'arrow'): number[] =>
+      second.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
+    expect(positions('tab'), 'Tab reaches the items the design says it does').toEqual(after.tab);
+    expect(positions('arrow'), 'the arrows reach the items the design says they do').toEqual(
+      after.arrow,
+    );
+
+    // ---- The push, from the push button, which the walk just reached ----
+    expect(names[names.length - 1], 'the push button is the last visit').toBe('push-button');
+    const said = spoken();
+    focusOn('push-button');
+    activate();
+
+    // The profile the screen opens in raises the stress before the re-throw, so
+    // the push adds one die to the table and one to the counter. Both figures
+    // come from the profile and from the tile, not from the screen.
+    const profileNow = profile(DEFAULT_PROFILE_ID);
+    expect(profileNow.stressBehaviour, 'the opening profile adds a stress die').toBe(
+      'addBeforeReroll',
+    );
+    const afterPush = sumOfTheDice();
+    expect(afterPush.dice, 'the push added the stress die before the throw').toBe(
+      wanted.length + 1,
+    );
+    // The counter is held at its cap here, and the rise is read off the table
+    // instead. The draw target needs every tile at its cap, so the stress tile
+    // is at the cap before the push, and `pushNow` holds the counter there
+    // while the core adds the die. Section 8 of the design draws that state and
+    // says the reading is at its cap and is marked.
+    expect(STRESS_TILE, 'the stress tile is at its cap in this run').toBe(POOL_CAPS.stress);
+    expect(spoken(), 'the pushed result reached the live region too').toBe(
+      liveSentence(afterPush, 1, POOL_CAPS.stress),
+    );
+    expect(
+      element('status-line').querySelector('.st-warn'),
+      'the reading at its cap is marked',
+    ).not.toBeNull();
+    expect(spoken(), 'and it is not the sentence the roll left').not.toBe(said);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The counts the design states about itself — Unit 4.11
+//
+// The document states its walk three ways on purpose, and `walkList` above
+// reads all three. It also states the same counts in PROSE, in paragraphs about
+// the browser's scroll stop, about the disclosure sheet and about the overlay,
+// and no check read those sentences. Two of them said "eleven and thirty" from
+// Unit 2.2 to Unit 4.10, while section 6 listed thirty-five. Both instruments
+// passed over a false statement for eight units, and Units 2.3 and 3.7 both
+// reported it.
+//
+// This check reads EVERY sentence of the document that talks about the walk and
+// holds every figure in it against the two numbered lists. A third sentence
+// cannot drift alone.
+// ---------------------------------------------------------------------------
+
+describe('the design states one set of counts about its own walk', () => {
+  it('holds every walk sentence in the document against the two numbered lists', () => {
+    const before = walkList(DESIGN, 'Before');
+    const after = walkList(DESIGN, 'After');
+    const split =
+      /Items (\d+) to (\d+) are the kept shelf and items (\d+) to (\d+) are the throw zone\./.exec(
+        DESIGN,
+      );
+    if (split === null) throw new Error('section 6 no longer splits the tray into two zones');
+    const shelf = Number(split[2]) - Number(split[1]) + 1;
+    const zone = Number(split[4]) - Number(split[3]) + 1;
+
+    // Every figure the document may state about the walk, derived from the two
+    // numbered lists and from the split sentence. Nothing here is typed.
+    const lawful = new Set([
+      before.stated,
+      after.stated,
+      before.stated + after.stated,
+      shelf,
+      zone,
+    ]);
+
+    // A sentence is about the walk when it names one. The three words are the
+    // vocabulary section 6 and section 4 both use.
+    const aboutTheWalk = /\b(authored|visits?|walks?)\b/i;
+    // Below nine, a number word in such a sentence is counting something else:
+    // "one extra stop", "the two lists", "both walks". The walk figures are all
+    // nine or more, and the check says so rather than reading a hand list.
+    const floor = 9;
+
+    const checked: string[] = [];
+    const wrong: string[] = [];
+    for (const sentence of DESIGN.split(/(?<=\.)\s+|\n\n/)) {
+      if (!aboutTheWalk.test(sentence)) continue;
+      for (const found of sentence.matchAll(/\b([a-z]+(?:-[a-z]+)?)\b/gi)) {
+        const value = inWords(found[1]);
+        if (value === undefined || value < floor) continue;
+        checked.push(`${String(value)} in "${sentence.trim().replace(/\s+/g, ' ').slice(0, 90)}"`);
+        if (!lawful.has(value)) {
+          wrong.push(
+            `${String(value)} is not one of [${[...lawful].sort((a, b) => a - b).join(', ')}] ` +
+              `in "${sentence.trim().replace(/\s+/g, ' ')}"`,
+          );
+        }
+      }
+    }
+
+    // The denominator. A reader that matched nothing would pass this check on
+    // an empty document, and the floor is what stops that.
+    expect(
+      checked.length,
+      `the document states the walk in ${String(checked.length)} places: ${checked.join(' | ')}`,
+    ).toBeGreaterThanOrEqual(9);
+    expect(wrong, 'every count the document states about its walk is one of its own').toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The disclosure sheet is a real modal — Unit 4.11
+//
+// It has carried `role="dialog"` and `aria-modal="true"` since Unit 2.1, and
+// `aria-modal` is a promise to a screen reader alone. Nothing held the Tab key,
+// so focus walked out of the sheet and onto the roll button behind it, where a
+// reader was still being told the page was hidden. Units 4.1, 4.2, 4.3, 4.8,
+// 4.9, 3.6 and 3.8 all added controls behind that promise.
+//
+// The real Tab presses are in `node scripts/browser.mjs --a11y`. jsdom runs no
+// sequential focus navigation, so what is judged here is the handler: given the
+// focus at an end of the sheet, a Tab press must be refused and answered with
+// the other end.
+// ---------------------------------------------------------------------------
+
+describe('the disclosure sheet', () => {
+  /** Send a Tab press the way a browser does, and say whether it was refused. */
+  function tab(from: Element, shiftKey = false): boolean {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      from.dispatchEvent(event);
+    });
+    return event.defaultPrevented;
+  }
+
+  it('keeps the focus inside itself in both directions, and hands it back on close', () => {
+    mount();
+    const opened = element('disclosure-toggle');
+    opened.focus();
+    click(opened);
+
+    const sheet = element('disclosure-sheet');
+    expect(sheet.getAttribute('role')).toBe('dialog');
+    expect(sheet.getAttribute('aria-modal')).toBe('true');
+    // The sheet takes the focus when it opens, or the first Tab would land
+    // behind it.
+    expect((document.activeElement as HTMLElement).dataset.el).toBe('sheet-close');
+
+    const stops = focusStops(sheet);
+    expect(stops.length, 'the sheet holds many controls, and this walk knows them').toBeGreaterThan(
+      10,
+    );
+    const first = stops[0] as HTMLElement;
+    const last = stops[stops.length - 1] as HTMLElement;
+    expect(last.dataset.el, 'the close control is the last stop of the sheet').toBe('sheet-close');
+    expect(sheet.contains(first) && sheet.contains(last)).toBe(true);
+
+    // Forwards off the end: refused, and answered with the first stop.
+    last.focus();
+    expect(tab(last), 'a Tab at the last stop is refused').toBe(true);
+    expect(document.activeElement, 'and the focus wrapped to the first stop').toBe(first);
+    expect(sheet.contains(document.activeElement), 'the focus is still in the sheet').toBe(true);
+
+    // Backwards off the front: refused, and answered with the last stop.
+    expect(tab(first, true), 'a Shift and Tab at the first stop is refused').toBe(true);
+    expect(document.activeElement, 'and the focus wrapped to the last stop').toBe(last);
+
+    // In the middle the browser keeps its own behaviour, so nothing is refused.
+    const middle = stops[Math.floor(stops.length / 2)] as HTMLElement;
+    middle.focus();
+    expect(tab(middle), 'a Tab in the middle of the sheet is the browser own behaviour').toBe(
+      false,
+    );
+    expect(document.activeElement, 'and nothing moved it').toBe(middle);
+
+    // Nothing behind the sheet can be reached by a press inside it, which is
+    // what the two wraps above mean, said as one sentence over a denominator.
+    const behind = tabStops(document.body).filter((stop) => !sheet.contains(stop));
+    expect(behind.length, 'the screen behind the sheet still holds its controls').toBeGreaterThan(
+      0,
+    );
+
+    // And the way out returns the focus to the control that opened it, which
+    // section 4 of the design requires of `sheet-close`.
+    click(element('sheet-close'));
+    expect(document.querySelector('[data-el="disclosure-sheet"]'), 'the sheet closed').toBeNull();
+    expect((document.activeElement as HTMLElement).dataset.el).toBe('disclosure-toggle');
+  });
+
+  it('closes on Escape and hands the focus back there too', () => {
+    mount();
+    element('disclosure-toggle').focus();
+    click(element('disclosure-toggle'));
+    const sheet = element('disclosure-sheet');
+    act(() => {
+      sheet.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+    });
+    expect(document.querySelector('[data-el="disclosure-sheet"]')).toBeNull();
+    expect((document.activeElement as HTMLElement).dataset.el).toBe('disclosure-toggle');
+  });
+
+  it('reaches every control the sheet draws, and the design lists them', () => {
+    // The trap moves the focus itself, so the list it walks must hold every
+    // control the sheet draws. A control missing from it would be unreachable
+    // by the keyboard, which is the failure a trap introduces.
+    mount();
+    click(element('disclosure-toggle'));
+    const sheet = element('disclosure-sheet');
+    const stops = focusStops(sheet);
+    // Every named ancestor, not the nearest one: a panel carries the name the
+    // design lists and the control inside it carries its own.
+    const named = new Set<string>();
+    for (const stop of stops) {
+      for (let held: Element | null = stop; held !== null; held = held.parentElement) {
+        const name = held.getAttribute('data-el');
+        if (name !== null) named.add(name);
+      }
+    }
+    // Section 4 lists the sheet's controls in a table. Every row that names a
+    // `sheet-` control must be reachable, and the list is read from the design.
+    const section = DESIGN.slice(
+      DESIGN.indexOf('## 4. Behind the one disclosure'),
+      DESIGN.indexOf('## 5.'),
+    );
+    const listed = [...section.matchAll(/^\| `(sheet-[a-z-]+)` \|/gm)].map(
+      (found) => found[1] as string,
+    );
+    expect(listed.length, 'the design lists the controls of the sheet').toBeGreaterThanOrEqual(12);
+    const missing = listed.filter((control) => !named.has(control));
+    expect(missing, 'every control the design lists is reachable inside the trap').toEqual([]);
   });
 });

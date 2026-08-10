@@ -12,6 +12,7 @@
 //                            [--tray] [--pool] [--push] [--affordance] [--probe]
 //                            [--share] [--share-controls] [--capture-later] [--offline]
 //                            [--shell] [--capture-shell <dir>] [--table] [--sheet]
+//                            [--a11y] [--no-webgl]
 //                            [--sound-controls] [--overlay]
 //
 // `--table` starts and stops its own preview server, because it drives the
@@ -52,6 +53,21 @@
 // of the export repeats the note, so the note length is the field that moves the
 // file size by the row count. It is how the two import-cap checks are shown to
 // fail: the room a full export leaves is a few characters a row.
+//
+// `--a11y` needs `--url` over a preview server and starts its own, because it
+// drives the BUILT application. It is the accessibility gate of Unit 4.11: one
+// keyboard-only journey from an empty pool to a pushed result, at each of the
+// two widths the design is drawn at, with real Tab, arrow, Enter and Escape
+// presses and no pointer at all. It also drives the disclosure sheet off both
+// ends to prove the focus cannot leave it, and it injects the pinned axe-core
+// package into the page and audits two states of the laid-out screen.
+//
+// It REFUSES to run without a declaration of what the machine can draw:
+// `--hardware` for a graphics card, `--no-webgl` for a machine without one. A
+// run that reads no renderer would otherwise skip its 3D checks and exit 0
+// while judging nothing. Build first, then run it alone:
+//   npm run build && node scripts/browser.mjs --a11y --no-webgl \
+//     --url http://localhost:4173/clatter/
 //
 // `--shell` starts and stops its own preview server, for the same reason
 // `--offline` does. Build first, then run it alone:
@@ -6996,10 +7012,21 @@ async function focusMoved(page) {
  * Focus that stays means a control whose arrows change a value, so the press is
  * undone and no inner visit is recorded. Nothing in the rule knows the answer.
  */
-async function walkShell(page, cap) {
+async function walkShell(page, cap, stopAfterAuthored = Number.POSITIVE_INFINITY) {
   const visits = [];
   let firstStop = null;
   for (let stops = 0; stops < cap; stops += 1) {
+    // Stop ON the last authored stop rather than one press past it.
+    //
+    // A Tab press at the last control of the document hands the focus to the
+    // browser's own chrome. The page keeps its `document.activeElement` and
+    // still takes key events, so the walk carries on working, but
+    // `document.hasFocus()` is then false and the browser performs no DEFAULT
+    // ACTION for a document that does not have the focus: Enter on a button
+    // fires no click and nothing reports an error. A caller that presses a key
+    // after its walk therefore names the number of authored visits it expects,
+    // and `--a11y` probes for a stop past the end once, as its last act.
+    if (visits.filter((visit) => !visit.implicit).length >= stopAfterAuthored) break;
     // A Tab that moves nothing is a Tab that left the document. Firefox hands
     // the focus to its own chrome after the last control and leaves
     // `document.activeElement` where it was, so the walk would otherwise
@@ -7272,6 +7299,877 @@ async function runShell(page, options, checks) {
       console.log(`browser: shell captured ${size.name} to ${path}`);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// The accessibility gate — Unit 4.11
+//
+// One run, from an empty pool to a pushed result, with nothing but the keys.
+// The plan asks for exactly this and says why it is the real check: an audit of
+// a canvas application passes while the application is unusable by keyboard.
+//
+// **This mode presses real keys.** `src/app.test.tsx` walks the same two lists
+// under jsdom, which runs no sequential focus navigation and no default
+// activation behaviour, so a Tab and an Enter both do nothing there. Everything
+// jsdom has to stand in for is pressed for real here: Tab, Shift and Tab, the
+// arrow keys, Enter and Escape.
+//
+// **Four things this mode judges that no other run does.**
+//
+//   1. The whole journey in one run. Two walks of two mounted states say
+//      nothing about the journey between them.
+//   2. The disclosure sheet as a real modal, by pressing Tab off both ends of
+//      it and reading where the focus went.
+//   3. The audit, in a browser that lays the page out, so the contrast rule is
+//      DECIDED rather than left undecided as it is under jsdom.
+//   4. That no pointer event reached the page at all, counted by the page
+//      itself, so "keyboard only" is measured and not claimed.
+//
+// **The viewport is the gate's own, and it is one the design is drawn at.**
+// The harness default is 800 by 600, which is neither 360 nor 1440, so a walk
+// measured there is measured at a width nothing was designed for. This mode
+// therefore runs the whole journey twice, at 360 by 760 and at 1440 by 900, and
+// refuses a `--viewport` that is not a drawn width. Decision 22.
+//
+// **A run that cannot draw must say so, not skip quietly.** Inside the sandbox
+// there is no `/dev/dri` and no WebGL context, so the startup probe falls to
+// flat dice and every 3D check is skipped. Unit 4.10 recorded a run that
+// reported `renderer unreadable` with checks skipped and still exited 0. This
+// mode refuses to start unless the run DECLARES what it can draw: `--hardware`
+// for a real card, or `--no-webgl` for a machine that has none, which CI is.
+// Neither flag on a machine with no readable renderer is a failure by name.
+// ---------------------------------------------------------------------------
+
+/** The two widths the design is drawn at. The gate runs the journey at both. */
+const A11Y_WIDTHS = [
+  { name: '360x760', width: 360, height: 760 },
+  { name: '1440x900', width: 1440, height: 900 },
+];
+
+/** The presses each tile takes to reach the draw target, in section 6 order. */
+const A11Y_TILES = [
+  ['pool-cell-attribute', 5],
+  ['pool-cell-skill', 5],
+  ['pool-cell-gear', 3],
+  ['pool-cell-artifact', 6],
+  ['pool-cell-bonus', 2],
+  ['pool-cell-stress', 10],
+];
+
+/** The notch presses that take the difficulty to +3, which the draw target has. */
+const A11Y_DIFFICULTY_PRESSES = 3;
+
+/** Where the audit lives. It is read from the installed package, never bundled. */
+function axeSource() {
+  return join(here, '..', 'node_modules', 'axe-core', 'axe.min.js');
+}
+
+/**
+ * Put the focus back at the top of the document, and give the DOCUMENT the
+ * focus again.
+ *
+ * `bringToFront` is the load-bearing half. A walk ends by pressing Tab past the
+ * last control, which is how the end is detected, and Firefox answers that
+ * press by handing the focus to its own chrome. The page keeps its
+ * `document.activeElement` afterwards and still takes key events, so a Tab
+ * press still moves the focus ring — but `document.hasFocus()` is false, and a
+ * browser performs no DEFAULT ACTION for a document that does not have the
+ * focus. Enter on a button then fires no click at all, and nothing anywhere
+ * reports an error. Measured on this host on 2026-08-10: 40 Enter presses on a
+ * focused, enabled roll button produced 0 click events with `hasFocus=false`,
+ * and 6 presses produced 6 clicks once the document had the focus back.
+ */
+async function resetFocus(page) {
+  await page.evaluate(() => {
+    const head =
+      document.querySelector('[data-el="shell-header"]') ??
+      document.querySelector('[data-el="history-header"]');
+    if (head === null) return;
+    head.setAttribute('tabindex', '-1');
+    head.focus();
+    head.removeAttribute('tabindex');
+  });
+  // Reported by every caller that then presses a key. Nothing this harness can
+  // do puts the focus back: `bringToFront`, `window.focus()` and a real mouse
+  // press in the content area were all measured on this host on 2026-08-10 and
+  // all three left `document.hasFocus()` false. The answer is not to lose it,
+  // which is what the bound on the walk above is for.
+  return page.evaluate(() => document.hasFocus());
+}
+
+/**
+ * What holds the focus: the control, the cell inside it, and its tag.
+ *
+ * `name` is the CONTROL, which is the composite where the focus is inside one,
+ * because section 2 counts a composite widget as one control. `inner` is the
+ * cell itself. The two differ exactly where the pool bar and the tray are
+ * walked, which is where this mode presses the arrow keys.
+ */
+async function focusedName(page) {
+  return page.evaluate(() => {
+    const held = document.activeElement;
+    if (held === null || held === document.body) return { name: null, inner: null, tag: null };
+    const control = held.closest('[data-composite]') || held.closest('[data-el]');
+    const inner = held.closest('[data-el]');
+    return {
+      name: control === null ? null : control.dataset.el,
+      inner: inner === null ? null : inner.dataset.el,
+      tag: held.tagName,
+      inSheet: held.closest('[data-el="disclosure-sheet"]') !== null,
+    };
+  });
+}
+
+/** Tab until a named control holds the focus. Returns the presses it took. */
+async function tabTo(page, wanted, cap = 60) {
+  for (let taken = 1; taken <= cap; taken += 1) {
+    await page.keyboard.press('Tab');
+    const held = await focusedName(page);
+    if (held.name === wanted) return taken;
+  }
+  return null;
+}
+
+/** What the live region says, less every subtree a reader is told to ignore. */
+async function liveRegion(page) {
+  return page.evaluate(() => {
+    const region = document.querySelector('[data-el="status-line"]');
+    if (region === null) return null;
+    const copy = region.cloneNode(true);
+    for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+    return {
+      role: region.getAttribute('role'),
+      live: region.getAttribute('aria-live'),
+      text: (copy.textContent || '').replace(/\s+/g, ' ').trim(),
+    };
+  });
+}
+
+/**
+ * The table, summed off the dice themselves.
+ *
+ * Each die cell states the face it shows and what that face is worth, and the
+ * status line states the totals. Both are written by the same render from the
+ * same result, so summing the parts is a second reading of the same throw, and
+ * it is the reading that catches a summary that counts its own table wrong.
+ */
+async function sumOfTheDice(page) {
+  return page.evaluate(() => {
+    let successes = 0;
+    let banes = 0;
+    let dice = 0;
+    for (const cell of document.querySelectorAll('[data-el^="die-"]')) {
+      const label = cell.getAttribute('aria-label') || '';
+      dice += 1;
+      if (/ A bane\./.test(label)) banes += 1;
+      if (/ One success\./.test(label)) successes += 1;
+      const many = / (\d+) successes\./.exec(label);
+      if (many !== null) successes += Number(many[1]);
+    }
+    return { successes, banes, dice };
+  });
+}
+
+/**
+ * Count every pointer event the page sees, so "keyboard only" is measured.
+ *
+ * The clicks are recorded beside them, because Enter on a button produces a
+ * click of its own: a keyboard activation carries `detail` 0 and a pointer
+ * carries 1 or more. So the two are told apart by the page rather than by the
+ * runner's word, and the click list is what a failed activation is read from.
+ */
+async function watchForPointers(page) {
+  await page.evaluate(() => {
+    window.__clatterPointerEvents = [];
+    window.__clatterClicks = [];
+    for (const kind of ['pointerdown', 'mousedown', 'touchstart']) {
+      document.addEventListener(
+        kind,
+        (event) => window.__clatterPointerEvents.push(`${kind} isTrusted=${event.isTrusted}`),
+        true,
+      );
+    }
+    document.addEventListener(
+      'click',
+      (event) => {
+        const named = event.target === null ? null : event.target.closest('[data-el]');
+        window.__clatterClicks.push(
+          `${named === null ? 'unnamed' : named.dataset.el} detail=${event.detail} ` +
+            `trusted=${event.isTrusted}`,
+        );
+      },
+      true,
+    );
+  });
+}
+
+/** Run the audit over the page as it stands, in a browser that lays it out. */
+async function auditPage(page, label) {
+  return page.evaluate(
+    async (tags, where) => {
+      const results = await window.axe.run(document.body, {
+        runOnly: { type: 'tag', values: tags },
+      });
+      return {
+        where,
+        violations: results.violations.map(
+          (found) =>
+            `${found.id} (${found.impact}) x${found.nodes.length} at ` +
+            `${found.nodes
+              .map((node) => String(node.target))
+              .slice(0, 4)
+              .join(' | ')}`,
+        ),
+        incomplete: results.incomplete.map((found) => found.id),
+        ran:
+          results.passes.length +
+          results.violations.length +
+          results.incomplete.length +
+          results.inapplicable.length,
+      };
+    },
+    ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'],
+    label,
+  );
+}
+
+/**
+ * The journey, at one width. Every press below is a real key press.
+ *
+ * Returns what the run measured, so the caller can compare the two widths
+ * against one another as well as against the design.
+ */
+async function a11yJourney(page, size, design, checks, options) {
+  const before = beforeThrowVisits(design, 'Before');
+  const after = beforeThrowVisits(design, 'After');
+  const dieNames = after.names.filter((name) => name.startsWith('die-'));
+  const at = (name) => `a11y.${size.name}.${name}`;
+
+  const opened = await freshPage(page, options, size);
+  const held = opened.page;
+  await watchForPointers(held);
+  const focusAtStart = opened.hasFocus && (await resetFocus(held));
+  checks.push({
+    name: at('the-document-holds-the-focus'),
+    ok: focusAtStart === true,
+    detail:
+      `document.hasFocus() reads ${focusAtStart} at the start of the journey, in a tab of its ` +
+      `own. A browser performs no default action for a document that does not hold the focus: ` +
+      `Enter on a focused, enabled button then fires no click and reports no error, so every ` +
+      `check below this one would fail for a reason that is not the screen's.`,
+  });
+
+  // ---- Rest A, walked with real Tab and arrow presses ----
+  const walkA = await walkShell(held, before.stated + 6, before.stated);
+  const namedA = walkA.filter((visit) => !visit.implicit);
+  const implicitA = walkA.filter((visit) => visit.implicit).map((visit) => visit.name);
+  const walkedA = namedA.map((visit) => visit.name);
+  const positionsA = (by) => namedA.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
+  console.log(
+    `browser: a11y ${size.name} before_throw walked=[${walkedA.join(', ')}] ` +
+      `implicit_scroll_stops=${implicitA.length} [${implicitA.join(', ')}]`,
+  );
+  checks.push({
+    name: at('the-keyboard-order-before-the-throw'),
+    ok:
+      walkedA.length === before.stated &&
+      walkedA.every((name, index) => name === before.names[index]) &&
+      String(positionsA('tab')) === String(before.tab) &&
+      String(positionsA('arrow')) === String(before.arrow),
+    detail:
+      `real Tab and arrow presses reached ${walkedA.length} authored visits against the ` +
+      `${before.stated} section 6 names, at ${size.name}. Walked [${walkedA.join(', ')}]. ` +
+      `Wanted [${before.names.join(', ')}]. Tab reached [${positionsA('tab')}] against ` +
+      `[${before.tab}] and the arrows reached [${positionsA('arrow')}] against [${before.arrow}]. ` +
+      `The browser added ${implicitA.length} scroll stops of its own, reported and not counted.`,
+  });
+
+  // ---- The pool, built with the arrow keys alone ----
+  await resetFocus(held);
+  const reachedBar = await tabTo(held, 'pool-bar');
+  for (const [tile, presses] of A11Y_TILES) {
+    const onTile = await focusedName(held);
+    if (onTile.inner !== tile) {
+      checks.push({
+        name: at('the-arrow-keys-walk-the-pool-bar'),
+        ok: false,
+        detail: `the right arrow reached ${onTile.inner} where ${tile} was next`,
+      });
+      break;
+    }
+    for (let taken = 0; taken < presses; taken += 1) await held.keyboard.press('ArrowUp');
+    await held.keyboard.press('ArrowRight');
+  }
+  const reachedTrack = await tabTo(held, 'difficulty');
+  for (let taken = 0; taken < A11Y_DIFFICULTY_PRESSES; taken += 1) {
+    await held.keyboard.press('ArrowRight');
+  }
+  const onTheTrack = await focusedName(held);
+  const built = await liveRegion(held);
+  checks.push({
+    name: at('the-pool-builds-under-the-keys-alone'),
+    ok:
+      reachedBar !== null &&
+      reachedTrack !== null &&
+      onTheTrack.name === 'difficulty' &&
+      (built?.text || '').includes(`The throw takes ${dieNames.length} dice`),
+    detail:
+      `Tab reached the pool bar in ${reachedBar} presses and the difficulty in ` +
+      `${reachedTrack} more. The arrow keys then built the pool and moved the difficulty, ` +
+      `and the focus stayed on ${onTheTrack.name}, because one value over seven positions ` +
+      `changes under the arrows and never moves. The live region reads ` +
+      `${JSON.stringify(built?.text)}, against the ${dieNames.length} dice section 6 names.`,
+  });
+
+  // ---- The throw, taken with Enter on the roll button ----
+  //
+  // The profile the screen opens in stops a push once a stress die shows a
+  // bane, and ten stress dice show one about five throws in six, so the run
+  // throws again until the push is live and reports how many throws it took.
+  let throws = 0;
+  let live = false;
+  let hadFocus = true;
+  for (; throws < 40 && !live;) {
+    hadFocus = (await resetFocus(held)) && hadFocus;
+    const reached = await tabTo(held, 'roll-button');
+    if (reached === null) break;
+    const onButton = await focusedName(held);
+    if (onButton.tag !== 'BUTTON') break;
+    await held.keyboard.press('Enter');
+    throws += 1;
+    await held.evaluate(
+      () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+    );
+    live = await held.evaluate(() => {
+      const button = document.querySelector('[data-el="push-button"]');
+      return button !== null && !button.disabled;
+    });
+  }
+  const rolled = await liveRegion(held);
+  const afterRoll = await sumOfTheDice(held);
+  const clicks = await held.evaluate(() => window.__clatterClicks || []);
+  console.log(
+    `browser: a11y ${size.name} threw throws=${throws} dice=${afterRoll.dice} ` +
+      `push_live=${live} clicks=${clicks.length} [${clicks.slice(0, 3).join(', ')}] ` +
+      `spoken=${JSON.stringify(rolled?.text)}`,
+  );
+  checks.push({
+    name: at('enter-on-the-roll-button-throws-the-pool'),
+    ok: live && afterRoll.dice === dieNames.length && hadFocus,
+    detail:
+      `${throws} Enter presses of at most 40 reached a table the push takes, with ` +
+      `${afterRoll.dice} dice on it against the ${dieNames.length} section 6 names, and the ` +
+      `document held the focus at every press (${hadFocus}). A press made while the document ` +
+      `does not hold the focus fires no click and reports no error, so the reading is taken ` +
+      `rather than assumed.`,
+  });
+  checks.push({
+    name: at('the-roll-reaches-the-live-region'),
+    ok:
+      rolled !== null &&
+      rolled.role === 'status' &&
+      rolled.live === 'polite' &&
+      rolled.text ===
+        `${afterRoll.successes} ${afterRoll.successes === 1 ? 'success' : 'successes'}. ` +
+          `${afterRoll.banes} ${afterRoll.banes === 1 ? 'bane' : 'banes'}. Push 0. ` +
+          `The table holds ${afterRoll.dice} dice. Stress 10.`,
+    detail:
+      `the live region is role=${rolled?.role} aria-live=${rolled?.live} and it READS ` +
+      `${JSON.stringify(rolled?.text)}. Every figure in it is compared against a figure ` +
+      `written elsewhere in the same render: the successes and the banes against the sum over ` +
+      `the ${afterRoll.dice} dice, which is ${afterRoll.successes} and ${afterRoll.banes}, and ` +
+      `the dice count against the section 6 list.`,
+  });
+
+  // ---- Rest B, walked with real presses ----
+  await withTimeout(
+    held.evaluate(async () => {
+      const frame = () =>
+        new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+      let quiet = 0;
+      for (let step = 0; step < 2000 && quiet < 3; step += 1) {
+        const seam = window.__clatterTable;
+        if (seam === undefined) return;
+        quiet = seam.busy ? 0 : quiet + 1;
+        await frame();
+      }
+    }),
+    120000,
+    'the table never came to rest',
+  );
+  await resetFocus(held);
+  const walkB = await walkShell(held, after.stated + 6, after.stated);
+  const namedB = walkB.filter((visit) => !visit.implicit);
+  const implicitB = walkB.filter((visit) => visit.implicit).map((visit) => visit.name);
+  const walkedB = namedB.map((visit) => visit.name);
+  const positionsB = (by) => namedB.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
+  const inTheTray = await held.evaluate(() =>
+    [...document.querySelectorAll('[data-el="dice-tray"] .slot')].map((slot) => slot.dataset.el),
+  );
+  const wantedB = [after.names[0], ...inTheTray, ...after.names.slice(after.names.length - 4)];
+  console.log(
+    `browser: a11y ${size.name} after_throw walked=${walkedB.length} ` +
+      `implicit_scroll_stops=${implicitB.length} [${implicitB.join(', ')}]`,
+  );
+  checks.push({
+    name: at('the-keyboard-order-after-the-throw'),
+    ok:
+      walkedB.length === after.stated &&
+      walkedB.every((name, index) => name === wantedB[index]) &&
+      String([...walkedB.slice(1, walkedB.length - 4)].sort()) === String([...dieNames].sort()) &&
+      String(positionsB('tab')) === String(after.tab) &&
+      String(positionsB('arrow')) === String(after.arrow),
+    detail:
+      `real Tab and arrow presses reached ${walkedB.length} authored visits against the ` +
+      `${after.stated} section 6 names, at ${size.name}. Walked [${walkedB.join(', ')}]. ` +
+      `Wanted [${wantedB.join(', ')}]. The dice are compared as a set against the ` +
+      `${dieNames.length} the document names, because which die lands in which zone follows ` +
+      `this throw and not the drawn one, and their ORDER is compared against the tray the ` +
+      `screen drew. Tab reached [${positionsB('tab')}] against [${after.tab}] and the arrows ` +
+      `reached [${positionsB('arrow')}] against [${after.arrow}]. The browser added ` +
+      `${implicitB.length} scroll stops of its own, reported and not counted.`,
+  });
+
+  // ---- The push, taken with Enter on the push button ----
+  const focusForPush = await resetFocus(held);
+  const reachedPush = await tabTo(held, 'push-button');
+  const onPush = await focusedName(held);
+  await held.keyboard.press('Enter');
+  await held.evaluate(
+    () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+  );
+  const afterPush = await sumOfTheDice(held);
+  const pushed = await liveRegion(held);
+  console.log(
+    `browser: a11y ${size.name} pushed dice=${afterPush.dice} spoken=${JSON.stringify(pushed?.text)}`,
+  );
+  checks.push({
+    name: at('enter-on-the-push-button-pushes'),
+    ok:
+      reachedPush !== null &&
+      focusForPush === true &&
+      onPush.tag === 'BUTTON' &&
+      afterPush.dice === dieNames.length + 1 &&
+      (pushed?.text || '').includes('Push 1.'),
+    detail:
+      `Tab reached the push button in ${reachedPush} presses and it is a ${onPush.tag}, so ` +
+      `Enter activates it with no script at all. The push left ${afterPush.dice} dice on the ` +
+      `table against the ${dieNames.length} before it: the opening profile raises the stress ` +
+      `before the re-throw, so one stress die joins that same push.`,
+  });
+  checks.push({
+    name: at('the-pushed-result-reaches-the-live-region'),
+    ok:
+      pushed !== null &&
+      pushed.text !== (rolled?.text ?? '') &&
+      pushed.text ===
+        `${afterPush.successes} ${afterPush.successes === 1 ? 'success' : 'successes'}. ` +
+          `${afterPush.banes} ${afterPush.banes === 1 ? 'bane' : 'banes'}. Push 1. ` +
+          `The table holds ${afterPush.dice} dice. Stress 10.`,
+    detail:
+      `the region READS ${JSON.stringify(pushed?.text)} after the push, against ` +
+      `${JSON.stringify(rolled?.text)} before it. The successes and the banes are the sum over ` +
+      `the ${afterPush.dice} dice on the table. The stress reading is at its cap of 10, which ` +
+      `section 8 of the design draws and marks, so the rise is read off the table instead.`,
+  });
+
+  // ---- Nothing was pressed with a pointer ----
+  const onTheTable = await held.evaluate(() => window.__clatterTable !== undefined);
+  const pointers = await held.evaluate(() => window.__clatterPointerEvents || []);
+  checks.push({
+    name: at('the-whole-journey-took-no-pointer'),
+    ok: pointers.length === 0,
+    detail:
+      `the held counted ${pointers.length} pointer events over the whole journey, from the ` +
+      `empty pool to the pushed result: [${pointers.slice(0, 6).join(', ')}]. The count is the ` +
+      `held's own, so "keyboard only" is measured rather than claimed.`,
+  });
+
+  return {
+    page: held,
+    throws,
+    dice: afterPush.dice,
+    onTheTable,
+    implicit: implicitA.length + implicitB.length,
+  };
+}
+
+/**
+ * A fresh TAB that holds the focus, with the old one closed behind it.
+ *
+ * **Why a whole tab, and not a reload.** A walk that presses Tab past the last
+ * control hands the focus to the browser's own chrome. The page keeps its
+ * `document.activeElement` and still takes key events, so a walk carries on
+ * working — but `document.hasFocus()` is false, and a browser performs no
+ * DEFAULT ACTION for a document that does not hold the focus. Enter on a
+ * focused, enabled button then fires no click and reports no error anywhere.
+ * Measured on this host on 2026-08-10: 40 such presses produced 0 click events,
+ * and the same 40 presses produced 40 clicks once the focus was back.
+ *
+ * Six ways of asking for it back were measured. `bringToFront`,
+ * `window.focus()` and a real mouse press in the content area all left it
+ * false. A reload, a navigation, and a window resize followed by a navigation
+ * each brought it back sometimes and not others — four navigations in a row
+ * failed once. A new tab is the one that always does, because a new tab is the
+ * active tab.
+ *
+ * The caller must use the page this returns. The old one is closed.
+ */
+async function freshPage(page, options, size) {
+  const next = await page.browser().newPage();
+  await next.setViewport({ width: size.width, height: size.height, deviceScaleFactor: 1 });
+  await next.goto(options.url, { waitUntil: 'load' });
+  await page.close();
+  return { page: next, hasFocus: await next.evaluate(() => document.hasFocus()) };
+}
+
+/**
+ * Is there a stop after the last one the design names?
+ *
+ * The two walks of the journey stop ON the last authored stop and never press
+ * past it, because that press hands the focus to the browser's chrome and every
+ * Enter after it fires nothing. So neither walk asks what comes after the end of
+ * the list, and an appended control would pass unseen. This phase asks, on a
+ * fresh document each time, and it is the last thing the mode does with the
+ * keys.
+ *
+ * Rest B is asked over a pool of THREE dice rather than the drawn thirty. The
+ * claim is about the end of the list, not about its length, and the length is
+ * judged by the journey against the authored names.
+ */
+async function a11yEndProbe(page, options, design, checks) {
+  const before = beforeThrowVisits(design, 'Before');
+  const after = beforeThrowVisits(design, 'After');
+  let held = page;
+
+  // A fresh document AND a real resize before each of the two probes.
+  //
+  // Both are needed and both were measured on this host on 2026-08-10. A walk
+  // that presses Tab past the last control hands the focus to the browser's
+  // chrome, `document.hasFocus()` goes false, and every default action stops:
+  // Enter on a focused, enabled button fires no click and reports no error.
+  // `bringToFront`, `window.focus()` and a real mouse press in the content area
+  // all failed to bring it back. A navigation ALONE failed as well. A window
+  // resize followed by a navigation brought it back on every attempt, so each
+  // probe below asks for a size the window is not already at.
+  const openedA = await freshPage(held, options, { width: 1440, height: 900 });
+  held = openedA.page;
+  const focusA = openedA.hasFocus && (await resetFocus(held));
+  const restA = (await walkShell(held, before.stated + 6)).filter((visit) => !visit.implicit);
+  checks.push({
+    name: 'a11y.rest-a-ends-where-the-design-ends',
+    ok: restA.length === before.stated && focusA === true,
+    detail:
+      `an unbounded walk of the empty pool reached ${restA.length} authored stops against the ` +
+      `${before.stated} section 6 names, and it pressed Tab past the last one to find out. ` +
+      `The document held the focus at the start (${focusA}). ` +
+      `Walked [${restA.map((visit) => visit.name).join(', ')}].`,
+  });
+
+  const openedB = await freshPage(held, options, { width: 360, height: 760 });
+  held = openedB.page;
+  const focusB = openedB.hasFocus && (await resetFocus(held));
+  await tabTo(held, 'pool-bar');
+  for (let taken = 0; taken < 3; taken += 1) await held.keyboard.press('ArrowUp');
+  let live = false;
+  let throws = 0;
+  for (; throws < 40 && !live;) {
+    await resetFocus(held);
+    if ((await tabTo(held, 'roll-button')) === null) break;
+    await held.keyboard.press('Enter');
+    throws += 1;
+    await held.evaluate(
+      () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+    );
+    live = await held.evaluate(() => {
+      const button = document.querySelector('[data-el="push-button"]');
+      return button !== null && !button.disabled;
+    });
+  }
+  await resetFocus(held);
+  const restB = (await walkShell(held, 40)).filter((visit) => !visit.implicit);
+  const tail = restB.slice(-4).map((visit) => visit.name);
+  console.log(
+    `browser: a11y end_probe rest_a=${restA.length} rest_b=${restB.length} ` +
+      `tail=[${tail.join(', ')}] throws=${throws}`,
+  );
+  checks.push({
+    name: 'a11y.rest-b-ends-where-the-design-ends',
+    ok: live && focusB === true && String(tail) === String(after.names.slice(-4)),
+    detail:
+      `the document held the focus at the start (${focusB}) and ${throws} Enter presses put a ` +
+      `table up. An unbounded walk of a table of three dice ended on [${tail.join(', ')}] against the ` +
+      `four names section 6 ends with, [${after.names.slice(-4).join(', ')}], and it pressed ` +
+      `Tab past the last one to find out. Three dice rather than thirty, because the claim is ` +
+      `about the END of the list and the journey judges its length.`,
+  });
+  return held;
+}
+
+/** The disclosure sheet, driven off both ends with real Tab presses. */
+async function a11ySheet(page, options, checks) {
+  const fresh = await freshPage(page, options, { width: 360, height: 760 });
+  const sheetPage = fresh.page;
+  const hasFocus = fresh.hasFocus && (await resetFocus(sheetPage));
+  checks.push({
+    name: 'a11y.the-document-holds-the-focus-for-the-sheet',
+    ok: hasFocus === true,
+    detail:
+      `document.hasFocus() reads ${hasFocus} before the presses below, in a tab of its own. A ` +
+      `browser performs no default action for a document that does not hold the focus, so ` +
+      `Enter would fire no click and every check under this one would fail for a reason that ` +
+      `is not the screen's.`,
+  });
+  const reached = await tabTo(sheetPage, 'disclosure-toggle');
+  await sheetPage.keyboard.press('Enter');
+  await sheetPage.evaluate(
+    () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+  );
+  const onOpen = await focusedName(sheetPage);
+  const modal = await sheetPage.evaluate(() => {
+    const sheet = document.querySelector('[data-el="disclosure-sheet"]');
+    return sheet === null
+      ? null
+      : { role: sheet.getAttribute('role'), aria: sheet.getAttribute('aria-modal') };
+  });
+  checks.push({
+    name: 'a11y.the-sheet-opens-under-enter-and-takes-the-focus',
+    ok:
+      reached !== null &&
+      modal !== null &&
+      modal.role === 'dialog' &&
+      modal.aria === 'true' &&
+      onOpen.inSheet === true,
+    detail:
+      `Tab reached the disclosure in ${reached} presses and Enter opened a ` +
+      `role=${modal?.role} aria-modal=${modal?.aria} sheet, with the focus on ${onOpen.name}. ` +
+      `A modal that opens without taking the focus lets the first Tab land behind it.`,
+  });
+
+  // Forwards, further than the sheet holds stops. Every landing must be inside.
+  const forward = [];
+  let escapedForward = 0;
+  for (let taken = 0; taken < 80; taken += 1) {
+    await sheetPage.keyboard.press('Tab');
+    const stop = await focusedName(sheetPage);
+    if (!stop.inSheet) escapedForward += 1;
+    forward.push(stop.inner);
+  }
+  const backward = [];
+  let escapedBackward = 0;
+  for (let taken = 0; taken < 80; taken += 1) {
+    // Shift and Tab is two keys. `press` takes no modifier, so the modifier is
+    // held down around it, which is what a hand does.
+    await sheetPage.keyboard.down('Shift');
+    await sheetPage.keyboard.press('Tab');
+    await sheetPage.keyboard.up('Shift');
+    const stop = await focusedName(sheetPage);
+    if (!stop.inSheet) escapedBackward += 1;
+    backward.push(stop.inner);
+  }
+  const forwardStops = new Set(forward);
+  const backwardStops = new Set(backward);
+  console.log(
+    `browser: a11y sheet forward_presses=80 distinct=${forwardStops.size} escaped=${escapedForward} ` +
+      `backward_presses=80 distinct=${backwardStops.size} escaped=${escapedBackward}`,
+  );
+  checks.push({
+    name: 'a11y.the-focus-cannot-leave-the-sheet-in-either-direction',
+    ok:
+      escapedForward === 0 &&
+      escapedBackward === 0 &&
+      forwardStops.size > 8 &&
+      forwardStops.size === backwardStops.size,
+    detail:
+      `80 Tab presses and 80 Shift and Tab presses landed inside the sheet every time: ` +
+      `${escapedForward} escaped forwards and ${escapedBackward} backwards. The two ` +
+      `directions reached the same stops, ${forwardStops.size} forwards and ` +
+      `${backwardStops.size} backwards, so the wrap is a cycle and not a trap that swallows ` +
+      `half the controls. 80 presses is more than the sheet holds stops, so the walk wrapped ` +
+      `several times rather than running out.`,
+  });
+
+  // The way back, and where the focus lands.
+  await sheetPage.keyboard.press('Escape');
+  await sheetPage.evaluate(
+    () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+  );
+  const afterEscape = await focusedName(sheetPage);
+  const closed = await sheetPage.evaluate(
+    () => document.querySelector('[data-el="disclosure-sheet"]') === null,
+  );
+  checks.push({
+    name: 'a11y.escape-closes-the-sheet-and-hands-the-focus-back',
+    ok: closed && afterEscape.name === 'disclosure-toggle',
+    detail:
+      `Escape closed the sheet (${closed}) and left the focus on ${afterEscape.name}. Section 4 ` +
+      `of the design requires the focus to return to disclosure-toggle, because a focus left on ` +
+      `a removed element falls to the top of the document.`,
+  });
+
+  // And the close control itself, pressed with Enter after a real Tab to it.
+  await resetFocus(sheetPage);
+  await tabTo(sheetPage, 'disclosure-toggle');
+  await sheetPage.keyboard.press('Enter');
+  await sheetPage.evaluate(
+    () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+  );
+  const onClose = await focusedName(sheetPage);
+  await sheetPage.keyboard.press('Enter');
+  await sheetPage.evaluate(
+    () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+  );
+  const afterClose = await focusedName(sheetPage);
+  checks.push({
+    name: 'a11y.sheet-close-hands-the-focus-back-as-the-design-says',
+    ok: onClose.name === 'sheet-close' && afterClose.name === 'disclosure-toggle',
+    detail:
+      `the sheet opened with the focus on ${onClose.name}, and Enter there left it on ` +
+      `${afterClose.name}.`,
+  });
+  return sheetPage;
+}
+
+async function runA11y(page, options, checks) {
+  const design = readFileSync(join(here, '..', 'docs', 'design', '0002-screen-design.md'), 'utf8');
+
+  // The run has to declare what it can draw. A sandboxed run reads no renderer
+  // at all and would otherwise skip its way to exit 0.
+  const { renderer } = await readRenderer(page);
+  const verdict = classifyRenderer(renderer);
+  const declared = options.hardware || options.noWebgl;
+  checks.push({
+    name: 'a11y.the-run-declares-what-it-can-draw',
+    ok: declared === true,
+    detail: declared
+      ? `the run declared ${options.hardware ? '--hardware' : '--no-webgl'} and the renderer ` +
+        `reads ${verdict.kind}. The 3D half is judged where a card is declared and printed as ` +
+        `NOT JUDGED where none is.`
+      : `this run named neither --hardware nor --no-webgl, and the renderer reads ` +
+        `${verdict.kind}. A run inside the sandbox and a run on a CI machine both get no ` +
+        `WebGL context, so every 3D check skips and the run exits 0 while judging nothing. ` +
+        `Name --hardware for a machine with a card, or --no-webgl for one without.`,
+  });
+  if (!declared) return;
+
+  // The viewport is the gate's own, and both widths are drawn ones.
+  checks.push({
+    name: 'a11y.the-gate-runs-at-the-widths-the-design-draws',
+    ok: A11Y_WIDTHS.every((size) => /^(360x760|768x1024|1440x900)$/.test(size.name)),
+    detail:
+      `the journey runs at ${A11Y_WIDTHS.map((size) => size.name).join(' and ')}. The harness ` +
+      `default is 800 by 600, which is neither width the design is drawn at, and a walk ` +
+      `measured there is measured at a width nothing was designed for. Decision 22.`,
+  });
+
+  // Each phase opens a tab of its own and closes the one before it, so the
+  // page travels from phase to phase rather than being held here.
+  let held = page;
+  const measured = [];
+  for (const size of A11Y_WIDTHS) {
+    const one = await a11yJourney(held, size, design, checks, options);
+    held = one.page;
+    measured.push({
+      size: size.name,
+      throws: one.throws,
+      dice: one.dice,
+      onTheTable: one.onTheTable,
+    });
+  }
+  console.log(
+    `browser: a11y widths=${measured.length} ` +
+      measured.map((one) => `${one.size}:throws=${one.throws},dice=${one.dice}`).join(' '),
+  );
+  checks.push({
+    name: 'a11y.the-journey-holds-at-both-widths',
+    ok:
+      measured.length === A11Y_WIDTHS.length && new Set(measured.map((one) => one.dice)).size === 1,
+    detail:
+      `the same journey ran at ${measured.length} widths and put the same number of dice on ` +
+      `the table at each: ${measured.map((one) => `${one.size}=${one.dice}`).join(', ')}. The ` +
+      `layout changes with the width and the walk does not.`,
+  });
+
+  // ---- The half a machine with no graphics card cannot judge ----
+  //
+  // The walk is one list in both renderers, which section 6 states and Decision
+  // 9 settles: the die cells are real DOM either way, and with the table
+  // running they lie over the dice the tray put down. A machine with no card
+  // draws the flat dice, so it walks the same list over the other renderer and
+  // says so rather than counting the run as cover it does not have.
+  const drewTheTable = measured.every((one) => one.onTheTable === true);
+  checks.push(
+    options.noWebgl
+      ? {
+          name: 'a11y.the-same-journey-over-the-3d-table',
+          ok: true,
+          skipped: true,
+          detail:
+            `NOT JUDGED: this run declared --no-webgl, so the startup probe fell to the flat ` +
+            `dice and the journey above walked those. The 3D table needs a graphics card, and ` +
+            `CI has none. Run this mode with --hardware on a machine that has one, which is ` +
+            `what the owner's run does, and this check is judged there.`,
+        }
+      : {
+          name: 'a11y.the-same-journey-over-the-3d-table',
+          ok: drewTheTable,
+          detail:
+            `the journey ran with the 3D table mounted at ${measured
+              .map((one) => `${one.size}=${one.onTheTable}`)
+              .join(', ')}, read off window.__clatterTable, which src/shell/table.tsx documents ` +
+            `as the one seam an outside instrument has into a WebGL scene. Both walks above are ` +
+            `therefore walks over the table, not over the flat dice.`,
+        },
+  );
+
+  held = await a11yEndProbe(held, options, design, checks);
+  held = await a11ySheet(held, options, checks);
+
+  // ---- The audit, in a browser that lays the page out ----
+  await held.evaluate(readFileSync(axeSource(), 'utf8'));
+  const version = await held.evaluate(() => window.axe.version);
+  const pinned = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')).devDependencies[
+    'axe-core'
+  ];
+  checks.push({
+    name: 'a11y.the-audit-is-named-and-pinned',
+    ok: version === pinned && /^\d+\.\d+\.\d+$/.test(pinned || ''),
+    detail:
+      `the page ran axe-core ${version} against the ${pinned} package.json pins, with no range ` +
+      `operator. It is read straight out of node_modules and never bundled, and ` +
+      `scripts/check-bundle-size.mjs proves no marker of it reaches dist/.`,
+  });
+
+  const findings = [];
+  let ranAtLeast = Number.POSITIVE_INFINITY;
+  let incomplete = new Set();
+  for (const where of ['the pushed table', 'the disclosure sheet']) {
+    if (where === 'the disclosure sheet') {
+      await resetFocus(held);
+      await tabTo(held, 'disclosure-toggle');
+      await held.keyboard.press('Enter');
+      await held.evaluate(
+        () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
+      );
+    }
+    const result = await auditPage(held, where);
+    for (const found of result.violations) findings.push(`${where}: ${found}`);
+    for (const rule of result.incomplete) incomplete.add(rule);
+    ranAtLeast = Math.min(ranAtLeast, result.ran);
+  }
+  console.log(
+    `browser: a11y audit rules_run_at_least=${ranAtLeast} violations=${findings.length} ` +
+      `incomplete=[${[...incomplete].join(', ')}]`,
+  );
+  checks.push({
+    name: 'a11y.the-audit-finds-nothing-on-a-laid-out-page',
+    ok: findings.length === 0 && ranAtLeast >= 85,
+    detail:
+      `axe-core ran at least ${ranAtLeast} rules over each of two states and reported ` +
+      `${findings.length} findings: [${findings.join(' | ')}]. This browser lays the page out ` +
+      `and computes its colours, so the contrast rule is DECIDED here where jsdom leaves it ` +
+      `undecided. Rules left undecided here: [${[...incomplete].join(', ')}].`,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -12386,6 +13284,8 @@ function parseArgs(argv) {
     overlay: false,
     offline: false,
     shell: false,
+    a11y: false,
+    noWebgl: false,
     sheet: false,
     theme: false,
     history: false,
@@ -12437,6 +13337,8 @@ function parseArgs(argv) {
     else if (arg === '--overlay') options.overlay = true;
     else if (arg === '--offline') options.offline = true;
     else if (arg === '--shell') options.shell = true;
+    else if (arg === '--a11y') options.a11y = true;
+    else if (arg === '--no-webgl') options.noWebgl = true;
     else if (arg === '--sheet') options.sheet = true;
     else if (arg === '--theme') options.theme = true;
     else if (arg === '--history') options.history = true;
@@ -12505,6 +13407,7 @@ function parseArgs(argv) {
     ['--overlay', options.overlay],
     ['--offline', options.offline],
     ['--shell', options.shell],
+    ['--a11y', options.a11y],
     ['--sheet', options.sheet],
     ['--theme', options.theme],
     ['--history', options.history],
@@ -12519,6 +13422,7 @@ function parseArgs(argv) {
         `${
           options.offline ||
           options.shell ||
+          options.a11y ||
           options.sheet ||
           options.theme ||
           options.history ||
@@ -12542,6 +13446,12 @@ function parseArgs(argv) {
     if (!Number.isInteger(options.offsetKept) || options.offsetKept < 0) {
       throw new Error('--offset-kept needs a whole number of 0 or more');
     }
+  }
+  if (options.noWebgl && !options.a11y) {
+    throw new Error('--no-webgl belongs to --a11y');
+  }
+  if (options.a11y && options.hardware && options.noWebgl) {
+    throw new Error('--hardware and --no-webgl declare opposite machines. Name one.');
   }
   if (options.captureLater && !options.share) {
     throw new Error('--capture-later belongs to --share');
@@ -13628,6 +14538,7 @@ async function run(options) {
     if (
       options.offline ||
       options.shell ||
+      options.a11y ||
       options.sheet ||
       options.theme ||
       options.history ||
@@ -13726,6 +14637,8 @@ async function run(options) {
       await runOffline(page, options, checks, server);
     } else if (options.shell) {
       await runShell(page, options, checks);
+    } else if (options.a11y) {
+      await runA11y(page, options, checks);
     } else if (options.sheet) {
       await runSheet(page, options, checks);
     } else if (options.theme) {

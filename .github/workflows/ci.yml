@@ -69,6 +69,30 @@ jobs:
       - name: Bundle size against budgets.json
         run: node scripts/check-bundle-size.mjs
 
+      # The accessibility gate — Unit 4.11.
+      #
+      # One keyboard-only run over the BUILT application, from an empty pool to
+      # a pushed result, with real Tab, arrow, Enter and Escape presses. It
+      # starts and stops its own preview server, so the build above is what it
+      # drives.
+      #
+      # `--no-webgl` DECLARES that this machine has no graphics card, which no
+      # CI runner has. The mode refuses to run without that declaration or
+      # `--hardware`, because a run that reads no renderer would otherwise skip
+      # its 3D checks and exit 0 while judging nothing. Decision 23.
+      #
+      # What CI judges: both keyboard walks, the live region after the roll and
+      # after the push, the disclosure sheet as a real modal, and the audit over
+      # a laid-out page. What it does not: the same walk over the 3D table,
+      # which needs a card. That half prints NOT JUDGED and counts in skipped=.
+      - name: Accessibility gate, keyboard only
+        run: |
+          set -eu
+          browser="$(command -v firefox)"
+          echo "driving ${browser}"
+          node scripts/browser.mjs --a11y --no-webgl \
+            --url http://localhost:4173/clatter/ --browser "${browser}"
+
       # The steps-to-rest gate. It runs the tray physics on the CPU with no
       # renderer, so it cannot flake on a GPU or on a shared runner. It stays
       # out of the validate list, because a validation attempt is capped and a
