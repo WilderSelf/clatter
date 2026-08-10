@@ -19,6 +19,7 @@
 
 import type { Settings } from '../settings/settings';
 import type { FallReason, TrayDecision } from '../tray/capability';
+import { faultLine, tableFault } from './faults';
 
 /** The two renderers. The flat dice of Unit 2.2 are the fallback. */
 export type RendererId = 'tray' | 'flat';
@@ -160,12 +161,15 @@ export const FALL_REASON_TEXT: Readonly<Record<FallReason, string>> = {
  *
  * A platform below the bar is told nothing about the toggle, because the
  * toggle cannot give it the table.
+ *
+ * **The words live in `src/shell/faults.ts` and are not restated here.** Unit
+ * 4.10 made the fall one of the faults the application draws, so the notice is
+ * one row of that surface and reads the same table every other row reads. A
+ * second copy of a sentence nobody updates is worse than none.
  */
 export function noticeText(choice: RendererChoice): string {
-  if (choice.cause === 'belowTheBar') {
-    return 'This browser cannot draw the table. The dice are flat now.';
-  }
-  return 'The table did not load. The dice are flat now. Open More to ask for the table again.';
+  const fault = tableFault(choice.cause);
+  return fault === null ? '' : faultLine(fault);
 }
 
 /** What the sheet prints under the toggle. It names the cause every time. */

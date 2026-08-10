@@ -50,6 +50,9 @@ import type { Faces } from '../rules/die';
 import type { PushCostUnit } from '../rules/push-profile';
 import { PUSH_PROFILES } from '../rules/push-profile';
 import { downloadBlob, exportFileName } from './download';
+import type { Fault } from './faults';
+import { faultOf } from './faults';
+import { FaultBanner } from './fault-banner';
 import { DIE_TYPE_TAG } from './state';
 import { Statistics } from './statistics';
 import { costReading, plural } from './words';
@@ -585,21 +588,31 @@ type View = 'summary' | 'record' | 'stats';
  */
 export function History({
   entries,
-  failure,
+  drawn,
   onBack,
+  onFault,
   onImport,
 }: {
   entries: readonly LogEntry[];
-  /** Why the log could not be opened, or null while it is open. */
-  failure: string | null;
-  onBack: () => void;
   /**
-   * Write an imported log over the stored one. It answers the reason it could
-   * not, or null when the log was written. The store belongs to the
-   * application, so the destination hands the rolls over rather than opening a
-   * second connection.
+   * Every fault the player is shown, one entry per slot — Unit 4.10.
+   *
+   * The destination REPLACES the roll flow, so a fault raised on the dice
+   * screen must still be readable here. The application holds the one list and
+   * both screens draw it.
    */
-  onImport: (imported: readonly LogEntry[]) => Promise<string | null>;
+  drawn: readonly (Fault | null)[];
+  onBack: () => void;
+  /** Raise or clear the import fault. The application holds it. */
+  onFault: (fault: Fault | null) => void;
+  /**
+   * Write an imported log over the stored one. It answers true when the log
+   * was written, and raises the fault itself when it was not, because a log
+   * that is full or broken is the application's fault and not this file's. The
+   * store belongs to the application, so the destination hands the rolls over
+   * rather than opening a second connection.
+   */
+  onImport: (imported: readonly LogEntry[]) => Promise<boolean>;
 }) {
   const rows = historyRows(entries);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -658,17 +671,23 @@ export function History({
     if (file === null) return;
     setBusy('import');
     setMessage('');
+    // The fault of the import before this one goes now. A player who picks a
+    // second file must read the answer to that file and never to the first.
+    onFault(null);
     const outcome = await readImportFile(file);
     if (outcome.kind === 'refused') {
-      setMessage(outcome.reason);
+      // `outcome.reason` is the player's words for the rejection code.
+      // `outcome.detail` names a column, a line and a value, and the screen
+      // never prints it. Unit 4.10.
+      onFault(faultOf('import-refused', outcome.reason));
       setBusy('none');
       return;
     }
-    const refused = await onImport(outcome.entries);
+    const written = await onImport(outcome.entries);
     setMessage(
-      refused === null
+      written
         ? `The log now holds ${plural(outcome.entries.length, 'roll', 'rolls')}, from ${file.name}.`
-        : refused,
+        : '',
     );
     setBusy('none');
   };
@@ -694,11 +713,9 @@ export function History({
       </header>
 
       <main class="shell-m" data-el="history-mid">
-        {failure === null ? null : (
-          <p class="fall-note" data-el="history-failure" role="status">
-            {failure}
-          </p>
-        )}
+        {/* Every fault the player is shown — Unit 4.10, Decision 19. The same
+            four rows the roll flow draws, from the same list. */}
+        <FaultBanner drawn={drawn} />
         {/* What the export or the import answered. It is in the document from
             the first paint and carries no text, so it is a live region a reader
             is already watching when the answer arrives. It holds no tab stop.

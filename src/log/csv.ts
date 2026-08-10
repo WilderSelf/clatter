@@ -244,6 +244,60 @@ export async function exportCsvInChunks(
 // Import
 // ---------------------------------------------------------------------------
 
+/**
+ * Why an import was rejected — Unit 4.10.
+ *
+ * The message of a rejection names a column, a line and a value, because a
+ * person who edited the file needs all three. **None of that may reach the
+ * player.** A column name is a code identifier and Unit 4.4 found two of them
+ * printed on a screen. So every rejection carries a CODE as well, the screen
+ * reads its words off that code, and the message stays for the person holding
+ * the file.
+ *
+ * The set is a counted denominator. `src/log/import-file.ts` holds one sentence
+ * per code and asserts the two sets equal, so a rejection added here cannot
+ * reach a player with no words.
+ */
+export type CsvRejection =
+  /** The text is longer than the cap an import reads. */
+  | 'too-large'
+  /** There is no header line at all. */
+  | 'no-header'
+  /** A quoted field runs to the end of the file. */
+  | 'unfinished-quote'
+  /** The header is not the export schema: a name, a count or an order. */
+  | 'wrong-header'
+  /** A line holds the wrong number of fields. */
+  | 'wrong-row'
+  /** A field holds something the schema does not allow. */
+  | 'bad-value'
+  /** One roll identifier appears in two blocks of rows. */
+  | 'duplicate-roll'
+  /** Two rows of one roll disagree about the roll-level values. */
+  | 'mixed-roll'
+  /** The rows of one roll do not describe a whole roll. */
+  | 'broken-roll';
+
+/**
+ * A rejection carrying its code.
+ *
+ * It is an `Error`, so every existing caller and every existing test still
+ * reads the same message. The code is the addition.
+ */
+export class CsvRejected extends Error {
+  readonly rejection: CsvRejection;
+  constructor(rejection: CsvRejection, message: string) {
+    super(message);
+    this.name = 'CsvRejected';
+    this.rejection = rejection;
+  }
+}
+
+/** Reject an import. One call, so no site can throw without a code. */
+function reject(rejection: CsvRejection, message: string): CsvRejected {
+  return new CsvRejected(rejection, message);
+}
+
 /** Split CSV text into rows of raw fields. Quoted fields may hold a line break. */
 function parseRows(text: string): string[][] {
   const rows: string[][] = [];
@@ -301,7 +355,7 @@ function parseRows(text: string): string[][] {
     index += 1;
   }
   if (quoted) {
-    throw new Error('csv import: a quoted field never closes.');
+    throw reject('unfinished-quote', 'csv import: a quoted field never closes.');
   }
   close();
   return rows;
@@ -311,21 +365,24 @@ function readHeader(header: readonly string[]): void {
   const schema: readonly string[] = CSV_COLUMNS;
   for (const [position, name] of header.entries()) {
     if (!schema.includes(name)) {
-      throw new Error(
+      throw reject(
+        'wrong-header',
         `csv import: column ${position + 1} is named "${name}". ` +
           'The export schema holds no such column.',
       );
     }
   }
   if (header.length !== schema.length) {
-    throw new Error(
+    throw reject(
+      'wrong-header',
       `csv import: the header holds ${header.length} columns. ` +
         `The export schema holds ${schema.length}.`,
     );
   }
   const wrong = schema.findIndex((name, position) => header[position] !== name);
   if (wrong >= 0) {
-    throw new Error(
+    throw reject(
+      'wrong-header',
       `csv import: the header is out of order. Column ${wrong + 1} must be ` +
         `"${schema[wrong]}" and it is "${header[wrong]}".`,
     );
@@ -361,7 +418,10 @@ function whole(fields: readonly string[], column: CsvColumn, line: number): numb
   const raw = field(fields, column);
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0) {
-    throw new Error(`csv import: line ${line}, column "${column}" holds "${raw}", not a count.`);
+    throw reject(
+      'bad-value',
+      `csv import: line ${line}, column "${column}" holds "${raw}", not a count.`,
+    );
   }
   return value;
 }
@@ -375,7 +435,8 @@ function oneOf<T extends string>(
   const raw = field(fields, column);
   const found = allowed.find((each) => each === raw);
   if (found === undefined) {
-    throw new Error(
+    throw reject(
+      'bad-value',
       `csv import: line ${line}, column "${column}" holds "${raw}". ` +
         `The allowed values are ${allowed.join(', ')}.`,
     );
@@ -412,11 +473,17 @@ function finish(building: Building): LogEntry {
   const indexes = [...building.dice.keys()].sort((left, right) => left - right);
   const dice: LoggedDie[] = indexes.map((index, position) => {
     if (index !== position) {
-      throw new Error(`csv import: roll "${building.rollId}" holds no row for die ${position}.`);
+      throw reject(
+        'broken-roll',
+        `csv import: roll "${building.rollId}" holds no row for die ${position}.`,
+      );
     }
     const die = building.dice.get(index);
     if (die === undefined) {
-      throw new Error(`csv import: roll "${building.rollId}" holds no row for die ${position}.`);
+      throw reject(
+        'broken-roll',
+        `csv import: roll "${building.rollId}" holds no row for die ${position}.`,
+      );
     }
     const cells: (DieCell | null)[] = Array.from(
       { length: building.generations },
@@ -452,7 +519,8 @@ function finish(building: Building): LogEntry {
  */
 export function importCsv(text: string): readonly LogEntry[] {
   if (text.length > MAX_IMPORT_CHARS) {
-    throw new Error(
+    throw reject(
+      'too-large',
       `csv import: the file holds ${text.length} characters, ` +
         `over the limit of ${MAX_IMPORT_CHARS}.`,
     );
@@ -460,7 +528,7 @@ export function importCsv(text: string): readonly LogEntry[] {
   const rows = parseRows(text);
   const header = rows[0];
   if (header === undefined) {
-    throw new Error('csv import: the file is empty. The first line must be the header.');
+    throw reject('no-header', 'csv import: the file is empty. The first line must be the header.');
   }
   readHeader(header);
 
@@ -470,7 +538,8 @@ export function importCsv(text: string): readonly LogEntry[] {
   for (const [offset, fields] of rows.slice(1).entries()) {
     const line = offset + 2;
     if (fields.length !== CSV_COLUMNS.length) {
-      throw new Error(
+      throw reject(
+        'wrong-row',
         `csv import: line ${line} holds ${fields.length} fields. The schema holds ${CSV_COLUMNS.length}.`,
       );
     }
@@ -481,7 +550,8 @@ export function importCsv(text: string): readonly LogEntry[] {
     }
     if (building === null) {
       if (seen.has(rollId)) {
-        throw new Error(
+        throw reject(
+          'duplicate-roll',
           `csv import: roll "${rollId}" appears twice. Every roll must hold one block of rows.`,
         );
       }
@@ -495,7 +565,8 @@ export function importCsv(text: string): readonly LogEntry[] {
         generations: 0,
       };
     } else if (signatureOf(fields) !== building.signature) {
-      throw new Error(
+      throw reject(
+        'mixed-roll',
         `csv import: line ${line} gives roll "${rollId}" a second set of roll-level values.`,
       );
     }
@@ -510,13 +581,15 @@ export function importCsv(text: string): readonly LogEntry[] {
     };
     const die = building.dice.get(dieIndex) ?? { type, faces, cells: new Map<number, DieCell>() };
     if (die.type !== type || die.faces !== faces) {
-      throw new Error(
+      throw reject(
+        'broken-roll',
         `csv import: roll "${rollId}" describes die ${dieIndex} twice, as a ` +
           `${die.faces}-faced ${die.type} die and as a ${faces}-faced ${type} die.`,
       );
     }
     if (die.cells.has(generation)) {
-      throw new Error(
+      throw reject(
+        'broken-roll',
         `csv import: roll "${rollId}" holds two rows for die ${dieIndex} at generation ${generation}.`,
       );
     }

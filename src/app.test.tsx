@@ -46,6 +46,7 @@ import {
 } from './shell/presets';
 import { storageLine } from './shell/history';
 import { noticeText, startRenderer } from './shell/renderer';
+import { FAULT_SLOT_ELEMENT, FAULT_SLOTS, faultLine, faultOf } from './shell/faults';
 import { shareCard } from './shell/share-card';
 import type { makeShareCard } from './shell/share-state';
 import {
@@ -3026,5 +3027,125 @@ describe('the performance overlay', () => {
     const panel = element('perf-overlay');
     expect(panel.getAttribute('aria-label')).toBe('Performance readings');
     expect(tabStops(panel)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The error surfaces — Unit 4.10
+//
+// Two of the five failures are REAL here rather than staged, and that is why
+// they are measured here at all:
+//
+//   - **jsdom exposes no `indexedDB`.** `openLog` answers `refused` against the
+//     real browser API, so the log fault below is the application meeting a
+//     platform that keeps no log, not a prop handed to a banner.
+//   - **`store` of null is the answer `localSettingsStore` gives** where the
+//     browser refuses `localStorage`. `mount` passes it by default.
+//
+// The other three — a refused chunk, a full disk and a malformed file — need a
+// real browser and are driven by `node scripts/browser.mjs --faults`.
+// ---------------------------------------------------------------------------
+
+describe('the fault banner', () => {
+  it('draws one row per slot from the first paint, and every row is empty', () => {
+    mount({ store: fakeStore() });
+    const banner = element('fault-banner');
+    const rows = [...banner.querySelectorAll<HTMLElement>('p')];
+    expect(rows.length, 'one row per slot, and the slots are the denominator').toBe(
+      FAULT_SLOTS.length,
+    );
+    expect(rows.map((row) => row.dataset['el'])).toEqual(
+      FAULT_SLOTS.map((slot) => FAULT_SLOT_ELEMENT[slot]),
+    );
+    // A live region built at the moment it fills is announced by some readers
+    // and not by others, so every row is here before anything fails.
+    for (const row of rows) {
+      expect(row.textContent, `${row.dataset['el']} carries no text yet`).toBe('');
+    }
+  });
+
+  it('says the browser keeps no log, when the browser keeps no log', async () => {
+    // Driven, not staged: jsdom has no `indexedDB`, so `openLog` answers
+    // `refused` from the real call.
+    expect(
+      (globalThis as { indexedDB?: unknown }).indexedDB,
+      'this environment really has no IndexedDB',
+    ).toBeUndefined();
+    mount({ store: fakeStore() });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const said = element('log-fault-note');
+    expect(said.dataset['fault'], 'the row names the fault it drew').toBe('log-refused');
+    expect(said.textContent).toBe(faultLine(faultOf('log-refused')));
+    expect(said.textContent, 'it says what the player loses').toContain('go when the tab closes');
+    expect(said.textContent, 'and what to do next').toContain('outside a private window');
+
+    // The surface reaches a live region and carries a name.
+    const banner = element('fault-banner');
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.getAttribute('aria-label')).toBe('Problems');
+    expect(banner.contains(said)).toBe(true);
+  });
+
+  it('says the browser keeps no settings, and clears the row when it does', () => {
+    // `store` of null is what `localSettingsStore` answers where the browser
+    // refuses `localStorage`. Both halves are driven: the refusal and the store.
+    mount({ store: null });
+    expect(element('settings-fault-note').textContent).toBe(faultLine(faultOf('settings-refused')));
+    expect(element('settings-fault-note').textContent).toContain('goes when the tab closes');
+
+    act(() => render(null, root as HTMLElement));
+    mount({ store: fakeStore() });
+    expect(
+      element('settings-fault-note').textContent,
+      'a browser that keeps settings is told nothing',
+    ).toBe('');
+  });
+
+  it('holds no tab stop, so both walks of section 6 are the walks they were', async () => {
+    const before = walkList(DESIGN, 'Before');
+    expect(before.stated).toBe(11);
+    // Two faults on the screen at once: no settings store and no log.
+    mount({ store: null });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const banner = element('fault-banner');
+    const filled = [...banner.querySelectorAll<HTMLElement>('p')].filter(
+      (row) => (row.textContent ?? '') !== '',
+    );
+    expect(filled.length, 'the walk runs with faults on the screen, not without').toBe(2);
+    expect(tabStops(banner), 'and the banner holds no tab stop').toHaveLength(0);
+
+    const visits = walk(document);
+    expect(visits.map((visit) => visit.name)).toEqual(before.names);
+    expect(visits.length).toBe(before.stated);
+  });
+
+  it('carries the same faults into the history destination', async () => {
+    // The destination REPLACES the roll flow, so a fault raised on the dice
+    // screen is unreadable there unless the destination draws the same list.
+    mount({ store: null });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const onTheDice = [...element('fault-banner').querySelectorAll<HTMLElement>('p')].map(
+      (row) => row.textContent,
+    );
+
+    click(element('disclosure-toggle'));
+    click(element('sheet-history'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(element('history'), 'the destination replaced the roll flow').not.toBeNull();
+    const inTheHistory = [...element('fault-banner').querySelectorAll<HTMLElement>('p')].map(
+      (row) => row.textContent,
+    );
+    expect(inTheHistory).toEqual(onTheDice);
+    expect(inTheHistory.filter((each) => each !== '').length).toBe(2);
+    expect(tabStops(element('fault-banner'))).toHaveLength(0);
   });
 });

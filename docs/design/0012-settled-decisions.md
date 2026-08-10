@@ -907,3 +907,94 @@ keyboard walks of section 6 are the walks they were. It is drawn over the screen
 the middle region, because the middle scrolls and a reading being photographed must stay beside the
 dice it belongs to. It takes no pointer events at all, so it can never swallow a tap on a control
 under it.
+
+---
+
+## Decision 19 — one fault banner, four rows, no control, taken by me 2026-08-10
+
+**A failure the player is told about is drawn in ONE surface, at the head of the middle region, on
+whatever screen the player is on.** The surface holds one row per SLOT, not one row per failure.
+Every row is in the document from the first paint with no text. The surface holds no control, and
+each row names the control the player already has.
+
+Unit 4.10 owns this. The failures themselves were all detected before it: `src/log/store.ts`
+answers four refusals by name, `src/log/import-file.ts` answers twelve, and `src/shell/renderer.ts`
+answers three causes for flat dice. What was missing was what the player is TOLD, and what the
+player can do next.
+
+### The four slots, and why the count is fixed
+
+| Slot | Row | Faults it draws |
+|---|---|---|
+| table | `flat-fallback-note` | the browser cannot draw the table, the table did not load |
+| log | `log-fault-note` | the browser keeps no log, another tab holds it, the log stopped, the storage is full |
+| import | `import-fault-note` | a file this application cannot read |
+| settings | `settings-fault-note` | the browser keeps no settings |
+
+Eight faults over four slots. The faults inside one slot cannot hold at once: a log that refused to
+open writes nothing, so it cannot then be full, and the newest log fault replaces the one before it.
+So the row count on the screen is the slot count and never the fault count, which is what bounds the
+surface. A banner that grew a row per failure has no bound, and a phone at 360 px has no room for
+one.
+
+`src/shell/faults.ts` holds the slots, the words and the accounting, and `src/shell/faults.test.ts`
+parses the union declarations out of every module that refuses and asserts the accounting against
+them. A refusal added later is therefore a red rather than a cell nobody read.
+
+### The banner holds no control, and that is forced
+
+Both keyboard walks of section 6 are fixed at eleven visits before the throw and thirty-five after
+it. A control that appeared with a fault would move them. So every recovery route is a control that
+already exists, and the row names it: More for the table, the history for the log, the import control
+for a file. The row is read by a screen reader through the live region, and the control it names is
+reachable by keyboard alone with an accessible name.
+
+Section 3 lists the banner under the read-only parts. The control inventory is unchanged at five
+controls at rest against a budget of eight.
+
+### The banner is the live region, and the row inside it is not
+
+The banner carries `role="alert"` and the name "Problems". Every row carries no role of its own. A
+live region inside a live region is announced twice, and Unit 3.7 had given the flat-dice notice its
+own `role="status"` when it was the only surface there was. That row keeps its name, because the
+notice it draws is the same notice and two names for one element would be a second surface.
+
+### A fault reads like the seven-day note, and that is deliberate
+
+Both are a shaded pad with a marked left edge and full ink. They are the same kind of thing to a
+player: read this, it is about your data. The two differences are the ones that matter — a fault
+carries its instruction in bold on its own line, and a fault is announced when it arrives.
+
+### The order of a recovery route is measured, not chosen
+
+Two of the routes take two steps, and both orders were found by taking the route rather than by
+reasoning about it.
+
+- **A refused chunk.** The toggle alone can never bring the table back. A dynamic import that failed
+  once is remembered by the module map, so the same document makes no second request at all —
+  measured through `node scripts/browser.mjs --faults`, where the chunk's resource list still held
+  one entry of zero bytes after the toggle. The words therefore read: reload, then switch the table
+  on. The reload has to come first, because the stored fall keeps the dice flat until the toggle
+  clears it, and the toggle is what asks the fresh document for the chunk.
+- **A full store.** Making room is not enough. A transaction that aborts on the quota leaves the
+  connection unusable, so the next throw answers a fault of the log rather than a full one —
+  measured through the same command with `--quota-kb`. The words therefore read: make room, then
+  reload.
+
+Both orders are measured on every run of that mode, in one check each, so a change that repairs
+either one turns the check red rather than leaving a stale instruction on the screen.
+
+### What a fault never prints
+
+No code identifier, of any kind. `importCsv` names a column, a line and a value in its message,
+because the person repairing the file needs all three, and a column name in a file the player did not
+write is whatever the file says it is. So a rejection carries a CODE as well, the screen reads its
+words off that code, and the message stays in a field nothing draws. Unit 4.4 found `1 ratingPoint`
+and `pool-banes-damage-ratings` printed on a player's screen, and only a capture caught them.
+
+### Captures
+
+Six surfaces, every one read at 360 px after it was written:
+`0024-fault-nothing-kept-360.png`, `0024-fault-table-absent-360.png`, `0024-fault-table-lost-360.png`,
+`0024-fault-log-stopped-360.png`, `0024-fault-import-refused-360.png` and
+`0024-fault-storage-full-360.png`.

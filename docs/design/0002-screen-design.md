@@ -150,8 +150,18 @@ through the table semantics.
 - The three charts of the statistics view. Each one is a real table, so a screen reader reaches
   every value by its row and its column. The bar beside a value is `aria-hidden` decoration, and
   every series carries a shape as well as a colour.
-- `flat-fallback-note`, the one-time notice that the dice fell to flat dice. It is a live region and
-  it holds no tab stop, so neither keyboard walk of section 6 changes. Unit 3.7 added it.
+- `fault-banner`, the one error surface — Unit 4.10, Decision 19. It sits at the head of the middle
+  region, on the roll flow and in the history destination, and it holds one row per SLOT: `table`,
+  `log`, `import` and `settings`, drawn as `flat-fallback-note`, `log-fault-note`,
+  `import-fault-note` and `settings-fault-note`. Eight faults share those four rows, because the
+  faults inside one slot cannot hold at once. Every row is in the document from the first paint with
+  no text, and an empty row takes no height, so the drawn screen is unchanged while nothing has
+  failed. **The banner carries `role="alert"` and the name "Problems", and every row inside it
+  carries no role of its own**, because a live region inside a live region is announced twice.
+  **It holds no tab stop**, so neither keyboard walk of section 6 changes: every recovery route the
+  words name is a control that already exists, and the row names it.
+- `flat-fallback-note`, the one-time notice that the dice fell to flat dice. Unit 3.7 added it and
+  Unit 4.10 made it the `table` row of the banner above, under the same name.
 - `share-preview`, the card the player is about to post. It is an image the application generates, so
   it carries alternative text built from the same roll the card draws. It sits inside the disclosure
   sheet and holds no tab stop. Unit 4.9 added it.

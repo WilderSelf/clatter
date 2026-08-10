@@ -63,7 +63,7 @@
 //   npm run build && node scripts/browser.mjs --offline \
 //     --url http://localhost:4173/clatter/
 //                            [--context-loss] [--reduced-motion] [--sound]
-//                            [--log-store] [--log-csv] [--settings-store]
+//                            [--log-store] [--log-csv] [--settings-store] [--faults]
 //                            [--long-task-ms <n>] [--quota-kb <n>] [--note-chars <n>]
 //                            [--capture-before <path>]
 //                            [--offset-kept <n>] [--viewport <w>x<h>[@<dpr>]]
@@ -163,6 +163,18 @@
 // quota check alone, because a full buffer does not fit under it. The limit is
 // the browser's own testing switch, so `QuotaExceededError` is raised by the
 // browser and never simulated.
+//
+// `--faults` starts and stops its own preview server. It is the browser half of
+// Unit 4.10 and it drives every error surface to its own failure: a browser
+// that keeps no store and no database, a browser that draws no 3D context, the
+// 3D chunk refused at the network layer, a log another connection deleted, and
+// a malformed file through the real picker. Each recovery route is then TAKEN
+// and the state is read after it. Build first, then run it alone:
+//   npm run build && node scripts/browser.mjs --faults \
+//     --url http://localhost:4173/clatter/
+// Add `--quota-kb <n>` to judge the full store instead, which needs the browser
+// launched with its own storage limit. The two runs cover the declared faults
+// between them and each one names what it left to the other.
 //
 // `--log-csv` needs `--url`. It is the browser half of Units 4.5 and 4.6. It
 // fills the 5,000-roll ring buffer, reads it back, and exports the whole log
@@ -7436,6 +7448,12 @@ async function runBlockedChunk(page, options, checks, server) {
       renderer: document.querySelector('.screen')?.dataset.renderer ?? null,
       canvases: document.querySelectorAll('canvas').length,
       notices: document.querySelectorAll('[data-el="flat-fallback-note"]').length,
+      // Unit 4.10 made the notice one row of the fault banner, so the live
+      // region is the banner and the row carries no role of its own. A row
+      // with a second live region inside an alert would be announced twice.
+      banners: document.querySelectorAll('[data-el="fault-banner"]').length,
+      bannerRole: note?.closest('[data-el="fault-banner"]')?.getAttribute('role') ?? null,
+      bannerName: note?.closest('[data-el="fault-banner"]')?.getAttribute('aria-label') ?? null,
       notice: (note?.textContent ?? '').trim(),
       role: note?.getAttribute('role') ?? null,
       stored: localStorage.getItem('clatter.settings'),
@@ -7519,12 +7537,22 @@ async function runBlockedChunk(page, options, checks, server) {
   checks.push({
     name: 'blocked-chunk.the-fall-is-recorded-and-said-once',
     ok:
-      fell.notices === 1 && fell.notice.length > 0 && fell.role === 'status' && storedFall === true,
+      fell.notices === 1 &&
+      fell.notice.length > 0 &&
+      fell.banners === 1 &&
+      fell.role === null &&
+      fell.bannerRole === 'alert' &&
+      (fell.bannerName ?? '').length > 0 &&
+      storedFall === true,
     detail:
       `the screen holds ${fell.notices} notice elements, the one it holds reads ` +
-      `${JSON.stringify(fell.notice)} with role=${JSON.stringify(fell.role)}, and the stored ` +
-      `settings record reads flatFallback=${storedFall}. The fall is permanent, so it is in ` +
-      `the record, and the notice carries a role a reader treats as a live region.`,
+      `${JSON.stringify(fell.notice)}, and the stored settings record reads ` +
+      `flatFallback=${storedFall}. The fall is permanent, so it is in the record. Unit 4.10 made ` +
+      `the notice one row of the one error surface, so the live region is the banner around it ` +
+      `and never the row: the screen holds ${fell.banners} banners, the row carries ` +
+      `role=${JSON.stringify(fell.role)} of its own, and the banner carries ` +
+      `role=${JSON.stringify(fell.bannerRole)} with the name ${JSON.stringify(fell.bannerName)}. ` +
+      `A live region inside a live region is announced twice.`,
   });
 
   // ---- 4. The acceptance: every rule and every affordance, on flat dice. ----
@@ -10426,7 +10454,9 @@ async function runRecordAndExport(page, options, checks, design) {
       cap,
       size: file.size,
       reads: reads.count,
-      message: document.querySelector('[data-el="history-message"]')?.textContent ?? '',
+      // Unit 4.10 moved a refusal off the message line and on to the one
+      // error surface. The message line still carries what an import DID.
+      message: document.querySelector('[data-el="import-fault-note"]')?.textContent ?? '',
     };
   }, csv.MAX_IMPORT_BYTES);
   const afterRefusal = (await readLogRolls(page)).rolls;
@@ -10443,6 +10473,7 @@ async function runRecordAndExport(page, options, checks, design) {
       refused.reads === 0 &&
       /too large/.test(refused.message) &&
       /No part of the file was read/.test(refused.message) &&
+      /Pick another file/.test(refused.message) &&
       afterRefusal.length === afterImport.length &&
       afterRefusal.length > 0,
     detail:
@@ -12359,6 +12390,7 @@ function parseArgs(argv) {
     theme: false,
     history: false,
     blockedChunk: false,
+    faults: false,
     table: false,
     captureShell: null,
     captureLater: false,
@@ -12409,6 +12441,7 @@ function parseArgs(argv) {
     else if (arg === '--theme') options.theme = true;
     else if (arg === '--history') options.history = true;
     else if (arg === '--blocked-chunk') options.blockedChunk = true;
+    else if (arg === '--faults') options.faults = true;
     else if (arg === '--table') options.table = true;
     else if (arg === '--capture-shell') options.captureShell = next();
     else if (arg === '--capture-later') options.captureLater = true;
@@ -12476,6 +12509,7 @@ function parseArgs(argv) {
     ['--theme', options.theme],
     ['--history', options.history],
     ['--blocked-chunk', options.blockedChunk],
+    ['--faults', options.faults],
     ['--table', options.table],
   ];
   const named = MODES.filter(([, on]) => on).map(([flag]) => flag);
@@ -12537,12 +12571,1051 @@ function parseArgs(argv) {
     }
   }
   if (options.quotaKb !== null) {
-    if (!options.logStore) throw new Error('--quota-kb belongs to --log-store');
+    if (!options.logStore && !options.faults) {
+      throw new Error('--quota-kb belongs to --log-store or --faults');
+    }
     if (!Number.isInteger(options.quotaKb) || options.quotaKb < 1) {
       throw new Error('--quota-kb needs a whole number of 1 or more');
     }
   }
   return options;
+}
+
+// ---------------------------------------------------------------------------
+// The error surfaces — Unit 4.10
+//
+// Every failure below is FORCED, and the surface is then read off the screen.
+// A run that rendered the banner from a prop would prove the words and never
+// the wiring, so nothing here hands a fault to a component:
+//
+//   - **A refused chunk** is refused at the network layer, with the service
+//     worker and Cache Storage taken away first, which is the route Unit 3.7's
+//     `--blocked-chunk` built and this mode reuses.
+//   - **A refused database** is the error this browser really raises on an
+//     opaque origin, read out of a sandboxed frame first, which is the route
+//     Unit 4.4's `--log-store` built.
+//   - **A stopped log** is the application's own connection closed by a
+//     `deleteDatabase` from another connection. Nothing is patched.
+//   - **A full store** is `--quota-kb`, which launches the browser with its own
+//     storage limit. The browser raises the error.
+//   - **A malformed file** is a real `File` through the real picker, carrying
+//     hostile text, which Constraint 8 exists for.
+//
+// The denominator is `FAULT_KINDS`, imported from the shipping module rather
+// than restated here, so a fault added later has to be judged or skipped by
+// name.
+// ---------------------------------------------------------------------------
+
+/** Where the captures of this mode go. Every surface is read at 360 px. */
+const FAULT_CAPTURES = join(here, '..', 'docs', 'design');
+const FAULT_VIEWPORT = { width: 360, height: 760, deviceScaleFactor: 1 };
+
+/** Read the banner off the screen: its role, its name, its rows and its stops. */
+async function readFaultBanner(page) {
+  return page.evaluate(() => {
+    const banner = document.querySelector('[data-el="fault-banner"]');
+    if (banner === null) return { present: false, rows: [], filled: [], stops: 0 };
+    const rows = [...banner.querySelectorAll('p')].map((row) => {
+      const box = row.getBoundingClientRect();
+      return {
+        el: row.dataset.el ?? null,
+        fault: row.dataset.fault ?? '',
+        text: (row.textContent ?? '').trim(),
+        elements: row.querySelectorAll('*').length,
+        shown: getComputedStyle(row).display !== 'none',
+        right: Math.round(box.right),
+        bottom: Math.round(box.bottom),
+        height: Math.round(box.height),
+      };
+    });
+    const stops = [...banner.querySelectorAll('*')].filter(
+      (each) =>
+        each.tabIndex >= 0 &&
+        (each.matches('a[href], button, input, select, textarea') || each.hasAttribute('tabindex')),
+    ).length;
+    return {
+      present: true,
+      role: banner.getAttribute('role'),
+      label: banner.getAttribute('aria-label'),
+      rows,
+      filled: rows.filter((row) => row.text !== '').map((row) => row.fault),
+      stops,
+      viewport: window.innerWidth,
+    };
+  });
+}
+
+/**
+ * Press one control with the keyboard alone, and report its accessible name.
+ *
+ * A label wrapping a checkbox is pressed on the checkbox, with the space bar,
+ * because Enter does nothing to a checkbox. The name is read off the control
+ * the browser would announce.
+ */
+async function pressWithKeyboard(page, name) {
+  // The focus is moved by the DRIVER and never by a script in the page.
+  // Measured on this host on 2026-08-10: an `element.focus()` inside
+  // `page.evaluate` leaves the key events arriving at that element — a listener
+  // on the page counted them — while the browser performs no default action for
+  // them, so a space on a checkbox never toggles it. `page.focus` is the idiom
+  // `--sound-controls` already uses, and it works.
+  const selector = `[data-el="${name}"]`;
+  const where = await page.evaluate((el) => {
+    const holder = document.querySelector(`[data-el="${el}"]`);
+    if (holder === null) return { own: false, found: false };
+    return { own: holder.matches('button, input, a[href]'), found: true };
+  }, name);
+  if (!where.found) return { found: false, name: '', control: null, disabled: null };
+  const aim = where.own ? selector : `${selector} :is(button, input, a[href])`;
+  await page.focus(aim);
+  const aimed = await page.evaluate((el) => {
+    const holder = document.querySelector(`[data-el="${el}"]`);
+    const control = holder.matches('button, input, a[href]')
+      ? holder
+      : holder.querySelector('button, input, a[href]');
+    const label = control.getAttribute('aria-label') ?? (holder.textContent ?? '').trim();
+    return {
+      found: document.activeElement === control,
+      name: (label ?? '').replace(/\s+/g, ' ').trim(),
+      control: control.tagName.toLowerCase() + (control.type ? `:${control.type}` : ''),
+      disabled: control.disabled ?? null,
+    };
+  }, name);
+  if (!aimed.found) return aimed;
+  await page.evaluate(() => {
+    window.__keys = [];
+    window.__watch ??= (() => {
+      window.addEventListener(
+        'keydown',
+        (event) => {
+          window.__keys.push(`${event.key} on ${event.target?.tagName ?? 'nothing'}`);
+        },
+        true,
+      );
+      return true;
+    })();
+  });
+  await page.keyboard.press(aimed.control === 'input:checkbox' ? ' ' : 'Enter');
+  await settleScreen(page);
+  const after = await page.evaluate((el) => {
+    const holder = document.querySelector(`[data-el="${el}"]`);
+    const control = holder?.matches('button, input, a[href]')
+      ? holder
+      : (holder?.querySelector('button, input, a[href]') ?? null);
+    return {
+      checked: control?.checked ?? null,
+      still: document.activeElement === control,
+      keys: window.__keys ?? [],
+      active: document.activeElement?.tagName ?? null,
+    };
+  }, name);
+  return {
+    ...aimed,
+    checked: after.checked,
+    held: after.still,
+    keys: after.keys,
+    active: after.active,
+  };
+}
+
+/** Take the whole screen at 360 px, and say where it went. */
+async function captureFaultScreen(page, file) {
+  const path = join(FAULT_CAPTURES, file);
+  await page.screenshot({ path });
+  console.log(`browser: faults captured ${file}`);
+  return path;
+}
+
+/** Take the service worker and every cache away, so no store can answer a request. */
+async function clearWorkerAndCaches(page) {
+  return withTimeout(
+    page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return { ready: false, caches: 0, registrations: 0 };
+      await navigator.serviceWorker.ready;
+      const held = await navigator.serviceWorker.getRegistrations();
+      const names = await caches.keys();
+      for (const registration of held) await registration.unregister();
+      for (const name of names) await caches.delete(name);
+      return {
+        ready: true,
+        caches: (await caches.keys()).length,
+        registrations: (await navigator.serviceWorker.getRegistrations()).length,
+      };
+    }),
+    30000,
+    'no service worker took control of the page within 30 seconds',
+  );
+}
+
+/** Wait for the screen and give the log open a chance to answer. */
+async function waitForRollScreen(page) {
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('[data-el="fault-banner"]') !== null, {
+    timeout: 15000,
+  });
+  await settleScreen(page);
+}
+
+/** Wait until one row of the banner carries text, or give up and report. */
+async function waitForFault(page, element, waitMs = 15000) {
+  const until = Date.now() + waitMs;
+  for (;;) {
+    const said = await page.evaluate(
+      (el) => (document.querySelector(`[data-el="${el}"]`)?.textContent ?? '').trim(),
+      element,
+    );
+    if (said !== '' || Date.now() > until) return said;
+    await new Promise((done) => setTimeout(done, 100));
+  }
+}
+
+/** Throw the built pool once, and let the write reach the log. */
+async function throwOnce(page) {
+  await page.click('[data-el="roll-button"]');
+  await settleScreen(page);
+  await new Promise((done) => setTimeout(done, 400));
+}
+
+async function runFaults(page, options, checks) {
+  const { FAULT_KINDS, FAULT_SLOT_ELEMENT, FAULT_SLOT_OF } = await import('../src/shell/faults.ts');
+  const judged = new Set();
+  const skipped = new Set();
+  await page.setViewport(FAULT_VIEWPORT);
+
+  /** Every claim about the banner itself, gathered over every phase. */
+  const banners = [];
+  const note = (phase, banner) => {
+    banners.push({ phase, banner });
+    return banner;
+  };
+
+  // ---- 0. The control: nothing has failed, so the banner says nothing. ----
+  //
+  // Without this every check below would pass against a banner that always
+  // showed something.
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // A browser that refuses storage answers the defaults anyway.
+    }
+  });
+  await clearLog(page);
+  await page.reload({ waitUntil: 'load' });
+  await waitForRollScreen(page);
+  const clean = note('clean', await readFaultBanner(page));
+  console.log(
+    `browser: faults clean rows=${clean.rows.length} filled=${clean.filled.length} ` +
+      `role=${clean.role} label=${JSON.stringify(clean.label)} stops=${clean.stops} ` +
+      `height=${clean.rows.reduce((total, row) => total + row.height, 0)}`,
+  );
+  checks.push({
+    name: 'faults.the-banner-says-nothing-until-something-fails',
+    ok:
+      clean.present &&
+      clean.rows.length === Object.keys(FAULT_SLOT_ELEMENT).length &&
+      clean.filled.length === 0 &&
+      clean.rows.every((row) => !row.shown) &&
+      clean.rows.map((row) => row.el).join(',') === Object.values(FAULT_SLOT_ELEMENT).join(','),
+    detail:
+      `with a store, a database and the chunk all in place the banner holds ` +
+      `${clean.rows.length} rows against the ${Object.keys(FAULT_SLOT_ELEMENT).length} slots, ` +
+      `${clean.filled.length} of them carry text, and every one is display:none, so the drawn ` +
+      `screen is unchanged. The rows are [${clean.rows.map((row) => row.el).join(' ')}] against ` +
+      `the slots [${Object.values(FAULT_SLOT_ELEMENT).join(' ')}]. This is the control: every ` +
+      `check below would pass against a banner that always said something.`,
+  });
+
+  // ---- 1. A browser that keeps nothing: no localStorage, no IndexedDB. ----
+  //
+  // The IndexedDB error is the one this browser really raises on an opaque
+  // origin, read out of a sandboxed frame first. The localStorage refusal is
+  // the same shape: the property itself throws before any read.
+  const real = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const frame = document.createElement('iframe');
+        frame.sandbox = 'allow-scripts';
+        frame.srcdoc =
+          '<script>let answer={};try{indexedDB.open("probe",1);answer.db={threw:false};}' +
+          'catch(error){answer.db={threw:true,name:error.name,message:error.message};}' +
+          'try{localStorage.getItem("probe");answer.store={threw:false};}' +
+          'catch(error){answer.store={threw:true,name:error.name,message:error.message};}' +
+          'parent.postMessage(answer,"*");</scr' +
+          'ipt>';
+        const done = (event) => {
+          window.removeEventListener('message', done);
+          frame.remove();
+          resolve(event.data);
+        };
+        window.addEventListener('message', done);
+        document.body.appendChild(frame);
+        setTimeout(() => resolve({ db: { threw: false }, store: { threw: false } }), 3000);
+      }),
+  );
+  console.log(
+    `browser: faults an opaque origin refuses storage db=${real.db.threw} ` +
+      `(${real.db.name}: ${real.db.message}) store=${real.store.threw} ` +
+      `(${real.store.name}: ${real.store.message})`,
+  );
+
+  const refusal = await page.evaluateOnNewDocument((measured) => {
+    IDBFactory.prototype.open = function refused() {
+      throw new DOMException(measured.db.message ?? 'refused', measured.db.name ?? 'SecurityError');
+    };
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException(
+          measured.store.message ?? 'refused',
+          measured.store.name ?? 'SecurityError',
+        );
+      },
+    });
+    window.__refusalInjected = true;
+  }, real);
+  await page.reload({ waitUntil: 'load' });
+  await waitForRollScreen(page);
+  const landed = await page.evaluate(() => {
+    const answer = { installed: window.__refusalInjected === true, db: false, store: false };
+    try {
+      indexedDB.open('injection-probe', 1);
+    } catch {
+      answer.db = true;
+    }
+    try {
+      void window.localStorage;
+    } catch {
+      answer.store = true;
+    }
+    return answer;
+  });
+  await waitForFault(page, FAULT_SLOT_ELEMENT.log);
+  const kept = note('nothing-kept', await readFaultBanner(page));
+  const nothingKept = await captureFaultScreen(page, '0024-fault-nothing-kept-360.png');
+  console.log(
+    `browser: faults nothing kept injection=${landed.installed} db_throws=${landed.db} ` +
+      `store_throws=${landed.store} filled=[${kept.filled.join(' ')}] stops=${kept.stops}`,
+  );
+  checks.push({
+    name: 'faults.a-browser-that-keeps-nothing-says-so-and-says-what-is-lost',
+    ok:
+      real.db.threw === true &&
+      real.store.threw === true &&
+      landed.installed &&
+      landed.db &&
+      landed.store &&
+      kept.filled.join(' ') === 'log-refused settings-refused' &&
+      kept.rows.every((row) => row.text === '' || /tab closes/.test(row.text)) &&
+      kept.stops === 0,
+    detail:
+      `this browser was measured first: inside a sandboxed frame, whose origin is opaque, ` +
+      `indexedDB.open threw ${real.db.name} and localStorage threw ${real.store.name}. That is ` +
+      `the shape a private window has. The run made both raise that same error before the first ` +
+      `line of the page ran, proved the injection landed (db=${landed.db} store=${landed.store}), ` +
+      `and the screen answered [${kept.filled.join(' ')}]. Both rows must name what is lost, ` +
+      `which is every roll and every choice when the tab closes, and the banner must hold ` +
+      `${kept.stops} tab stops. The words: ` +
+      kept.rows
+        .filter((row) => row.text !== '')
+        .map((row) => JSON.stringify(row.text))
+        .join(' and ') +
+      `. Capture: ${nothingKept}.`,
+  });
+  judged.add('log-refused');
+  judged.add('settings-refused');
+
+  // ---- 2. A platform that cannot draw the table, and has no way back. ----
+  //
+  // The storage refusal goes first, so this phase measures one failure and not
+  // three. Every injection of this mode is removed by its own identifier.
+  await page.removeScriptToEvaluateOnNewDocument(refusal.identifier);
+  const noWebgl = await page.evaluateOnNewDocument(() => {
+    const real = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function refused(kind, ...rest) {
+      if (String(kind).startsWith('webgl')) return null;
+      return real.call(this, kind, ...rest);
+    };
+    window.__webglRefused = true;
+  });
+  await page.reload({ waitUntil: 'load' });
+  await waitForRollScreen(page);
+  await page.waitForFunction(
+    () => (document.querySelector('.screen')?.dataset.trayDecision ?? 'pending') !== 'pending',
+    { timeout: 30000 },
+  );
+  const below = await page.evaluate(() => ({
+    injected: window.__webglRefused === true,
+    context: document.createElement('canvas').getContext('webgl2'),
+    decision: document.querySelector('.screen')?.dataset.trayDecision ?? null,
+    renderer: document.querySelector('.screen')?.dataset.renderer ?? null,
+    canvases: document.querySelectorAll('canvas').length,
+  }));
+  await waitForFault(page, FAULT_SLOT_ELEMENT.table);
+  const absent = note('table-absent', await readFaultBanner(page));
+  const absentShot = await captureFaultScreen(page, '0024-fault-table-absent-360.png');
+  const toggle = await page.evaluate(async () => {
+    document.querySelector('[data-el="disclosure-toggle"]')?.click();
+    await new Promise((done) => setTimeout(done, 200));
+    const control = document.querySelector('[data-el="sheet-tray-renderer"] input');
+    const answer = {
+      found: control !== null,
+      disabled: control?.disabled ?? null,
+      note: (document.querySelector('[data-el="sheet-tray-note"]')?.textContent ?? '').trim(),
+    };
+    document.querySelector('[data-el="sheet-close"]')?.click();
+    return answer;
+  });
+  const tableRow = absent.rows.find((row) => row.el === FAULT_SLOT_ELEMENT.table);
+  console.log(
+    `browser: faults table absent injection=${below.injected} webgl2=${below.context} ` +
+      `decision=${below.decision} renderer=${below.renderer} canvases=${below.canvases} ` +
+      `toggle_disabled=${toggle.disabled} row=${JSON.stringify(tableRow?.text ?? '')}`,
+  );
+  checks.push({
+    name: 'faults.a-browser-that-cannot-draw-the-table-says-what-is-lost-and-offers-nothing',
+    ok:
+      below.injected &&
+      below.context === null &&
+      below.decision === 'false' &&
+      below.renderer === 'flat' &&
+      below.canvases === 0 &&
+      absent.filled.includes('table-absent') &&
+      /flat now/.test(tableRow?.text ?? '') &&
+      !/More/.test(tableRow?.text ?? '') &&
+      toggle.disabled === true &&
+      absent.stops === 0,
+    detail:
+      `the run refused every WebGL context before the first line of the page ran and proved it ` +
+      `(getContext('webgl2') answers ${below.context}). The startup probe then answered ` +
+      `tray=${below.decision}, the screen draws ${below.renderer} dice over ${below.canvases} ` +
+      `canvases, and the banner reads ${JSON.stringify(tableRow?.text ?? '')}. This fault has no ` +
+      `route back and must offer none: the words name no control, and the toggle on the sheet ` +
+      `is disabled=${toggle.disabled}, so a route the player could not take is never printed. ` +
+      `The sheet says why: ${JSON.stringify(toggle.note)}. Capture: ${absentShot}.`,
+  });
+  judged.add('table-absent');
+
+  // ---- 3. The chunk refused at the network layer, and the route back taken. ----
+  //
+  // The same route Unit 3.7 built: the worker and every cache go first, because
+  // either of them can answer a request the network refused.
+  await page.removeScriptToEvaluateOnNewDocument(noWebgl.identifier);
+  await page.goto(options.url, { waitUntil: 'load' });
+  await clearWorkerAndCaches(page);
+  // The phase before this one recorded a permanent fall, and a session that
+  // OPENS on a recorded fall says nothing, which is Unit 3.7's rule and not a
+  // fault of this one. So the record goes, and the fall this phase measures is
+  // the fall this phase caused.
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // A browser that refuses storage answers the defaults anyway.
+    }
+  });
+
+  let blocking = true;
+  const chunkAsked = [];
+  const abortRefusals = [];
+  await page.setCacheEnabled(false);
+  await page.setRequestInterception(true);
+  const intercept = (request) => {
+    const url = request.url();
+    if (blocking && (TRAY_CHUNK.test(url) || WORKER_FILES.test(url))) {
+      chunkAsked.push(url);
+      request.abort().catch(() => abortRefusals.push(url));
+      return;
+    }
+    request.continue().catch(() => {
+      // A request the driver could not resume is reported by the run below.
+    });
+  };
+  page.on('request', intercept);
+  await page.reload({ waitUntil: 'load' });
+  await waitForRollScreen(page);
+  await page.click('[data-el="collapse-button"]');
+  await page.waitForFunction(
+    () => document.querySelector('.screen[data-renderer="flat"]') !== null,
+    { timeout: 30000 },
+  );
+  await waitForFault(page, FAULT_SLOT_ELEMENT.table);
+  const lost = note('table-lost', await readFaultBanner(page));
+  const lostShot = await captureFaultScreen(page, '0024-fault-table-lost-360.png');
+  const lostRow = lost.rows.find((row) => row.el === FAULT_SLOT_ELEMENT.table);
+  const chunkBytes = await page.evaluate(() =>
+    performance
+      .getEntriesByType('resource')
+      .filter((entry) => /\/dice-tray-[^/]+\.js$/.test(entry.name))
+      .reduce((total, entry) => total + (entry.encodedBodySize || 0), 0),
+  );
+  console.log(
+    `browser: faults table lost chunk_requests=${chunkAsked.length} refused_aborts=` +
+      `${abortRefusals.length} chunk_bytes=${chunkBytes} row=${JSON.stringify(lostRow?.text ?? '')}`,
+  );
+  checks.push({
+    name: 'faults.a-refused-chunk-says-so-and-names-the-route-back',
+    ok:
+      chunkAsked.length > 0 &&
+      abortRefusals.length === 0 &&
+      chunkBytes === 0 &&
+      lost.filled.includes('table-lost') &&
+      /flat now/.test(lostRow?.text ?? '') &&
+      /Reload this page/.test(lostRow?.text ?? '') &&
+      /switch the table on/.test(lostRow?.text ?? '') &&
+      lost.stops === 0,
+    detail:
+      `the screen asked for the 3D chunk ${chunkAsked.length} times and every request was ` +
+      `refused at the network layer, with the worker and every cache removed first, so no store ` +
+      `could answer it. The chunk's own resource timing reads ${chunkBytes} encoded bytes. The ` +
+      `banner reads ${JSON.stringify(lostRow?.text ?? '')}, which must name the route back, and ` +
+      `the banner holds ${lost.stops} tab stops, so the route is a control that already exists ` +
+      `and never a new one. Capture: ${lostShot}.`,
+  });
+  judged.add('table-lost');
+
+  // Take the route. The chunk is served again from here on, so every failure
+  // below belongs to the page and never to the network.
+  //
+  // **The order in the words is measured, not chosen.** A dynamic import that
+  // failed once is remembered by the module map, so the same document can never
+  // fetch that chunk again: the toggle alone asks for the table, the import
+  // fails without a request, and the screen falls back exactly as it should.
+  // The reload is therefore part of the route and not a convenience, and this
+  // run measures both halves rather than quoting a measurement from one day.
+  blocking = false;
+  const withoutReload = await (async () => {
+    const opened = await pressWithKeyboard(page, 'disclosure-toggle');
+    await page.waitForSelector('[data-el="sheet-tray-renderer"]', { timeout: 15000 });
+    const toggled = await pressWithKeyboard(page, 'sheet-tray-renderer');
+    await page.evaluate(() => document.querySelector('[data-el="sheet-close"]')?.click());
+    await settleScreen(page);
+    await new Promise((done) => setTimeout(done, 1500));
+    const seen = await page.evaluate(() => {
+      const entries = performance
+        .getEntriesByType('resource')
+        .filter((entry) => /\/dice-tray-[^/]+\.js$/.test(entry.name));
+      return {
+        renderer: document.querySelector('.screen')?.dataset.renderer ?? null,
+        entries: entries.length,
+        bytes: entries.reduce((total, entry) => total + (entry.encodedBodySize || 0), 0),
+      };
+    });
+    return { opened, toggled, seen };
+  })();
+  console.log(
+    `browser: faults the toggle alone renderer=${withoutReload.seen.renderer} ` +
+      `chunk_entries=${withoutReload.seen.entries} chunk_bytes=${withoutReload.seen.bytes} ` +
+      `asked_while_blocked=${chunkAsked.length}`,
+  );
+
+  await page.reload({ waitUntil: 'load' });
+  await waitForRollScreen(page);
+  const canDraw = await page.evaluate(
+    () => document.querySelector('.screen')?.dataset.trayDecision ?? null,
+  );
+  const asked = await pressWithKeyboard(page, 'disclosure-toggle');
+  await page.waitForSelector('[data-el="sheet-tray-renderer"]', { timeout: 15000 });
+  const pressed = await pressWithKeyboard(page, 'sheet-tray-renderer');
+  await page.evaluate(() => document.querySelector('[data-el="sheet-close"]')?.click());
+  await page
+    .waitForFunction(() => document.querySelector('.screen')?.dataset.renderer === 'tray', {
+      timeout: 30000,
+    })
+    .catch(() => undefined);
+  // A reload opens the builder again, and the table is hidden at rest A. `Done`
+  // is what shows it, so the mount can only be refused by the choice and never
+  // by a table the screen never drew.
+  await page.click('[data-el="collapse-button"]').catch(() => undefined);
+  await page
+    .waitForFunction(() => document.querySelectorAll('canvas').length > 0, { timeout: 30000 })
+    .catch(() => undefined);
+  await settleScreen(page);
+  await new Promise((done) => setTimeout(done, 1500));
+  const after = await page.evaluate(() => ({
+    renderer: document.querySelector('.screen')?.dataset.renderer ?? null,
+    canvases: document.querySelectorAll('canvas').length,
+    row: (document.querySelector('[data-el="flat-fallback-note"]')?.textContent ?? '').trim(),
+  }));
+  console.log(
+    `browser: faults route back name=${JSON.stringify(pressed.name)} ` +
+      `control=${pressed.control} checked_after=${pressed.checked} decision=${canDraw} ` +
+      `renderer=${after.renderer} canvases=${after.canvases} row=${JSON.stringify(after.row)}`,
+  );
+  checks.push({
+    name: 'faults.the-route-back-from-a-refused-chunk-works-when-it-is-taken',
+    // A machine the startup probe put below the bar cannot take this route at
+    // all, and the toggle back is dead there by design. Such a run says so
+    // rather than reporting a pass it never earned.
+    skipped: canDraw !== 'true',
+    ok:
+      asked.found &&
+      pressed.found &&
+      pressed.name.length > 0 &&
+      pressed.checked === true &&
+      after.renderer === 'tray' &&
+      after.canvases === 1 &&
+      after.row === '' &&
+      withoutReload.seen.renderer === 'flat' &&
+      withoutReload.seen.entries === 1 &&
+      withoutReload.seen.bytes === 0,
+    detail:
+      (canDraw === 'true'
+        ? ''
+        : `NOT JUDGED. The startup probe answered tray=${canDraw} on this machine, so the ` +
+          `toggle back is refused by design and the route cannot be taken here. `) +
+      `The words name two steps in one order, and the order is measured here. The chunk is ` +
+      `served again for both halves, so nothing below is the network. FIRST, the toggle alone: ` +
+      `the screen still draws ${withoutReload.seen.renderer} dice and the chunk's resource list ` +
+      `still holds ${withoutReload.seen.entries} entry of ${withoutReload.seen.bytes} bytes, so ` +
+      `NO second request was made at all. A dynamic import that failed once is remembered by the ` +
+      `module map, so a toggle inside the same document can never bring the table back, and the ` +
+      `screen falls again exactly as it should. THEN the whole route: reload, open More with the ` +
+      `keyboard (${JSON.stringify(asked.name)}), and press ` +
+      `${JSON.stringify(pressed.name)}, a ${pressed.control} carrying that accessible name, with ` +
+      `the space bar. The state is read AFTER the recovery: the control reads ` +
+      `checked=${pressed.checked}, the screen draws ${after.renderer} dice over ` +
+      `${after.canvases} canvases, and the row now reads ${JSON.stringify(after.row)}.`,
+  });
+
+  page.off('request', intercept);
+  await page.setRequestInterception(false);
+  await page.setCacheEnabled(true);
+
+  // ---- 4. A log that stopped, and the reload the words ask for. ----
+  //
+  // Nothing is patched. Another connection asks the browser to delete the
+  // database, the application's own connection closes on `versionchange`, and
+  // the next write meets a connection that is gone.
+  await page.goto(options.url, { waitUntil: 'load' });
+  await waitForRollScreen(page);
+  await pressTile(page, 'attribute', 'p', 3);
+  await throwOnce(page);
+  const beforeStop = await logHolds(page, 1);
+  const deleted = await page.evaluate(
+    (db) =>
+      new Promise((resolve) => {
+        const request = indexedDB.deleteDatabase(db);
+        request.onsuccess = () => resolve('deleted');
+        request.onerror = () => resolve(`error: ${request.error}`);
+        request.onblocked = () => resolve('blocked');
+        setTimeout(() => resolve('no answer'), 8000);
+      }),
+    LOG_DB,
+  );
+  await throwOnce(page);
+  const stoppedSaid = await waitForFault(page, FAULT_SLOT_ELEMENT.log);
+  const stopped = note('log-error', await readFaultBanner(page));
+  const stoppedShot = await captureFaultScreen(page, '0024-fault-log-stopped-360.png');
+  console.log(
+    `browser: faults log stopped before=${beforeStop.rolls.length} delete=${deleted} ` +
+      `filled=[${stopped.filled.join(' ')}] row=${JSON.stringify(stoppedSaid)}`,
+  );
+  checks.push({
+    name: 'faults.a-log-that-stopped-says-so-and-says-what-is-lost',
+    ok:
+      beforeStop.rolls.length > 0 &&
+      deleted === 'deleted' &&
+      stopped.filled.includes('log-error') &&
+      /not in it/.test(stoppedSaid) &&
+      /Reload/.test(stoppedSaid) &&
+      stopped.stops === 0,
+    detail:
+      `${beforeStop.rolls.length} roll reached the log, then another connection asked the ` +
+      `browser to delete the database and the browser answered ${deleted}. The application's own ` +
+      `connection closes on versionchange, which is its own code and not an injection, so the ` +
+      `next throw met a connection that was gone. The banner reads ${JSON.stringify(stoppedSaid)}. ` +
+      `Capture: ${stoppedShot}.`,
+  });
+  judged.add('log-error');
+
+  await page.reload({ waitUntil: 'load' });
+  await waitForRollScreen(page);
+  await pressTile(page, 'attribute', 'p', 3);
+  await throwOnce(page);
+  const recovered = await logHolds(page, 1);
+  const afterReload = await readFaultBanner(page);
+  console.log(
+    `browser: faults log recovered rolls=${recovered.rolls.length} ` +
+      `filled=[${afterReload.filled.join(' ')}]`,
+  );
+  checks.push({
+    name: 'faults.the-reload-a-stopped-log-asks-for-works-when-it-is-taken',
+    ok:
+      recovered.error === null &&
+      recovered.rolls.length > 0 &&
+      !afterReload.filled.includes('log-error'),
+    detail:
+      `the words say to reload the page to write rolls again, so the run reloaded and threw. The ` +
+      `state is read AFTER the recovery, out of IndexedDB through this file's own connection: ` +
+      `the log holds ${recovered.rolls.length} rolls and the banner reads ` +
+      `[${afterReload.filled.join(' ') || 'nothing'}].`,
+  });
+
+  // ---- 5. A malformed file, carrying hostile text. ----
+  //
+  // Constraint 8, and the case it was written for. The refusal must quote NO
+  // part of the file: a column name is an identifier, and in a file the player
+  // did not write it is whatever the file says it is.
+  const HOSTILE = '<img src=x onerror=alert(1)>';
+  await openHistory(page);
+  const fed = await page.evaluate((hostile) => {
+    const input = document.querySelector('[data-el="import-file"]');
+    if (input === null) return { failed: 'the summary holds no import-file' };
+    const file = new File([`${hostile},age\r\nada,36\r\n`], 'not-a-log.csv', { type: 'text/csv' });
+    const carrier = new DataTransfer();
+    carrier.items.add(file);
+    input.files = carrier.files;
+    const real = input.files.length === 1 && input.files[0].size > 0;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return { failed: null, real, size: file.size };
+  }, HOSTILE);
+  const refusedSaid = await waitForFault(page, FAULT_SLOT_ELEMENT.import);
+  const refused = note('import-refused', await readFaultBanner(page));
+  const refusedShot = await captureFaultScreen(page, '0024-fault-import-refused-360.png');
+  const importRow = refused.rows.find((row) => row.el === FAULT_SLOT_ELEMENT.import);
+  const scanned = await page.evaluate((hostile) => {
+    const inside = document.querySelector('[data-el="history"]');
+    return {
+      text: (inside?.textContent ?? '').includes(hostile),
+      images: document.querySelectorAll('[data-el="history"] img').length,
+      html: (inside?.innerHTML ?? '').includes('onerror'),
+      message: (document.querySelector('[data-el="history-message"]')?.textContent ?? '').trim(),
+      control: (document.querySelector('[data-el="import-button"]')?.textContent ?? '').trim(),
+    };
+  }, HOSTILE);
+  console.log(
+    `browser: faults import refused real_file=${fed.real} bytes=${fed.size} ` +
+      `row=${JSON.stringify(refusedSaid)} hostile_in_text=${scanned.text} ` +
+      `images=${scanned.images} elements=${importRow?.elements ?? -1}`,
+  );
+  checks.push({
+    name: 'faults.a-malformed-file-is-refused-in-the-player-s-own-words',
+    ok:
+      fed.failed === null &&
+      fed.real === true &&
+      refused.filled.includes('import-refused') &&
+      /first line of this file/.test(refusedSaid) &&
+      /Pick another file/.test(refusedSaid) &&
+      !refusedSaid.includes(HOSTILE) &&
+      !/age/.test(refusedSaid) &&
+      scanned.text === false &&
+      scanned.images === 0 &&
+      scanned.html === false &&
+      refused.stops === 0,
+    detail:
+      `a real File of ${fed.size} bytes went through the real picker, carrying ${HOSTILE} as its ` +
+      `first column name. The banner reads ${JSON.stringify(refusedSaid)}. It must quote no part ` +
+      `of the file: the parser's own message names that column, and the screen never prints it. ` +
+      `The whole destination holds the hostile string ${scanned.text} times as text and ` +
+      `${scanned.images} images, and its markup names onerror: ${scanned.html}. The row draws ` +
+      `${importRow?.elements ?? -1} elements, which is the instruction span and nothing else. ` +
+      `Capture: ${refusedShot}.`,
+  });
+  judged.add('import-refused');
+
+  // Take the route: pick another file, and this one is a log.
+  // The file is built in node, by the application's own writer, over the roll
+  // the application itself logged a moment ago. The preview server serves the
+  // built output and no source module, so the page cannot build it; and a roll
+  // the application wrote is a file this application must be able to read back,
+  // which a hand-made fixture would not prove.
+  const csv = await import('../src/log/csv.ts');
+  const held = await readLogRolls(page);
+  const goodText = csv.csvParts(held.rolls).join('');
+  const good = await page.evaluate((text) => {
+    const input = document.querySelector('[data-el="import-file"]');
+    const file = new File([text], 'a-real-log.csv', { type: 'text/csv' });
+    const carrier = new DataTransfer();
+    carrier.items.add(file);
+    input.files = carrier.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return { bytes: file.size };
+  }, goodText);
+  // The wait ends on an answer of either kind, so a refused import fails the
+  // check below rather than stopping the run at a timeout.
+  await page
+    .waitForFunction(
+      () => {
+        const said = document.querySelector('[data-el="history-message"]')?.textContent ?? '';
+        const refusedAgain = (
+          document.querySelector('[data-el="import-fault-note"]')?.textContent ?? ''
+        ).trim();
+        const logSaid = (
+          document.querySelector('[data-el="log-fault-note"]')?.textContent ?? ''
+        ).trim();
+        return (
+          (said.length > 0 && !said.startsWith('The import is running')) ||
+          refusedAgain !== '' ||
+          logSaid !== ''
+        );
+      },
+      { timeout: 30000 },
+    )
+    .catch(() => undefined);
+  const afterImport = await readFaultBanner(page);
+  const importedLog = await readLogRolls(page);
+  const saidAfter = await page.evaluate(() =>
+    (document.querySelector('[data-el="history-message"]')?.textContent ?? '').trim(),
+  );
+  console.log(
+    `browser: faults import recovered bytes=${good.bytes} rolls=${importedLog.rolls.length} ` +
+      `filled=[${afterImport.filled.join(' ') || 'nothing'}] message=${JSON.stringify(saidAfter)}`,
+  );
+  checks.push({
+    name: 'faults.picking-another-file-recovers-the-import',
+    ok:
+      importedLog.error === null &&
+      held.rolls.length > 0 &&
+      importedLog.rolls.length === held.rolls.length &&
+      importedLog.rolls[0]?.rollId === held.rolls[0]?.rollId &&
+      !afterImport.filled.includes('import-refused') &&
+      saidAfter.includes('a-real-log.csv'),
+    detail:
+      `the words say to pick another file, so the run picked one this application wrote: the ` +
+      `${held.rolls.length} rolls the store held, written back out through the application's own ` +
+      `writer. The state is read AFTER the recovery, out of IndexedDB through this file's own ` +
+      `connection: the log holds ${importedLog.rolls.length} rolls, the first is ` +
+      `${importedLog.rolls[0]?.rollId} against ${held.rolls[0]?.rollId}, the fault row is clear ` +
+      `([${afterImport.filled.join(' ') || 'nothing'}]) and the destination says ` +
+      `${JSON.stringify(saidAfter)}.`,
+  });
+
+  // ---- 6. Every surface at 360 px, read rather than assumed. ----
+  const widest = banners
+    .flatMap(({ phase, banner }) =>
+      banner.rows
+        .filter((row) => row.text !== '')
+        .map((row) => ({ phase, el: row.el, right: row.right, height: row.height })),
+    )
+    .sort((left, right) => right.right - left.right)[0];
+  const shortest = banners
+    .flatMap(({ banner }) => banner.rows.filter((row) => row.text !== ''))
+    .sort((left, right) => left.height - right.height)[0];
+  const roles = new Set(banners.map(({ banner }) => `${banner.role}/${banner.label}`));
+  console.log(
+    `browser: faults at ${FAULT_VIEWPORT.width} px widest=${widest ? widest.right : 'none'} ` +
+      `shortest=${shortest ? shortest.height : 'none'} roles=[${[...roles].join(' ')}] ` +
+      `phases=${banners.length}`,
+  );
+  checks.push({
+    name: 'faults.every-surface-reaches-a-live-region-and-fits-a-phone',
+    ok:
+      banners.length >= 5 &&
+      widest !== undefined &&
+      widest.right <= FAULT_VIEWPORT.width &&
+      shortest !== undefined &&
+      shortest.height > 20 &&
+      roles.size === 1 &&
+      [...roles][0] === 'alert/Problems' &&
+      banners.every(({ banner }) => banner.stops === 0),
+    detail:
+      `${banners.length} phases drew the banner at ${FAULT_VIEWPORT.width} by ` +
+      `${FAULT_VIEWPORT.height}. The widest filled row ends at ${widest ? widest.right : 'none'} ` +
+      `px against a viewport of ${FAULT_VIEWPORT.width}, so nothing runs off the side, and the ` +
+      `shortest one is ${shortest ? shortest.height : 'none'} px high, so nothing is clipped to ` +
+      `a line. Every phase read the same live region and the same name: ` +
+      `[${[...roles].join(' ')}]. Every phase read ` +
+      `${banners.map(({ banner }) => banner.stops).join(', ')} tab stops on the banner, so both ` +
+      `keyboard walks of section 6 are the walks they were.`,
+  });
+
+  // ---- 7. The denominator. ----
+  skipped.add('log-blocked');
+  checks.push({
+    name: 'faults.a-blocked-log-cannot-be-driven-in-the-shipped-application',
+    skipped: true,
+    ok: true,
+    detail:
+      `NOT JUDGED. A blocked open needs an UPGRADE for another connection to hold off, and the ` +
+      `shipped database is at version 1, so no upgrade exists to block. The store's own blocked ` +
+      `answer is driven against the real mechanism by --log-store, which opens a second ` +
+      `connection at version 1 with no versionchange handler and asks for version 2, and the ` +
+      `surface for it is asserted under jsdom in src/shell/history.test.tsx. This becomes ` +
+      `judgeable the day DB_VERSION rises.`,
+  });
+  if (options.quotaKb === null) {
+    skipped.add('log-full');
+    checks.push({
+      name: 'faults.a-full-store-says-so',
+      skipped: true,
+      ok: true,
+      detail:
+        `NOT JUDGED. A full store needs the browser launched with its own storage limit, which ` +
+        `is a launch preference and not a page one. Run this mode again with --quota-kb to ` +
+        `judge it.`,
+    });
+  }
+
+  const covered = [...judged].sort();
+  const missed = FAULT_KINDS.filter((kind) => !judged.has(kind) && !skipped.has(kind));
+  console.log(
+    `browser: faults covered=${covered.length} skipped=${skipped.size} ` +
+      `of ${FAULT_KINDS.length} declared [${covered.join(' ')}] ` +
+      `skipped=[${[...skipped].join(' ')}]`,
+  );
+  checks.push({
+    name: 'faults.every-declared-fault-is-judged-or-skipped-by-name',
+    ok: missed.length === 0 && covered.length + skipped.size === FAULT_KINDS.length,
+    detail:
+      `the denominator is FAULT_KINDS, imported from src/shell/faults.ts rather than restated ` +
+      `here, and src/shell/faults.test.ts holds that list against the union declarations of ` +
+      `every module that refuses. This run judged ${covered.length} of ${FAULT_KINDS.length} ` +
+      `[${covered.join(' ')}] and skipped ${skipped.size} by name [${[...skipped].join(' ')}]. ` +
+      `Unjudged and unnamed: [${missed.join(' ') || 'none'}]. A fault added to the union later ` +
+      `lands here as a red rather than as a cell nobody read. The slots the surface draws are ` +
+      `[${Object.keys(FAULT_SLOT_OF).length} faults over ${new Set(Object.values(FAULT_SLOT_OF)).size} slots].`,
+  });
+}
+
+/**
+ * The quota path. It runs alone, under `--quota-kb`, because the browser is
+ * launched with a storage limit far below what a page needs and nothing else in
+ * this mode could then run.
+ */
+async function runFaultsQuota(page, options, checks) {
+  const { FAULT_KINDS, FAULT_SLOT_ELEMENT } = await import('../src/shell/faults.ts');
+  await page.setViewport(FAULT_VIEWPORT);
+  await clearLog(page);
+  await page.reload({ waitUntil: 'load' });
+  await waitForRollScreen(page);
+  await pressTile(page, 'attribute', 'p', 3);
+  await throwOnce(page);
+  const before = await logHolds(page, 1);
+
+  // Fill the origin's storage with random bytes in a database of this run's
+  // own, until the browser refuses more. A run of zeros compresses away and
+  // would never reach the limit.
+  const filled = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const request = indexedDB.open('faults-filler', 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('blocks');
+        request.onerror = () => resolve({ failed: String(request.error) });
+        request.onsuccess = async () => {
+          const db = request.result;
+          const block = new Uint8Array(256 * 1024);
+          for (let at = 0; at < block.length; at += 65536) {
+            crypto.getRandomValues(block.subarray(at, at + 65536));
+          }
+          let written = 0;
+          let stopped = null;
+          for (let i = 0; i < 400 && stopped === null; i += 1) {
+            stopped = await new Promise((done) => {
+              const transaction = db.transaction('blocks', 'readwrite');
+              transaction.objectStore('blocks').add(block.slice(), i);
+              transaction.oncomplete = () => {
+                written += 1;
+                done(null);
+              };
+              transaction.onabort = () => done(String(transaction.error));
+            });
+          }
+          db.close();
+          const estimate = await navigator.storage.estimate();
+          resolve({ failed: null, written, stopped, estimate });
+        };
+      }),
+  );
+  await throwOnce(page);
+  const fullSaid = await waitForFault(page, FAULT_SLOT_ELEMENT.log);
+  const banner = await readFaultBanner(page);
+  const fullShot = await captureFaultScreen(page, '0024-fault-storage-full-360.png');
+  const afterFull = await readLogRolls(page);
+  console.log(
+    `browser: faults quota limit=${filled.estimate ? filled.estimate.quota : 'none'} ` +
+      `blocks=${filled.written} stopped=${filled.stopped} rolls_before=${before.rolls.length} ` +
+      `rolls_after=${afterFull.rolls.length} filled=[${banner.filled.join(' ')}] ` +
+      `row=${JSON.stringify(fullSaid)}`,
+  );
+  checks.push({
+    name: 'faults.a-full-store-says-so-and-says-which-roll-was-lost',
+    ok:
+      filled.failed === null &&
+      filled.written > 0 &&
+      /QuotaExceededError/.test(String(filled.stopped)) &&
+      banner.filled.includes('log-full') &&
+      /storage is full/.test(fullSaid) &&
+      /Make room/.test(fullSaid) &&
+      /reload this page/i.test(fullSaid) &&
+      banner.stops === 0,
+    detail:
+      `the browser was launched with a storage limit of ` +
+      `${filled.estimate ? filled.estimate.quota : 'none'} bytes, which is its own testing ` +
+      `switch and not a simulation. ${filled.written} blocks of 256 KB of random bytes went in ` +
+      `and then the browser answered ${filled.stopped}. The next throw met a full origin, and ` +
+      `the banner reads ${JSON.stringify(fullSaid)}. It must name the roll that was lost and ` +
+      `the way to make room, and it must not read as a fault of the application. The log held ` +
+      `${before.rolls.length} rolls before and ${afterFull.rolls.length} after. ` +
+      `Capture: ${fullShot}.`,
+  });
+
+  // Take the route: make room, then throw again.
+  const cleared = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const request = indexedDB.deleteDatabase('faults-filler');
+        request.onsuccess = () => resolve('deleted');
+        request.onerror = () => resolve(`error: ${request.error}`);
+        request.onblocked = () => resolve('blocked');
+        setTimeout(() => resolve('no answer'), 8000);
+      }),
+  );
+  // Room alone, without the reload. This is the half that measures the ORDER in
+  // the words rather than assuming it.
+  await throwOnce(page);
+  const roomOnly = await readFaultBanner(page);
+  const roomOnlyLog = await readLogRolls(page);
+  console.log(
+    `browser: faults room made ${cleared} without a reload rolls=${roomOnlyLog.rolls.length} ` +
+      `filled=[${roomOnly.filled.join(' ') || 'nothing'}]`,
+  );
+
+  await page.reload({ waitUntil: 'load' });
+  await waitForRollScreen(page);
+  await pressTile(page, 'attribute', 'p', 3);
+  await throwOnce(page);
+  const roomy = await logHolds(page, afterFull.rolls.length + 1, 12000);
+  const afterRoom = await readFaultBanner(page);
+  console.log(
+    `browser: faults room and a reload rolls=${roomy.rolls.length} ` +
+      `filled=[${afterRoom.filled.join(' ') || 'nothing'}]`,
+  );
+  checks.push({
+    name: 'faults.making-room-and-reloading-recovers-the-log',
+    ok:
+      cleared === 'deleted' &&
+      roomy.error === null &&
+      roomy.rolls.length > afterFull.rolls.length &&
+      afterRoom.filled.length === 0,
+    detail:
+      `the words name two steps in one order, and the order is measured here. The run deleted ` +
+      `the filler database (${cleared}), which is the room. FIRST, room alone: the log still ` +
+      `held ${roomOnlyLog.rolls.length} rolls and the banner read ` +
+      `[${roomOnly.filled.join(' ') || 'nothing'}], because a transaction that aborts on the ` +
+      `quota leaves the connection unusable and the next write answers a fault of the log ` +
+      `rather than a full one. THEN the whole route: reload, and throw. The state is read AFTER ` +
+      `the recovery, out of IndexedDB through this file's own connection: the log moved from ` +
+      `${afterFull.rolls.length} rolls to ${roomy.rolls.length} and the banner reads ` +
+      `[${afterRoom.filled.join(' ') || 'nothing'}].`,
+  });
+
+  const judged = ['log-full'];
+  const skippedHere = FAULT_KINDS.filter((kind) => !judged.includes(kind));
+  console.log(
+    `browser: faults quota covered=${judged.length} of ${FAULT_KINDS.length} declared ` +
+      `[${judged.join(' ')}] left to the plain run=[${skippedHere.join(' ')}]`,
+  );
+  for (const kind of skippedHere) {
+    checks.push({
+      name: `faults.${kind}-is-not-judged-under-a-storage-limit`,
+      skipped: true,
+      ok: true,
+      detail:
+        `NOT JUDGED. This run launched the browser with a storage limit, so it judges the full ` +
+        `store alone. Run this mode without --quota-kb to judge ${kind}.`,
+    });
+  }
 }
 
 async function run(options) {
@@ -12559,6 +13632,7 @@ async function run(options) {
       options.theme ||
       options.history ||
       options.blockedChunk ||
+      options.faults ||
       options.shareControls ||
       options.soundControls ||
       options.overlay ||
@@ -12660,6 +13734,9 @@ async function run(options) {
       await runHistory(page, options, checks);
     } else if (options.blockedChunk) {
       await runBlockedChunk(page, options, checks, server);
+    } else if (options.faults) {
+      if (options.quotaKb === null) await runFaults(page, options, checks);
+      else await runFaultsQuota(page, options, checks);
     } else if (options.table) {
       await runTable(page, options, checks);
     } else if (!options.url) {

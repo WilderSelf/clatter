@@ -22,11 +22,14 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { render } from 'preact';
+import { useState } from 'preact/hooks';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { csvParts, exportCsvInChunks, MAX_IMPORT_BYTES } from '../log/csv';
 import type { LogEntry } from '../log/entry';
 import { PUSH_PROFILES } from '../rules/push-profile';
+import type { Fault } from './faults';
+import { faultOf, faultsOf } from './faults';
 import {
   costReading,
   History,
@@ -177,25 +180,46 @@ function blanksIn(held: LogEntry): { cells: number; kept: number; absent: number
 
 let root: HTMLElement | null = null;
 let imported: (readonly LogEntry[])[] = [];
-let importAnswer: string | null = null;
+/** True while the store accepts an imported log. False makes it refuse one. */
+let importAccepts = true;
 
-function mount(entries: readonly LogEntry[], failure: string | null = null): HTMLElement {
+/**
+ * The application, in as much as the destination needs of it — Unit 4.10.
+ *
+ * `src/app.tsx` holds the fault list and hands it down, and the destination
+ * raises the import fault back up. A test that passed a hand-made banner would
+ * prove the words and never the wiring, so this stands in for the application
+ * and keeps the same two directions.
+ */
+function Host({ entries, log }: { entries: readonly LogEntry[]; log: Fault | null }) {
+  const [importFault, setImportFault] = useState<Fault | null>(null);
+  const [logFault, setLogFault] = useState<Fault | null>(log);
+  return (
+    <History
+      entries={entries}
+      drawn={faultsOf({
+        table: null,
+        log: logFault,
+        imported: importFault,
+        settingsRefused: false,
+      })}
+      onBack={() => undefined}
+      onFault={setImportFault}
+      onImport={(held) => {
+        imported.push(held);
+        // The application raises the log fault itself when the store refuses an
+        // imported log, exactly as `importLog` in `src/app.tsx` does.
+        if (!importAccepts) setLogFault(faultOf('log-full'));
+        return Promise.resolve(importAccepts);
+      }}
+    />
+  );
+}
+
+function mount(entries: readonly LogEntry[], log: Fault | null = null): HTMLElement {
   root = document.createElement('div');
   document.body.appendChild(root);
-  act(() =>
-    render(
-      <History
-        entries={entries}
-        failure={failure}
-        onBack={() => undefined}
-        onImport={(held) => {
-          imported.push(held);
-          return Promise.resolve(importAnswer);
-        }}
-      />,
-      root as HTMLElement,
-    ),
-  );
+  act(() => render(<Host entries={entries} log={log} />, root as HTMLElement));
   return root;
 }
 
@@ -214,7 +238,7 @@ afterEach(() => {
     root = null;
   }
   imported = [];
-  importAnswer = null;
+  importAccepts = true;
   vi.restoreAllMocks();
 });
 
@@ -378,11 +402,22 @@ describe('the history summary', () => {
     );
   });
 
-  it('says why the log did not open, in a live region', () => {
-    mount([], 'The log did not open.');
-    const failure = element('history-failure');
-    expect(failure.getAttribute('role')).toBe('status');
-    expect(failure.textContent).toBe('The log did not open.');
+  it('says why the log did not open, in the one live region', () => {
+    // Unit 4.10. The destination replaces the roll flow, so a fault raised on
+    // the dice screen has to be readable here or it is never read at all.
+    mount([], faultOf('log-refused'));
+    const banner = element('fault-banner');
+    expect(banner.getAttribute('role'), 'the banner is the live region').toBe('alert');
+    expect(banner.getAttribute('aria-label'), 'and it carries a name').toBe('Problems');
+    const said = element('log-fault-note');
+    expect(said.textContent).toBe(
+      'This browser keeps no roll log. The rolls of this session go when the tab closes. ' +
+        'Open this application outside a private window to keep a log.',
+    );
+    expect(
+      tabStops(banner).length,
+      'the banner holds no tab stop, so neither keyboard walk of section 6 moves',
+    ).toBe(0);
   });
 });
 
@@ -670,10 +705,11 @@ describe('the import control', () => {
     });
     expect(reads, 'a refused file is never read').toBe(0);
     expect(imported.length, 'nothing reached the store').toBe(0);
-    const said = element('history-message').textContent ?? '';
+    const said = element('import-fault-note').textContent ?? '';
     expect(said, 'the refusal names its cause').toContain('too large');
-    expect(said).toContain('32.0 MB (33554433 bytes)');
+    expect(said).toContain('It holds 32.0 MB (33554433 bytes)');
     expect(said).toContain('The limit is 32.0 MB (33554432 bytes)');
+    expect(said, 'and it names what to do next').toContain('Pick another file.');
   });
 
   it('says why a file that is not a log did not import', async () => {
@@ -684,24 +720,43 @@ describe('the import control', () => {
       text: () => Promise.resolve('name,age\r\nada,36\r\n'),
     });
     expect(imported.length).toBe(0);
-    expect(element('history-message').textContent).toContain('not a log this application wrote');
+    expect(element('import-fault-note').textContent).toContain(
+      'The first line of this file is not the one this application writes.',
+    );
   });
 
   it('says why the store refused a log that read cleanly', async () => {
     const text = csvParts([entry(0)]).join('');
-    importAnswer = 'The storage is full. The log was not replaced.';
+    importAccepts = false;
     mount([entry(9)]);
     await pick({
       name: 'campaign.csv',
       size: new TextEncoder().encode(text).length,
       text: () => Promise.resolve(text),
     });
-    expect(imported.length).toBe(1);
-    expect(element('history-message').textContent).toBe(importAnswer);
+    expect(imported.length, 'the file parsed, so the rolls reached the store').toBe(1);
+    // The file was well formed, so the import fault stays clear and the log
+    // fault carries the answer. The two slots are apart on purpose: a player
+    // must tell a bad file from a full disk.
+    expect(element('import-fault-note').textContent, 'the file was not the fault').toBe('');
+    expect(element('log-fault-note').textContent).toBe(
+      'The storage is full. This roll is not in the log. ' +
+        'Make room on this device. Then reload this page.',
+    );
+    expect(element('history-message').textContent, 'and nothing claims a log was written').toBe('');
   });
 
-  it('draws the message as text, whatever the file called its columns', async () => {
-    // Constraint 8. A refusal quotes the file, and a file is user-supplied.
+  it('quotes nothing out of a malformed file, and draws the file name as text', async () => {
+    // Constraint 8 and Unit 4.10, together. A malformed import can carry
+    // hostile text, and this is where that text would be printed back at the
+    // player. Two claims, and they are different claims:
+    //
+    //   1. The refusal quotes NOTHING out of the file. The parser's message
+    //      names a column, and a column name is both an identifier and, in a
+    //      file the player did not write, whatever the file says it is.
+    //   2. The file NAME is still drawn, because a player picked it and needs
+    //      to know which file answered. It is user text and it goes through
+    //      `textContent`, so no parser ever sees it.
     const risky = '<img src=x onerror=1>';
     mount([entry(0)]);
     await pick({
@@ -709,9 +764,25 @@ describe('the import control', () => {
       size: 40,
       text: () => Promise.resolve(`${risky},age\r\n`),
     });
-    const said = element('history-message');
-    expect(said.textContent).toContain(risky);
-    expect(said.querySelectorAll('*').length, 'the markup made no element').toBe(0);
+    const said = element('import-fault-note');
+    expect(said.textContent, 'the refusal quotes no part of the file').not.toContain(risky);
+    expect(said.textContent, 'and it quotes no column name at all').not.toContain('age');
+    expect(said.querySelectorAll('*').length, 'and it draws one span at most').toBeLessThan(2);
+    expect(document.querySelectorAll('[data-el="history"] img').length).toBe(0);
+
+    // The name of a file the player picked is drawn, and it is user text.
+    act(() => render(null, root as HTMLElement));
+    imported = [];
+    const text = csvParts([entry(0)]).join('');
+    mount([entry(0)]);
+    await pick({
+      name: `${risky}.csv`,
+      size: new TextEncoder().encode(text).length,
+      text: () => Promise.resolve(text),
+    });
+    const answered = element('history-message');
+    expect(answered.textContent, 'the name is drawn').toContain(risky);
+    expect(answered.querySelectorAll('*').length, 'the markup made no element').toBe(0);
     expect(document.querySelectorAll('[data-el="history"] img').length).toBe(0);
   });
 });
