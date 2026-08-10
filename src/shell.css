@@ -998,6 +998,88 @@ body {
   color: var(--ink-dim);
 }
 
+/* ---------------- the saved pools, Unit 4.3 ---------------- */
+
+.pre-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+
+/* The name takes a whole line and the four controls sit under it, so a long
+   name never squeezes a control below the hit target floor. The name is the
+   player's own text and may hold no space at all, so it breaks anywhere rather
+   than pushing the row off the side. */
+.pre-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1);
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.pre-row:last-of-type {
+  border-bottom: 0;
+}
+
+.pre-name {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+
+/* A name is up to sixty characters, so the field takes the width it can get
+   and drops to its own line rather than sitting in a box eleven characters
+   wide. */
+.pre-field {
+  flex: 1 1 14rem;
+}
+
+.pre-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+
+.pre-btn {
+  min-height: 44px;
+  min-width: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 var(--s2);
+}
+
+.pre-btn[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The pool the builder holds right now. The row carries the words beside the
+   name as well as the frame around the control, so the mark is never colour
+   alone. Section 7 of the screen design. The words sit outside the button, so
+   the visible label of that button stays inside its accessible name, which is
+   WCAG 2.2 SC 2.5.3. */
+.pre-btn[aria-current='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.pre-here {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
 /* ---------------- wider screens ---------------- */
 
 @media (min-width: 600px) {

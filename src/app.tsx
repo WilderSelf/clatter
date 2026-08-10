@@ -30,9 +30,30 @@ import { PUSH_PROFILES } from './rules/push-profile';
 import type { ArtifactCurveId } from './rules/success';
 import { ARTIFACT_CURVE_IDS } from './rules/success';
 import { localSettingsStore } from './settings/local-store';
-import type { Settings, SettingsStore } from './settings/settings';
-import { readSettings, writeSettings } from './settings/settings';
+import type {
+  PoolPreset,
+  PresetOutcome,
+  PresetRefusal,
+  Settings,
+  SettingsStore,
+} from './settings/settings';
+import {
+  deletePoolPreset,
+  movePoolPreset,
+  readSettings,
+  savePoolPreset,
+  writeSettings,
+} from './settings/settings';
 import { OverridePanel } from './shell/overrides';
+import { PresetPanel } from './shell/presets';
+import {
+  NAME_REFUSALS,
+  PRESET_DELETED_TEXT,
+  PRESET_MOVED_TEXT,
+  PRESET_REFUSAL_TEXT,
+  PRESET_SAVED_TEXT,
+  UNUSABLE_POOL_TEXT,
+} from './shell/presets';
 import type { RendererState } from './shell/renderer';
 import {
   askForTray,
@@ -51,7 +72,9 @@ import {
   costLine,
   dieView,
   difficultyPreview,
+  holdsPool,
   nudge,
+  poolCountsOf,
   poolCells,
   POOL_CAPS,
   presetOf,
@@ -64,10 +87,12 @@ import {
   signedDifficulty,
   stateFromSettings,
   throwDice,
+  tilesFor,
   toggleDie,
   withArtifactCurve,
   withDifficulty,
   withMode,
+  withPool,
   withOverride,
   withoutOverride,
   withPreset,
@@ -663,16 +688,34 @@ function DiceTray({
   );
 }
 
+/** What the last preset operation answered, and which refusal it was. */
+interface PresetNote {
+  readonly text: string;
+  readonly reason: PresetRefusal | null;
+}
+
+const NO_PRESET_NOTE: PresetNote = { text: '', reason: null };
+
 function Sheet({
   state,
   setState,
   renderer,
+  presetNote,
+  onSavePreset,
+  onRecallPreset,
+  onMovePreset,
+  onDeletePreset,
   onAskForTray,
   onClose,
 }: {
   state: AppState;
   setState: (change: Change) => void;
   renderer: RendererState;
+  presetNote: PresetNote;
+  onSavePreset: (name: string) => boolean;
+  onRecallPreset: (preset: PoolPreset) => void;
+  onMovePreset: (preset: PoolPreset, toIndex: number) => void;
+  onDeletePreset: (preset: PoolPreset) => void;
   onAskForTray: (wanted: boolean) => void;
   onClose: () => void;
 }) {
@@ -736,6 +779,24 @@ function Sheet({
           ))}
           <p class="sheet-note">A change of mode clears the pool.</p>
         </fieldset>
+        {/* The saved pools.
+
+            A recall writes over every tile of the built pool, which is the
+            hazard the mode switch sits here for, so the list sits here beside
+            it. Decision 11 of `docs/design/0012-settled-decisions.md` records
+            the choice and prices it: the sheet is a second surface, so section
+            3 still spends five controls at each rest state. */}
+        <PresetPanel
+          mode={state.mode}
+          presets={renderer.settings.poolPresets}
+          note={presetNote.text}
+          invalid={presetNote.reason !== null && NAME_REFUSALS.includes(presetNote.reason)}
+          isCurrent={(preset) => holdsPool(state, preset.counts)}
+          onSave={onSavePreset}
+          onRecall={onRecallPreset}
+          onMove={onMovePreset}
+          onDelete={onDeletePreset}
+        />
         {/* Both artifact curves ship. On a d12 the escalating curve is worth
             more than the flat one, so this is a real setting and not a
             preference. `specs/0001-rules-model.md` holds both thresholds and
@@ -834,12 +895,18 @@ export function App({
   // Where the 3D dice landed, so the cells the keyboard reaches lie over them.
   // The flat renderer reads none of it and the record stays empty there.
   const [spots, setSpots] = useState<TraySpots>(NO_SPOTS);
+  // What the last preset operation answered. It is empty until the player
+  // presses something in the panel.
+  const [presetNote, setPresetNote] = useState<PresetNote>(NO_PRESET_NOTE);
   const dice = throwDice(state);
   const onTheTable = renderer.choice.renderer === 'tray';
   const layout: TrayLayout = onTheTable ? 'over' : 'flat';
   const toggle = useRef<HTMLButtonElement>(null);
   const closeSheet = (): void => {
     setState((previous) => ({ ...previous, sheetOpen: false }));
+    // The note belongs to the visit that produced it. A refusal left standing
+    // would greet the next opening of the sheet with an old complaint.
+    setPresetNote(NO_PRESET_NOTE);
     toggle.current?.focus();
   };
 
@@ -854,6 +921,43 @@ export function App({
     held.current = next;
     if (next.settings !== previous.settings) writeSettings(store, next.settings);
     setRenderer(next);
+  };
+
+  // ---- The saved pools — Unit 4.3 ----
+  //
+  // Every operation reads the record out of the ref rather than out of the
+  // render that drew the row. Two presses inside one frame are one frame apart
+  // for the player and zero renders apart for the shell, so a delete pressed
+  // twice reads a list the first press already changed and the store answers
+  // `noSuchPreset`. Reading the render would have deleted a second preset or
+  // done nothing at all, and neither would have told the player.
+  const runPreset = (operate: (settings: Settings) => PresetOutcome, done: string): boolean => {
+    const outcome = operate(held.current.settings);
+    if (outcome.kind === 'refused') {
+      setPresetNote({ text: PRESET_REFUSAL_TEXT[outcome.reason], reason: outcome.reason });
+      return false;
+    }
+    apply((previous) => ({ ...previous, settings: outcome.settings }));
+    setPresetNote({ text: done, reason: null });
+    return true;
+  };
+
+  /**
+   * Recall a saved pool.
+   *
+   * The sheet closes and the builder opens, because the player has to see the
+   * pool that arrived. The table is left where it lies: a pool decides what the
+   * next throw takes and prices no roll already thrown. Decision 11.
+   */
+  const recallPreset = (preset: PoolPreset): void => {
+    const tiles = tilesFor(preset.counts);
+    if (tiles === null) {
+      setPresetNote({ text: UNUSABLE_POOL_TEXT, reason: null });
+      return;
+    }
+    setState((previous) => withPool(previous, tiles));
+    setPresetNote(NO_PRESET_NOTE);
+    closeSheet();
   };
 
   // The rules the player chose are written to the same record the renderer
@@ -1025,6 +1129,23 @@ export function App({
           state={state}
           setState={setState}
           renderer={renderer}
+          presetNote={presetNote}
+          onSavePreset={(name) =>
+            runPreset(
+              (settings) => savePoolPreset(settings, name, poolCountsOf(state)),
+              PRESET_SAVED_TEXT,
+            )
+          }
+          onRecallPreset={recallPreset}
+          onMovePreset={(preset, toIndex) =>
+            runPreset(
+              (settings) => movePoolPreset(settings, preset.name, toIndex),
+              PRESET_MOVED_TEXT,
+            )
+          }
+          onDeletePreset={(preset) =>
+            runPreset((settings) => deletePoolPreset(settings, preset.name), PRESET_DELETED_TEXT)
+          }
           onAskForTray={(wanted) => apply((previous) => askForTray(previous, wanted))}
           onClose={closeSheet}
         />

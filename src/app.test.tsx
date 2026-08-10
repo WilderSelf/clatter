@@ -29,7 +29,19 @@ import type { TrayDecision } from './tray/capability';
 import type { RollResult } from './rules/roll';
 import { roll, successCount } from './rules/roll';
 import type { Settings, SettingsStore } from './settings/settings';
-import { DEFAULT_SETTINGS, SETTINGS_KEY, readSettings } from './settings/settings';
+import {
+  DEFAULT_SETTINGS,
+  MAX_POOL_PRESETS,
+  MAX_PRESET_NAME_CHARS,
+  SETTINGS_KEY,
+  readSettings,
+} from './settings/settings';
+import {
+  PRESET_MOVED_TEXT,
+  PRESET_REFUSAL_TEXT,
+  PRESET_SAVED_TEXT,
+  UNUSABLE_POOL_TEXT,
+} from './shell/presets';
 import { noticeText, startRenderer } from './shell/renderer';
 import type { AppState, Counts } from './shell/state';
 import {
@@ -41,6 +53,7 @@ import {
   rollNow,
   signedDifficulty,
   throwDice,
+  tilesFor,
   worstCaseState,
 } from './shell/state';
 
@@ -1961,4 +1974,396 @@ describe('the 3D tray under a change of rules', () => {
     },
     TRAY_WAIT_MS + 5000,
   );
+});
+
+// ---------------------------------------------------------------------------
+// The saved pools — Unit 4.3, the list on the screen
+//
+// The storage half proved the four operations and the four refusals over a
+// record. None of that is repeated here. These checks are about the screen: a
+// pool that reaches the builder and then the rules core, a reorder a player can
+// see, a name that is drawn as text and never as markup, a refusal that reaches
+// the player in words, and a list a keyboard can work.
+//
+// Decision 11 of `docs/design/0012-settled-decisions.md` puts the list behind
+// the disclosure, so the last check below reads both rest states and finds
+// nothing of it there. That is the price of the decision, measured.
+// ---------------------------------------------------------------------------
+
+/**
+ * A name holding markup, both kinds of quote, an ampersand and an emoji.
+ *
+ * It is 54 code points, which is inside the cap, because a name over the cap is
+ * refused by the store and would never reach the list to be drawn at all.
+ */
+const RISKY_NAME = `<img src=x onerror=1><b>bold</b> & 'single' "double" 🎲`;
+
+function presetRows(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-el^="preset-row-"]')];
+}
+
+/** The names the list draws, read off the rows in the order they are drawn. */
+function presetNames(): string[] {
+  return presetRows().map((row) => row.dataset.name ?? '');
+}
+
+function presetNote(): string {
+  return (element('preset-note').textContent ?? '').trim();
+}
+
+/** Type into the name field the way a player does. */
+function typeName(text: string): void {
+  const field = element('preset-name') as HTMLInputElement;
+  act(() => {
+    field.value = text;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+function savePreset(name: string): void {
+  typeName(name);
+  click(element('preset-save'));
+}
+
+/** The counts one saved pool holds. The artifact rating of 5 is `d12 + d10`. */
+const SAVED_TILES: Partial<Counts> = {
+  attribute: 4,
+  skill: 2,
+  gear: 1,
+  artifact: 5,
+  bonus: 1,
+  stress: 3,
+};
+
+describe('the saved pool list', () => {
+  it('recalls a saved pool into the builder, and the rules core is the oracle', () => {
+    const store = fakeStore();
+    const id = 'pool-referee-gains-a-point';
+    const built = builtState(SAVED_TILES, id);
+    mount({ store, initial: built, random: seededRandom(31) });
+
+    click(element('disclosure-toggle'));
+    savePreset('Night watch');
+    expect(presetNote(), 'the panel says the pool went in').toBe(PRESET_SAVED_TEXT);
+    expect(presetNames(), 'and the list holds one row under that name').toEqual(['Night watch']);
+    click(element('sheet-close'));
+
+    // The screen is thrown away and built again over the same store, which is
+    // what a reload does, and it opens on a different pool.
+    act(() => render(null, root as HTMLElement));
+    root?.remove();
+    mount({ store, initial: builtState({ attribute: 1 }, id), random: seededRandom(31) });
+
+    click(element('disclosure-toggle'));
+    click(element('preset-recall-0'));
+
+    // The sheet closed and the builder opened, so the player sees the pool.
+    expect(document.querySelector('[data-el="disclosure-sheet"]'), 'the sheet closed').toBeNull();
+    expect(element('pool-builder'), 'and the builder is open').not.toBeNull();
+    expect(cellValue('pool-cell-attribute'), 'the attribute tile').toBe('4');
+    expect(cellValue('pool-cell-artifact'), 'the artifact tile steps its ladder').toBe('d12 + d10');
+
+    // The oracle is the rules core, not the record. The recalled pool is thrown
+    // and every face is compared against `firstRoll` over the pool the preset
+    // stored, under the same seeded source.
+    click(element('roll-button'));
+    const stored = readSettings(store).poolPresets[0];
+    if (stored === undefined) throw new Error('the store holds no preset');
+    const outcome = firstRoll(
+      applyDifficulty(poolBuilder(stored.counts), 0),
+      seededRandom(31),
+      stored.counts.stress ?? 0,
+    );
+    if (outcome.kind !== 'rolled') throw new Error('the core rolled nothing');
+    const wanted = new Map(
+      outcome.dice.map((die) => [dieElement(die), latestValue(die) ?? 0] as const),
+    );
+    expect(wanted.size, 'the core built a pool of the size the preset names').toBe(13);
+    expect(facesOnTable(), 'the table holds the dice the core rolled, face for face').toEqual(
+      wanted,
+    );
+  });
+
+  it('reorders the list, over three presets, because a move of two is not observable', () => {
+    const store = fakeStore();
+    mount({ store, initial: builtState({ attribute: 2 }, 'pool-referee-gains-a-point') });
+    click(element('disclosure-toggle'));
+    for (const name of ['first', 'second', 'third']) savePreset(name);
+    expect(presetNames(), 'three saved pools, in the order they were saved').toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
+
+    // The last row moves up one place. Over three rows that is a move nothing
+    // else could produce: it changes the order of two rows and leaves one.
+    click(element('preset-up-2'));
+    expect(presetNote()).toBe(PRESET_MOVED_TEXT);
+    expect(presetNames(), 'the third row moved up one place').toEqual(['first', 'third', 'second']);
+
+    // And down again, from the middle, which no move of a two-row list can do.
+    click(element('preset-down-1'));
+    expect(presetNames(), 'and the middle row moved back down').toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
+
+    click(element('preset-up-1'));
+    expect(presetNames(), 'the middle row moved up over the first').toEqual([
+      'second',
+      'first',
+      'third',
+    ]);
+    expect(
+      readSettings(store).poolPresets.map((preset) => preset.name),
+      'the store holds the order the list draws',
+    ).toEqual(['second', 'first', 'third']);
+
+    // The ends refuse to leave the list.
+    expect((element('preset-up-0') as HTMLButtonElement).disabled, 'the first row').toBe(true);
+    expect((element('preset-down-2') as HTMLButtonElement).disabled, 'the last row').toBe(true);
+    expect(element('preset-up-0').getAttribute('aria-disabled')).toBe('true');
+    expect(element('preset-down-2').getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('draws a name holding markup as text, and no element comes from it', () => {
+    const store = fakeStore();
+    mount({ store, initial: builtState({ attribute: 2 }, 'pool-referee-gains-a-point') });
+    click(element('disclosure-toggle'));
+    savePreset(RISKY_NAME);
+
+    const stored = readSettings(store).poolPresets[0];
+    if (stored === undefined) throw new Error('the store holds no preset');
+    expect(stored.name, 'storage kept every byte of the name').toBe(RISKY_NAME);
+
+    // The drawn characters are the stored characters, counted in code points so
+    // the emoji counts once.
+    const drawn = element('preset-name-0');
+    expect(drawn.textContent, 'the drawn name is the stored name').toBe(stored.name);
+    expect([...(drawn.textContent ?? '')].length, 'character for character').toBe(
+      [...stored.name].length,
+    );
+
+    // A check that only read the text content would pass while the markup was
+    // parsed, because the text of a parsed `<b>bold</b>` still reads `bold`.
+    // The name therefore holds no element the markup could have made.
+    expect(drawn.children.length, 'the name is one text node and no element').toBe(0);
+    expect(drawn.childNodes.length).toBe(1);
+    expect(drawn.childNodes[0]?.nodeType, 'a text node').toBe(3);
+    expect(
+      document.querySelectorAll('img, script, b, iframe, svg').length,
+      'and the document holds no element the name could have made',
+    ).toBe(0);
+
+    // The accessible names carry the same text, and they are attribute values,
+    // which the framework writes rather than parses.
+    expect(element('preset-recall-0').getAttribute('aria-label')).toBe(`Recall ${RISKY_NAME}`);
+    expect(element('preset-delete-0').getAttribute('aria-label')).toBe(`Delete ${RISKY_NAME}`);
+  });
+
+  it('names the cause of every refusal the store can answer', () => {
+    // The denominator is a second reading of the union, taken off the source of
+    // the store rather than off the record that holds the sentences. A fifth
+    // refusal added to `PresetRefusal` fails this line until it has words and a
+    // route through the screen.
+    const source = readFileSync(resolve(process.cwd(), 'src/settings/settings.ts'), 'utf8');
+    const union = /export type PresetRefusal =\s*([^;]+);/.exec(source)?.[1];
+    if (union === undefined) throw new Error('the store no longer declares PresetRefusal');
+    const named = [...union.matchAll(/'([a-zA-Z]+)'/g)].map(([, name]) => name ?? '');
+    expect(
+      named.length,
+      'the store answers four refusals. A fifth needs words and a route through this check',
+    ).toBe(4);
+    expect(
+      Object.keys(PRESET_REFUSAL_TEXT).sort(),
+      'every refusal the store answers has words on the screen',
+    ).toEqual([...named].sort());
+
+    const store = fakeStore();
+    mount({ store, initial: builtState({ attribute: 2 }, 'pool-referee-gains-a-point') });
+    click(element('disclosure-toggle'));
+    const shown = new Map<string, string>();
+    const field = (): HTMLInputElement => element('preset-name') as HTMLInputElement;
+
+    // 1. An empty name. The save control is never disabled, so the refusal is
+    //    reachable rather than prevented.
+    click(element('preset-save'));
+    shown.set('emptyName', presetNote());
+    expect(field().getAttribute('aria-invalid'), 'the field is marked').toBe('true');
+
+    // 2. A name over the cap, counted in code points. Sixty emoji save and
+    //    sixty-one are refused, so the cap is proved at the screen in the units
+    //    it is counted in.
+    const emoji = '🎲';
+    savePreset(emoji.repeat(MAX_PRESET_NAME_CHARS));
+    expect(presetNote(), 'a name of the cap length saves').toBe(PRESET_SAVED_TEXT);
+    savePreset(emoji.repeat(MAX_PRESET_NAME_CHARS + 1));
+    shown.set('nameTooLong', presetNote());
+    expect(presetNames().length, 'and the over-long name never reached the list').toBe(1);
+
+    // 3. The preset limit, filled one save at a time through the field.
+    for (let each = 1; each < MAX_POOL_PRESETS; each += 1) savePreset(`pool ${each}`);
+    expect(presetNames().length, 'the list stands at its cap').toBe(MAX_POOL_PRESETS);
+    savePreset('one too many');
+    shown.set('atPresetLimit', presetNote());
+    expect(presetNames().length, 'and the list is still at its cap').toBe(MAX_POOL_PRESETS);
+    // A replacement is still let through at the cap, so the cap holds rows and
+    // never the act of saving.
+    savePreset('pool 1');
+    expect(presetNote(), 'a save under a name the list holds replaces that row').toBe(
+      PRESET_SAVED_TEXT,
+    );
+
+    // 4. No such preset. This is a real press and not a stub: the player pressed
+    //    Delete twice before the list could be drawn again, and the second press
+    //    reads a list the first one already changed.
+    const held = presetNames().length;
+    const doomed = element('preset-delete-0') as HTMLButtonElement;
+    act(() => {
+      doomed.click();
+      doomed.click();
+    });
+    shown.set('noSuchPreset', presetNote());
+    expect(presetNames().length, 'the double press deleted exactly one row').toBe(held - 1);
+
+    // Every refusal reached the player, and each one carries its own sentence.
+    expect([...shown.keys()].sort(), 'every refusal of the union was shown').toEqual(
+      [...named].sort(),
+    );
+    for (const [reason, text] of shown) {
+      expect(text, `${reason} reached the player under its own words`).toBe(
+        PRESET_REFUSAL_TEXT[reason as keyof typeof PRESET_REFUSAL_TEXT],
+      );
+    }
+    expect(new Set(shown.values()).size, 'the four sentences are four different sentences').toBe(4);
+  });
+
+  it('refuses a stored pool the six tiles cannot hold, and says why', () => {
+    // A pool of this shape is unwritable through the interface: the artifact
+    // ladder holds no rung of two d8 dice. It reaches the store only by hand,
+    // and the migration keeps it, because the migration validates a pool
+    // against the rules core and not against this screen.
+    const store = fakeStore({
+      ...DEFAULT_SETTINGS,
+      poolPresets: [{ name: 'by hand', counts: { attribute: 2, artifact: [8, 8] } }],
+    });
+    mount({ store, initial: builtState({ attribute: 1 }, 'pool-referee-gains-a-point') });
+    click(element('disclosure-toggle'));
+    click(element('preset-recall-0'));
+
+    expect(
+      document.querySelector('[data-el="disclosure-sheet"]'),
+      'the sheet stayed open, because the recall was refused',
+    ).not.toBeNull();
+    expect(presetNote(), 'and the panel named the cause').toBe(UNUSABLE_POOL_TEXT);
+    // The builder is still collapsed, so the roll button is the readout of the
+    // pool. A recall would have put four dice there and opened the builder.
+    expect(
+      element('roll-button').querySelector('small')?.textContent,
+      'no tile took the stored pool',
+    ).toContain('1 dice');
+    expect(tilesFor({ attribute: 2, artifact: [8, 8] }), 'the tiles cannot hold it').toBeNull();
+  });
+
+  it('gives every control a role, an accessible name and a state', () => {
+    const store = fakeStore();
+    mount({ store, initial: builtState(SAVED_TILES, 'pool-referee-gains-a-point') });
+    click(element('disclosure-toggle'));
+    savePreset('Night watch');
+    // The second pool is a different pool, so the two rows can differ in the
+    // one state that follows the builder.
+    click(element('sheet-close'));
+    click(element('edit-pool-button'));
+    click(element('pool-cell-gear').querySelector('.cell-p') as Element);
+    click(element('disclosure-toggle'));
+    savePreset('Daylight');
+
+    const panel = element('sheet-presets');
+    const controls = [...panel.querySelectorAll<HTMLElement>('button, input')];
+    expect(controls.length, 'one field, one save and four controls a row').toBe(2 + 4 * 2);
+    const names: string[] = [];
+    for (const control of controls) {
+      // The accessible name, computed the way a reader computes it: the label
+      // attribute first, then the label around the control, then the words
+      // inside it.
+      const name = (
+        control.getAttribute('aria-label') ??
+        control.closest('label')?.textContent ??
+        control.textContent ??
+        ''
+      ).trim();
+      const state =
+        control.getAttribute('aria-disabled') ??
+        control.getAttribute('aria-invalid') ??
+        control.getAttribute('aria-current');
+      const row = control.closest<HTMLElement>('[data-el^="preset-row-"]');
+      expect(control.tagName.toLowerCase(), 'the role is the element').toMatch(/^(button|input)$/);
+      expect(name.length, `${control.dataset.el ?? ''} carries no accessible name`).toBeGreaterThan(
+        0,
+      );
+      expect(state, `${control.dataset.el ?? ''} reports no state`).not.toBeNull();
+      // A control inside a row names the row it acts on. Four controls a row
+      // all reading "Delete" would leave a reader hearing one word per row and
+      // no way to tell the rows apart.
+      if (row !== null) {
+        expect(name, `${control.dataset.el ?? ''} does not name the pool it acts on`).toContain(
+          row.dataset.name ?? '',
+        );
+      }
+      names.push(name);
+    }
+    expect(new Set(names).size, 'every control in the panel is named apart').toBe(names.length);
+
+    // The state on the recall control is the row the builder holds. The second
+    // pool was saved from the tiles as they now stand, so its row is current
+    // and the first row is not.
+    expect(element('preset-recall-1').getAttribute('aria-current'), 'the row in the builder').toBe(
+      'true',
+    );
+    expect(element('preset-recall-0').getAttribute('aria-current'), 'the other row').toBe('false');
+    expect(
+      [...panel.querySelectorAll('.pre-here')].length,
+      'and the mark is words as well as a frame',
+    ).toBe(1);
+
+    // A tile changes again, so no row holds the pool any more. The builder is
+    // already open, because the recall of the second pool opened it.
+    click(element('sheet-close'));
+    click(element('pool-cell-bonus').querySelector('.cell-p') as Element);
+    click(element('disclosure-toggle'));
+    expect(
+      [...element('sheet-presets').querySelectorAll('[aria-current="true"]')].length,
+      'no row is current now',
+    ).toBe(0);
+  });
+
+  it('draws no part of itself at either rest state, which is what Decision 11 costs', () => {
+    // Decision 11 puts the list behind the disclosure and claims the control
+    // budget of section 3 is untouched. The inventory check above counts the
+    // eight named controls. This one counts what a tenth control would have
+    // added to the screen at rest, and finds nothing.
+    expect(
+      DESIGN.includes('| `sheet-presets` |'),
+      'section 4 lists the panel behind the one disclosure',
+    ).toBe(true);
+    const partsOnScreen = (): string[] =>
+      [...document.querySelectorAll<HTMLElement>('[data-el]')]
+        .map((each) => each.dataset.el ?? '')
+        .filter((name) => name.startsWith('preset-') || name === 'sheet-presets');
+
+    const thrown = rollNow(
+      builtState({ attribute: 3, skill: 2 }, 'pool-referee-gains-a-point'),
+      seededRandom(8),
+    );
+    mount({ store: fakeStore() });
+    expect(partsOnScreen(), 'rest A holds no part of the panel').toEqual([]);
+    act(() => render(null, root as HTMLElement));
+    mount({ store: fakeStore(), initial: thrown });
+    expect(partsOnScreen(), 'rest B holds no part of the panel').toEqual([]);
+
+    // And it is one press away, which is the whole of what the disclosure costs.
+    click(element('disclosure-toggle'));
+    expect(element('sheet-presets'), 'the panel is behind the one disclosure').not.toBeNull();
+  });
 });

@@ -60,6 +60,7 @@ Status table for each unit. Every unit appends one row after it lands.
 | 2.3 | Roll again, and deploy the slice | Done | #8 | One tap on the roll button re-throws the built pool. The behaviour was already in place. This unit adds five checks that prove it and records what the difficulty readout is once the builder collapses. `src/app.test.tsx` gained five checks and `src/app.tsx` gained one comment block; no behaviour changed. **The five checks:** the re-throw calls the core and the core is the oracle; the re-throw is a new roll and not a continuation, generations back to one over every die; the stress counter carries in over a case where a push raised it; the difficulty on `roll-button` after a throw is the one the throw took; and the control inventory of section 3 holds at both rest states, 16 cells read out of the design. Each check was proved red by an injection that landed and named its gate. **The difficulty is settled.** Section 3 of `docs/design/0002-screen-design.md` keeps the difficulty control and its preview sentence in rest A alone because the builder collapses on a roll. Section 8 states that no control of rest B can change the difficulty, so what the last throw took and what the next throw will take are one number. The design treats the whole after-throw difficulty readout as the signed value on `roll-button`. **Validation:** `npm run lint` 0, `npm run typecheck` 0, `npm test` 0 over 230 vitest tests and 20 node --test tests, `npm run build` 0. Branding gate `files_scanned=116` `hits=0`. **Deploy:** PR #8 merged `2a4d751`, CI SUCCESS. Six URLs answered 200: the page at 544 bytes, the entry script `assets/index-CITyIdqU.js` at 39,652 bytes, the stylesheet at 9,895 bytes, the web manifest at 425 bytes, the service worker registration at 150 bytes, and the lazy 3D chunk at 596,587 bytes. The hashes match the build, so the live page is this commit. **Bundle:** Initial JavaScript 14,356 gzip bytes and lazy 3D chunk 151,876 gzip bytes, both unchanged because the only source addition is a comment. See the notes under this table. |
 | 3.7 | Capability probe, fallback, context loss — the interface half | Done. The 3D tray still draws no result. | #10 | `src/shell/renderer.ts` is the choice and it is pure: it reads the probe answer and the stored record and answers which renderer draws the dice. `src/app.tsx` runs the probe once at startup, draws flat dice until it answers, and mounts the table only where the probe clears the bar, so a browser below the bar fetches no part of the 3D chunk. Three events fall to flat dice for good and every one records the flag and tells the player once: a probe below the bar, a table that does not mount, and a lost WebGL context. The notice carries `role="status"` and holds no tab stop, so both keyboard walks of section 6 stay at 11 visits and 35. The way back is `sheet-tray-renderer`, a ninth control on the sheet, which carries no share of the control budget of section 3. Decision 8 of `docs/design/0012-settled-decisions.md` records it. **The defect Unit 2.3 reported is fixed:** the die cell is keyed by a throw ordinal in `AppState`, and the old key held the count of the values a die carries, which reads the same before and after a re-throw. **The acceptance:** `node scripts/browser.mjs --blocked-chunk` removes the service worker and Cache Storage, refuses the chunk at the network layer, counts every refused abort, and then walks every rule and every affordance on the flat dice. On the graphics card outside the sandbox it exits 0 at `checks=11 failures=0 skipped=0`, with the probe reading `true`, one chunk request refused, 0 refused aborts, 0 encoded bytes, 0 canvases and the stored flag true. Eight injections were proved red and every one was restored by editing the injection back. Initial JavaScript moves from 14,356 to 16,355 gzip bytes and the lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=118`, `hits=0`, exit 0. **Open:** the 3D tray draws no result yet, for three measured reasons. See the notes under this table. |
 | 3.5 | Locked-dice affordance — the screen half. **Closes Unit 3.5, and puts the 3D tray to work in the application.** | Done | #11 | The 3D tray now draws the result inside the application. Three blockers Unit 3.7 named are closed. **1. The push defect.** `pushPool` in `src/tray/throw.ts` spawns the die a profile adds before the re-throw, through `box.add`, on the value the core decided, and it never throws that die twice. The library appends, so the added die takes the index after every die on the tray and the returned order says so. Two answers to "which die is new" — the set the tray does not hold, and `PushedRoll.stressAdded` — must agree, so a stale order fails by name. **2. The screen half.** Decision 9 of `docs/design/0012-settled-decisions.md`: the die cells are real DOM in both renderers, and over the 3D table they lie on the die each one names, draw no die of their own, and take no pointer. `dice-tray` is still ONE control with a roving tab index, and section 6 still reads 11 visits before the throw and 35 after it in BOTH instruments, with the 3D table running. **3. The click route.** A press with the pointer falls through to the raycast of Unit 3.5, which refuses a rule lock. **A defect the render found and no green suite could:** the library draws one last frame when a throw ends and none at all for a click, so a lock mark added after that frame kept the matrix of the frame before and the player saw the marks of the previous throw standing where the previous dice stood, up to 682 world units away. `drawMarkers` now draws the frame that shows them. `node scripts/browser.mjs --table` is the new mode and it exits 0 at `checks=9 failures=0 skipped=0` on the graphics card: `compared=30 of a pool of 30` up-faces read off the body quaternions against the faces the screen printed, `placed=30 of 30` cells inside 1 px of a centroid the harness projects itself, 23 dice answered a real Enter and 7 refused it, `reached=30 unreachable=0` under a real pointer click, and the push took the table from 30 dice to 31 with `die-st11` spawned and every kept die inside 1 px of where it lay. Nine injections were proved red and every file was restored by editing the injection back. Initial JavaScript 16,355 to 18,944 gzip bytes; the lazy 3D chunk unchanged at 151,876; the three render counters unchanged at 841, 842 and 77. See the notes under this table. |
+| 4.3 | Saved pool presets — the list on the screen. **Unit 4.3 is now complete.** | Done | #13 | `sheet-presets` names a pool, recalls one, reorders the list and deletes a row, behind the one disclosure. **Decision 11 of `docs/design/0012-settled-decisions.md` settles where it lives**, and three reasons put it there: a recall writes over every tile of the built pool, which is the hazard `sheet-mode` already sits behind; a control in the builder would rewrite the drawn screen the owner approved at Unit 2.0 and both keyboard walks of section 6; and saving is rare where building is constant. **Section 3 is untouched at five controls at each rest state against a ceiling of eight**, and that is measured rather than claimed: the inventory check still counts the eight named controls, and a second check reads both rest states and finds no part of the panel there. Section 6 still reads eleven visits before the throw and thirty-five after it, in both instruments. **The rules core is the oracle for the recall.** The recalled pool is thrown and every face is compared against `firstRoll` over the pool the store holds, 13 dice compared face for face, and no record is compared to a record. **The reorder is asserted over three presets in both instruments**, because a move of one of two is not observable, and the browser half moves a row with a real Enter press. **The name is user text and no parser ever sees it.** A name of 54 code points holding markup, both kinds of quote, an ampersand and an emoji draws as 54 code points of text, in a name element holding one node and no element, in a panel holding no element the markup could have made. Constraint 8. **Each of the four refusals reaches the player as a sentence that names its cause**, against a denominator read off the `PresetRefusal` union in the source of the store, so a fifth refusal fails the check until it has words and a route. Nothing is disabled to prevent a refusal, so both caps are reachable by hand: 60 emoji save and 61 are refused, and the twenty-first preset is refused while a replacement is still let through. The fourth refusal has a real route — a player who presses Delete twice before the list is drawn again — and the operations read the record out of a ref rather than out of the render that drew the row. **A stored pool the six tiles cannot hold is refused and says why**, rather than clamped: a count over a tile cap or an artifact list off the ladder is unwritable through the interface and reaches the store only by hand. **Step mode draws one sentence and no control**, because a saved pool holds counts. Every control carries a role, an accessible name that holds the name of the pool it acts on, and a state, and the list is walked with real Tab presses against a list derived from the panel itself. Vitest moves from 272 to 279 tests over 28 files. `node scripts/browser.mjs --sheet` moves from 7 checks to 11 and exits 0 at `checks=11 failures=0 skipped=0`. Initial JavaScript moves from 21,152 to 22,532 gzip bytes; the lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=124`, `hits=0`, exit 0. Thirteen injections were proved red and every one was restored by editing the injection back. See the notes under this table. |
 
 ## Unit 0.5 — CI, public repository, protection
 
@@ -4452,3 +4453,146 @@ asserted under jsdom, where the core itself answers.
 - Unit 4.1 is complete. The stress reset, the mode switch and the renderer toggle already sat on the
   same sheet, and the theme picker of Unit 4.8 and the history of Units 4.4 to 4.7 are still owed
   there by their own units.
+
+## Unit 4.3 — the saved pools on the screen
+
+The storage half was already built and proved. This is the list on the screen, and **Unit 4.3 is now
+complete.** No second store was built, no fifth operation was added, and the four operations and the
+four refusals are the ones the store already answered.
+
+### The decision the unit had to settle first
+
+Section 4 of `docs/design/0002-screen-design.md` listed no pool preset list, and section 3 spends
+five of its eight controls at each rest state, so a tenth control in the builder was affordable by
+the budget alone. **The budget was not the deciding reason.** Decision 11 of
+`docs/design/0012-settled-decisions.md` records the three that were.
+
+1. **A recall writes over every tile of the built pool.** That is the hazard `sheet-mode` sits
+   behind the disclosure for, and the paragraph under the section 4 table already states the rule: a
+   control that destroys the built pool must not sit one tap from the throw.
+2. **The drawn screen is the owner's.** `docs/design/0013-screen-final.html` is what the owner
+   approved at Unit 2.0, and `src/shell/drawn-screen.test.ts` holds every later unit against it. A
+   control in the builder would change the drawn builder pane, the rest A walk of section 6, and the
+   counts both instruments read out of that section.
+3. **Saving is rare and building is constant.** The builder is the tightest part of the screen at
+   360 px, where it already holds two columns and scrolls.
+
+**What the decision costs, measured rather than claimed.** Section 3 is untouched: five controls at
+rest A and five at rest B against a ceiling of eight. The inventory check still reads the eight rows
+out of the document and answers them control by control at both rest states. A second check reads
+both rest states for any element of the panel and finds none, so the claim is a measurement and not
+a sentence. Section 6 still reads eleven visits before the throw and thirty-five after it, in jsdom
+and in Firefox, with both lists read out of the design document.
+
+### The recall, and why the table stays
+
+A recall opens the builder and closes the sheet, because the player has to see the pool that
+arrived, and the status line is a live region that names the new throw.
+
+**A recall does not clear the table.** Decision 10 clears the table on a change of rules, because a
+roll was committed to at a price the rules set. A pool is not a rule: it decides what the next throw
+takes and prices no roll already thrown. This is the rule the pool tiles already obey, where a press
+on a tile over an open builder leaves the dice where they lie.
+
+### A stored pool the six tiles cannot hold
+
+Two stored pools cannot be drawn: a count above the cap of its tile, and an artifact list that is
+not a rung of `ARTIFACT_LADDER`. Neither is writable through the interface, because every tile stops
+at its own cap and the artifact tile steps the ladder. Both are writable by hand into the browser's
+storage, and the migration keeps them, because it validates a pool against the rules core rather
+than against this screen.
+
+**Such a pool is refused and the panel says why.** Clamping a count or picking the nearest rung
+would put a pool in the builder that the player never saved and could not see the difference from.
+No fifth refusal was added to the store for it: the refusal is a message of the screen, and
+`tilesFor` in `src/shell/state.ts` is the one place that answers whether the tiles can hold a pool.
+
+### Step mode draws no control
+
+A saved pool holds counts. Step mode holds two rated die sizes plus the extras, and the storage half
+saves no step pool. A panel that saved the counts in step mode would save a pool the screen was not
+showing, because the attribute and skill tiles carry sizes there and the counts behind them stand
+where pool mode left them. The panel draws one sentence and no control.
+
+### The traps this unit had to walk past
+
+**A cap proved in storage is not a cap proved on the screen.** Nothing in the panel is disabled to
+prevent a refusal. A disabled control names nothing, and it would put both caps out of reach of the
+interface, which is where they now have to be proved. So the save control presses at the preset
+limit and the name field takes a name over the cap, and both refusals are reached by hand: 60 emoji
+save and 61 are refused, and the twenty-first preset is refused while a replacement under a name the
+list already holds is still let through. The emoji case runs through the interface in both
+instruments, because the cap counts code points.
+
+**A check that reads the text alone passes while the markup is parsed.** The text of a parsed
+`<b>bold</b>` still reads `bold`, so the name checks assert the drawn characters against the stored
+characters AND that the name element holds one node and no element, and that the panel holds no
+element the markup could have made. Both halves were proved red on their own: the parsed name failed
+the character comparison, and an element added beside an unparsed name failed the element count.
+
+**The fourth refusal needed a real route.** `noSuchPreset` cannot be reached by pressing a row that
+is drawn, so the interface would have had no route to it at all. The route is the one a player takes
+by accident: two presses on Delete before the list can be drawn again. Every operation therefore
+reads the stored record out of the ref beside the renderer state rather than out of the render that
+drew the row, so the second press reads the list the first press changed. Reading the render would
+have deleted a second preset or done nothing, and neither would have told the player anything.
+
+**A batched framework is not a player.** The browser harness first drove the field and the save
+control inside one task, and every save used the name the field held before it. A player cannot type
+and press inside one task. The harness now settles the screen between the two, and the comment says
+why, because a script that drives one task drives a screen no player meets.
+
+### What the injections found, and it was not always the code
+
+Thirteen injections were proved red and every one was restored by editing the injection back. Two of
+them found a check that could not fail, and the check was strengthened rather than the injection
+softened.
+
+- **A missing accessible name passed.** Removing `aria-label` from a delete control left the visible
+  word `Delete`, which is a name, so the check passed while four rows all read `Delete` and a reader
+  could not tell them apart. The check now asserts that a control inside a row holds the name of the
+  pool it acts on, and that no two controls in the panel share a name.
+- **A disabled save control passed.** Disabling the save at the preset limit left the note of the
+  press before it standing, so four different sentences read as four refusals when one of them was a
+  success. The browser check now reads what a save that went through prints and refuses to count any
+  refusal that matches it.
+
+A third injection landed on a guard that already covered it: an artifact rating of `-1` was caught by
+the bound check below it rather than by the rung lookup, so the injection was replaced with the
+defect the code comment warns about, which is clamping the rating to the nearest rung.
+
+### The instruments
+
+| The claim | The instrument |
+|---|---|
+| A recalled pool reaches the rules core | `src/app.test.tsx`, comparing every face against `firstRoll` over the stored pool |
+| A recalled pool reaches the builder and crosses a reload | `node scripts/browser.mjs --sheet`, over the tiles and a real page reload |
+| The reorder is observable | Both, over three presets, and by a real Enter press in the browser |
+| The name is text and never markup | Both, by the drawn characters and by the element count |
+| Every refusal names its cause | `src/app.test.tsx`, against the union read from the source of the store |
+| Every refusal is reachable through the interface | `node scripts/browser.mjs --sheet`, by four real routes |
+| The list is operable by keyboard alone | `node scripts/browser.mjs --sheet`, by real Tab and Enter presses at 360 px |
+| The control budget of section 3 is untouched | `src/app.test.tsx`, by reading both rest states for any part of the panel |
+| Both keyboard walks are unchanged | `src/app.test.tsx` and `node scripts/browser.mjs --shell` |
+
+### The numbers
+
+| Number | Value |
+|---|---|
+| New tests | 7 in `src/app.test.tsx`, and 4 new checks in `node scripts/browser.mjs --sheet` |
+| Test total | 272 to 279 vitest tests over 28 files, plus 21 node tests |
+| Injections proved red | 13, every one restored by editing the injection back |
+| Controls at rest | 5 at rest A and 5 at rest B, against the ceiling of 8 in section 3 |
+| Keyboard walks | 11 visits before the throw and 35 after it, unchanged, in both instruments |
+| Initial JavaScript | 21,152 to 22,532 gzip bytes. Budget in `budgets.json`. |
+| Lazy 3D chunk | 151,876 gzip bytes, unchanged |
+| `npm run perf` | 203 steps over 5 runs, spread 0, scene digest unchanged, exit 0 |
+| Harness | `--sheet` 11/0/0, `--shell` 8/0/0, `--table` 9/0/0, `--blocked-chunk` 11/0/0 |
+| Captures | `docs/design/0015-sheet-presets-360.png` and `-1440.png`, looked at before this row was written |
+| Branding gate | `files_scanned=124`, `binary_skipped=55`, `hits=0`, exit 0 |
+| Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |
+
+### Open
+
+- **Unit 4.3 is complete.** Nothing of it is deferred.
+- The panel writes no step pool, and that is a decision with its reason recorded, not a deferral.
