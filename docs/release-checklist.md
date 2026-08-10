@@ -167,6 +167,9 @@ grep -q Clatter page.html && echo "body carries the name"
 
 ## Unit 5.2 — the version tag and the release
 
+**COMPLETE 2026-08-10.** Steps 10, 11 and 12 are done. Read the Unit 5.2 notes in `LEDGER.md` for
+the readings. The steps stay here, because the next release repeats them with a new version.
+
 The version is `0.1.0`, set in `package.json`. The tag is `v0.1.0`.
 
 **Cut the tag after the pull request merges.** A tag cut before the merge points at a commit that
