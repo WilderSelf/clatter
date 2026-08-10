@@ -11,7 +11,9 @@
 //     with pool order inside each zone. Decision 4.
 //
 // Unit 2.1 built the builder and both rest states. Unit 2.2 throws the pool,
-// draws the dice flat, and prices the push from `previewPush`.
+// draws the dice flat, and prices the push from `previewPush`. Unit 3.7 chooses
+// between the two renderers at startup, records the permanent fall to flat
+// dice, says so once, and offers the toggle back.
 //
 // **This unit builds no history matrix.** The matrix moves into the history
 // record, where Decision 3 transposes it to one row per die. `LEDGER.md` holds
@@ -24,6 +26,18 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Die } from './rules/die';
 import type { RandomSource } from './rules/random';
 import { cryptoRandom } from './rules/random';
+import { localSettingsStore } from './settings/local-store';
+import type { SettingsStore } from './settings/settings';
+import { readSettings, writeSettings } from './settings/settings';
+import type { RendererState } from './shell/renderer';
+import {
+  askForTray,
+  fallToFlat,
+  noticeText,
+  startRenderer,
+  trayNote,
+  withDecision,
+} from './shell/renderer';
 import type { AppState, DieView, PoolCell } from './shell/state';
 import {
   canPush,
@@ -47,9 +61,26 @@ import {
   withMode,
   zonesOf,
 } from './shell/state';
+import type { TrayDecision } from './tray/capability';
+import { decideTray, probeCapability } from './tray/capability';
+import type { MountTrayOptions } from './tray/scene';
 import { mountTray } from './tray/scene';
 
 export const APP_NAME = 'Clatter';
+
+/**
+ * The startup probe, as the screen takes it.
+ *
+ * `probeCapability` reads the platform and `decideTray` decides over that
+ * reading alone. Both live in `src/tray/capability.ts`, and a test hands over
+ * an answer of its own rather than a platform.
+ */
+export type TrayProbe = () => Promise<TrayDecision>;
+
+/** The mount, as the screen takes it. A test counts the calls. */
+export type TrayMount = (container: HTMLElement, options?: MountTrayOptions) => Promise<unknown>;
+
+const probeTray: TrayProbe = async () => decideTray(await probeCapability());
 
 /**
  * How the screen changes the state.
@@ -420,6 +451,7 @@ function Zone({
   note,
   views,
   thrown,
+  ordinal,
   activeId,
   onPress,
 }: {
@@ -428,6 +460,7 @@ function Zone({
   note: string;
   views: readonly DieView[];
   thrown: readonly string[];
+  ordinal: number;
   activeId: string;
   onPress: (id: string) => void;
 }) {
@@ -441,15 +474,18 @@ function Zone({
       </p>
       <div class="tray">
         {views.map((view) => (
-          // The key carries the generation of the dice that moved, so the shake
-          // plays again on every throw. A die that stayed keeps its key and
-          // therefore its element, and it does not shake.
+          // The key carries the throw that moved the die, so the element is
+          // rebuilt and the shake plays again on every throw. A die that stayed
+          // keeps its key and therefore its element, and it does not shake.
+          //
+          // The number is the throw ordinal and never the count of the values
+          // the die carries. A re-throw asks the core for a fresh roll, whose
+          // dice each carry one value, so a count would read the same before
+          // and after and no die that stayed in its zone would shake. Unit 2.3
+          // reported that defect and `src/shell/state.ts` holds the ordinal
+          // that closes it.
           <Slot
-            key={
-              thrown.includes(view.die.id)
-                ? `${view.die.id}:${view.die.values.length}`
-                : view.die.id
-            }
+            key={thrown.includes(view.die.id) ? `${view.die.id}:${ordinal}` : view.die.id}
             view={view}
             shaken={thrown.includes(view.die.id)}
             active={view.element === activeId}
@@ -525,6 +561,7 @@ function DiceTray({ state, setState }: { state: AppState; setState: (change: Cha
         note="these stay on the table"
         views={kept}
         thrown={state.thrown}
+        ordinal={state.throwOrdinal}
         activeId={active}
         onPress={(id) => setState((previous) => toggleDie(previous, id))}
       />
@@ -534,6 +571,7 @@ function DiceTray({ state, setState }: { state: AppState; setState: (change: Cha
         note="the push throws these"
         views={loose}
         thrown={state.thrown}
+        ordinal={state.throwOrdinal}
         activeId={active}
         onPress={(id) => setState((previous) => toggleDie(previous, id))}
       />
@@ -549,21 +587,39 @@ function DiceTray({ state, setState }: { state: AppState; setState: (change: Cha
  * and a hidden container measures nothing. The tray is behind a dynamic import,
  * so nothing of it is fetched until the player first closes the builder.
  *
- * The flat dice of this unit render in its place the moment a throw lands, so
- * this element is the empty table and nothing else. Unit 3.7 chooses between
- * the two renderers, and until it does the 3D route stays reachable here.
+ * **Unit 3.7 chooses.** The table mounts only while `wanted` holds, which is
+ * the answer of `chooseRenderer` in `src/shell/renderer.ts`. A platform below
+ * the bar, a player who asked for flat dice, and a table that already fell all
+ * read false here, and nothing of the 3D chunk is then fetched at all.
+ *
+ * Two events fall to flat dice and both reach `onFall`: a mount that does not
+ * finish, which is what a blocked chunk gives, and a lost WebGL context, which
+ * `watchContextLoss` reports through the option below.
  */
-function Table({ shown }: { shown: boolean }) {
+function Table({
+  shown,
+  wanted,
+  mount,
+  onFall,
+}: {
+  shown: boolean;
+  wanted: boolean;
+  mount: TrayMount;
+  onFall: () => void;
+}) {
   const container = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const element = container.current;
-    if (!shown || element === null || mounted.current) return;
+    if (!shown || !wanted || element === null || mounted.current) return;
     mounted.current = true;
-    mountTray(element).catch(() => setFailed(true));
-  }, [shown]);
+    mount(element, { onFallToFlat: () => onFall() }).catch(() => {
+      setFailed(true);
+      onFall();
+    });
+  }, [shown, wanted]);
 
   return (
     <div class="table" data-el="dice-table" hidden={!shown} ref={container}>
@@ -575,10 +631,14 @@ function Table({ shown }: { shown: boolean }) {
 function Sheet({
   state,
   setState,
+  renderer,
+  onAskForTray,
   onClose,
 }: {
   state: AppState;
   setState: (change: Change) => void;
+  renderer: RendererState;
+  onAskForTray: (wanted: boolean) => void;
   onClose: () => void;
 }) {
   const close = useRef<HTMLButtonElement>(null);
@@ -612,6 +672,28 @@ function Sheet({
           ))}
           <p class="sheet-note">A change of mode clears the pool.</p>
         </fieldset>
+        {/* The way back from a permanent fall to flat dice, which the plan asks
+            Unit 3.7 for. The sheet is a second surface and carries no share of
+            the control budget of section 3, so this control costs the screen
+            nothing. Decision 8 of `docs/design/0012-settled-decisions.md`
+            records it.
+
+            A platform below the bar cannot draw the table whatever the record
+            says, so the control is dead there and the note names every reading
+            that failed. Every other fall is clearable, and the same switch
+            takes the player back to flat dice. */}
+        <label class="choice" data-el="sheet-tray-renderer">
+          <input
+            type="checkbox"
+            checked={renderer.choice.renderer === 'tray'}
+            disabled={renderer.choice.cause === 'belowTheBar'}
+            onChange={(event) => onAskForTray(event.currentTarget.checked)}
+          />
+          Roll the dice on the table
+        </label>
+        <p class="sheet-note" data-el="sheet-tray-note">
+          {trayNote(renderer.choice)}
+        </p>
         <button
           class="btn"
           type="button"
@@ -640,12 +722,29 @@ function Sheet({
  * application, which Constraint 7 fixes, and a seeded source is injected here
  * by a test alone. `initial` is the state a test opens the screen in, so a
  * table with dice on it can be asserted without a search for a seed.
+ *
+ * `store`, `probe` and `mount` are the three platform readings of Unit 3.7.
+ * The screen is the one place that reads the store and writes it, so
+ * `src/shell/renderer.ts` stays pure and a test hands over a store, an answer
+ * and a mount of its own.
  */
 export function App({
   random = cryptoRandom(),
   initial,
-}: { random?: RandomSource; initial?: AppState } = {}) {
+  store = localSettingsStore(),
+  probe = probeTray,
+  mount = mountTray,
+}: {
+  random?: RandomSource;
+  initial?: AppState;
+  store?: SettingsStore | null;
+  probe?: TrayProbe;
+  mount?: TrayMount;
+} = {}) {
   const [state, setState] = useState<AppState>(() => initial ?? emptyState('pool'));
+  const [renderer, setRenderer] = useState<RendererState>(() =>
+    startRenderer(null, readSettings(store)),
+  );
   const dice = throwDice(state);
   const toggle = useRef<HTMLButtonElement>(null);
   const closeSheet = (): void => {
@@ -653,14 +752,63 @@ export function App({
     toggle.current?.focus();
   };
 
+  // The renderer state is held in a ref beside the hook, because a fall arrives
+  // from a callback the mount holds and that callback captured an older render.
+  // The write goes here rather than inside the state change, so the change
+  // itself stays pure and the store is written exactly once per change.
+  const held = useRef(renderer);
+  const apply = (change: (previous: RendererState) => RendererState): void => {
+    const previous = held.current;
+    const next = change(previous);
+    held.current = next;
+    if (next.settings !== previous.settings) writeSettings(store, next.settings);
+    setRenderer(next);
+  };
+
+  // The probe runs once, at startup, and the screen draws flat dice until it
+  // answers. A probe that answered below the bar records the permanent fall and
+  // the notice below says so once. `probeCapability` never throws, so there is
+  // no failure path here beyond the answer itself.
+  useEffect(() => {
+    let live = true;
+    void probe().then((decision) => {
+      if (live) apply((previous) => withDecision(previous, decision));
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   return (
-    <div class="screen">
+    <div
+      class="screen"
+      data-renderer={renderer.choice.renderer}
+      data-tray-decision={renderer.decision === null ? 'pending' : String(renderer.decision.tray)}
+    >
       <StatusLine state={state} dice={dice} />
 
       <main class="shell-m" data-el="shell-mid">
+        {/* The fall to flat dice, said once.
+
+            The element is in the document from the first paint and carries no
+            text, so it is a live region a reader is already watching when the
+            fall happens. A region built at the moment it fills is announced by
+            some readers and not by others. It is empty until the fall, and CSS
+            hides an empty one, so it costs the drawn screen no height.
+
+            It holds no tab stop, so neither keyboard walk of section 6 changes.
+            Section 3 lists it under the read-only parts. */}
+        <p class="fall-note" data-el="flat-fallback-note" role="status">
+          {renderer.noticed ? noticeText(renderer.choice) : ''}
+        </p>
         {state.builderOpen ? <Builder state={state} setState={setState} /> : null}
         {state.result === null ? null : <DiceTray state={state} setState={setState} />}
-        <Table shown={!state.builderOpen && state.result === null} />
+        <Table
+          shown={!state.builderOpen && state.result === null}
+          wanted={renderer.choice.renderer === 'tray'}
+          mount={mount}
+          onFall={() => apply(fallToFlat)}
+        />
       </main>
 
       <div class="shell-f" data-el="shell-footer">
@@ -731,7 +879,15 @@ export function App({
         </div>
       </div>
 
-      {state.sheetOpen ? <Sheet state={state} setState={setState} onClose={closeSheet} /> : null}
+      {state.sheetOpen ? (
+        <Sheet
+          state={state}
+          setState={setState}
+          renderer={renderer}
+          onAskForTray={(wanted) => apply((previous) => askForTray(previous, wanted))}
+          onClose={closeSheet}
+        />
+      ) : null}
     </div>
   );
 }

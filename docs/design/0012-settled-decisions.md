@@ -248,3 +248,41 @@ in pool mode, except that the player chooses die sizes instead of counts. Gear, 
 their counts. The artifact tile keeps its ladder, which is unchanged.
 
 ---
+
+## Decision 8 — the sheet holds a ninth control, the renderer toggle, taken by me 2026-08-09
+
+The disclosure sheet holds a ninth control, `sheet-tray-renderer`. It rolls the dice on the table or
+draws them flat, and it clears a permanent fall to flat dice. Section 4 of
+`docs/design/0002-screen-design.md` now lists it against Unit 3.7. I took this decision under the
+delegated interface authority of `CLAUDE.md`.
+
+### The reason
+
+The plan asks Unit 3.7 for a settings toggle back. A fall to flat dice is permanent by design, so a
+player whose browser lost one WebGL context keeps flat dice for ever with no way to ask again. The
+toggle is the only way back, and it has to live somewhere the player can find.
+
+### Why it costs the budget nothing
+
+Section 3 sets a ceiling of **8 controls at rest** and counts the controls visible by default. The
+sheet is a second surface and carries no share of that budget, exactly as the history destination
+does. Section 4 already held eight controls behind the disclosure and none of them counts against
+section 3. The screen still shows five controls at rest A and five at rest B.
+
+### What did not change, checked and not assumed
+
+**Section 6 is unchanged.** Both keyboard walks are lists of the main screen, and neither one names
+a `sheet-` control. The counts stay eleven visits before the throw and thirty-five after it, and
+both instruments read those lists out of the document rather than restating them.
+
+**The notice is not a control.** The fall to flat dice is announced by `flat-fallback-note`, which
+carries `role="status"`, holds no tab stop and takes no press. Section 3 lists it under the
+read-only parts, where the status line and the cost row already sit.
+
+### What the toggle refuses
+
+A platform below the bar cannot draw the table whatever the record says, so the control is dead
+there and its note names every reading that failed. `chooseRenderer` in `src/shell/renderer.ts`
+reads the platform before the record for that reason.
+
+---

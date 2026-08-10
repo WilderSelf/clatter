@@ -93,6 +93,7 @@ Measured on this host on 2026-08-09:
 | `--sound` | off | Throw twice, silent then sounded, and judge the sound engine. Needs `--url`. |
 | `--shell` | off | Walk the screen with real Tab and arrow presses, and capture the three widths. Needs `--url`, and the url must be a preview server over `dist/`. |
 | `--capture-shell <dir>` | none | `--shell` only. One PNG per width, named `shell-builder-<w>x<h>.png`. |
+| `--blocked-chunk` | off | Block the lazy 3D chunk at the network layer and judge the fall to flat dice. Needs `--url`, and the url must be a preview server over `dist/`. |
 | `--capture-before <path>` | none | `--push` only. The frame before the push. |
 | `--offset-kept <n>` | none | `--push` only. Move kept die `n` by 3 px, to red-prove the kept-die check. |
 | `--viewport <w>x<h>[@dpr]` | `800x600` | The window the scene is built in. |
@@ -164,6 +165,26 @@ npm run browser -- --shell --url http://localhost:4173/clatter/ --capture-shell 
 A browser gives a scrollable box a tab stop of its own, so a keyboard can scroll a region that
 holds no control. The run reports such a stop by name and does not count it against the authored
 list. The drawn screen earns the same stop.
+
+`--blocked-chunk` comes from Unit 3.7 and is that unit's acceptance. It refuses the lazy 3D chunk at
+the network layer and then asserts that every rule and every affordance still works on the flat
+dice. It starts and stops its own preview server, so build first and run it alone.
+
+```sh
+npm run build
+npm run browser -- --blocked-chunk --url http://localhost:4173/clatter/
+```
+
+Two stores can answer a blocked request and the run closes both by measurement. Unit 5.1 precaches
+the chunk, so the run unregisters the service worker and deletes Cache Storage, and it reads both
+counts before and after. Firefox refuses `request.abort()` once a worker owns the request, so every
+refused abort is counted and a refusal fails the run. The service worker and its registration
+script are blocked with the chunk, so no worker can install again during the run.
+
+**Run it outside the sandbox.** The screen asks for the chunk only where the startup probe clears
+the bar, and there is no WebGL context inside the sandbox. The run still exercises the rules and the
+affordances there, and it prints `blocked-chunk.the-chunk-was-refused` as `NOT JUDGED`, counted in
+the `skipped=` figure of the summary line.
 
 Exit 0 when every check passed, 1 when a check failed, 2 on a usage error.
 

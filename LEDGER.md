@@ -53,9 +53,10 @@ Status table for each unit. Every unit appends one row after it lands.
 | 2.1 | Application shell and pool builder | Done | — | The Preact shell, the state store and the pool builder, drawn from `docs/design/0013-screen-final.html`. `src/shell/state.ts` holds the whole state and asks the rules core every question: the pool, the caps, the step ladder and the effect of the difficulty. The shell decides no rule. **The keyboard order is read out of the design, never restated.** `src/app.test.tsx` parses section 6 of `docs/design/0002-screen-design.md`, which states the same walk three ways, and asserts the walk against all three: 11 numbered names, the count in words, and the sentence splitting Tab from the arrow keys. Tab reached items 1, 2, 9, 10 and 11 and the arrows reached 3 to 8, in both instruments. `node scripts/browser.mjs --shell` presses the real keys in a real browser and reads the same 11. **The browser adds one tab stop of its own at `shell-mid`,** because a scrollable box earns one so a keyboard can scroll it. It is reported by name and not counted, and the drawn screen earns the same stop. The live region is the status line, and it moves from `The throw takes no dice. A roll of no dice fails.` to `The throw takes 25 dice. 5 attribute, 5 skill, 3 gear, 2 bonus, 10 stress.` A mode switch clears a pool of 25 dice, and the core is the oracle: the switched builder equals `switchMode` over the same builder. Four red-proofs passed. The three widths are captured and compared against the `0013-screen-final-builder-*` renders: the builder card, the header and the footer match at 360, 768 and 1440, and every difference is a part no throw has produced yet. Initial JavaScript moves from 7,160 to 10,663 gzip bytes against the 61,440 in `budgets.json`. The lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=115`, `hits=0`, exit 0. **Open:** the dice on the table, the push button and the difficulty on `Roll again` all wait for Unit 2.2. See the notes under this table. |
 | 2.2 | Flat dice, roll, push, readout | Done, with one acceptance deferred by a settled decision | — | `Roll` throws the built pool and the dice land flat over the kept shelf and the throw zone of Decision 4. The screen decides no rule: `src/shell/state.ts` asks `firstRoll`, `push`, `previewPush`, `isLocked` and `score`, and `src/app.tsx` renders the answer. The cost row and the push button read one `previewPush`, so the price the player commits to is the price the rules apply. **The history matrix is not built here.** Decision 3 moves it into the history record and transposes it, and the row below carries its acceptance to the unit that builds that record. Four checks, each red-proved by an injection that landed and named its gate: the push button is live below the push limit and dead at it; it is live with no stress bane showing and dead under the blocker; the thirty visits of section 6 are walked in the order the document states; and a push re-throws the loose dice alone, with the core as the oracle. The keyboard order is read out of the design and never restated, in both instruments. `node scripts/browser.mjs --shell` gains the after-throw half and passes 8 of 8 checks against the built output in Firefox. Initial JavaScript moves from 10,663 to 14,166 gzip bytes against the 61,440 in `budgets.json`. The lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=115`, `hits=0`, exit 0. **Open:** the difficulty preview after a throw, the log entry a roll should write, and the 3D renderer, which Unit 3.7 chooses between. See the notes under this table.
 | 2.2d | The history matrix, deferred with its acceptance | Deferred to the unit that builds the history record | — | **This row exists so the deferral has a home and a name.** The plan gives Unit 2.2 the matrix beside the dice, one column per die and one row per generation, with two acceptances: the matrix holds exactly `dice × generations` cells, and the blank count equals an independently computed count of locked-or-absent pairs. Decision 3 in `docs/design/0012-settled-decisions.md` moved the matrix out of the roll flow and into the history record, where it is transposed to one row per die, because 25 columns need 780 pixels of minimum content width against the 300 a phone gives. The settled decision is the authority over the plan text. **Both acceptances travel with the matrix, unchanged.** They land in the unit that builds the record view: Unit 4.5, whose open half is the record and its export control, which Decision 3 puts in the same place. Unit 4.4 builds the summary list beside it. Nothing of the pair is dropped and nothing is weakened. **One dependent item moves with it.** Unit 3.5 records that the keyboard route to a die the 3D tray buries runs through the history matrix of Unit 2.2. The flat tray of Unit 2.2 gives that route already: 25 dice, one arrow walk, every die reachable and named. The matrix route stays owed only for the 3D tray. |
-| 2.3 | Roll again, and deploy the slice | Done | #8 | One tap on the roll button re-throws the built pool. The behaviour was already in place. This unit adds five checks that prove it and records what the difficulty readout is once the builder collapses. `src/app.test.tsx` gained five checks and `src/app.tsx` gained one comment block; no behaviour changed. **The five checks:** the re-throw calls the core and the core is the oracle; the re-throw is a new roll and not a continuation, generations back to one over every die; the stress counter carries in over a case where a push raised it; the difficulty on `roll-button` after a throw is the one the throw took; and the control inventory of section 3 holds at both rest states, 16 cells read out of the design. Each check was proved red by an injection that landed and named its gate. **The difficulty is settled.** Section 3 of `docs/design/0002-screen-design.md` keeps the difficulty control and its preview sentence in rest A alone because the builder collapses on a roll. Section 8 states that no control of rest B can change the difficulty, so what the last throw took and what the next throw will take are one number. The design treats the whole after-throw difficulty readout as the signed value on `roll-button`. **Validation:** `npm run lint` 0, `npm run typecheck` 0, `npm test` 0 over 230 vitest tests and 20 node --test tests, `npm run build` 0. Branding gate `files_scanned=116` `hits=0`. **Deploy:** PR #8 merged `2a4d751`, CI SUCCESS. Six URLs answered 200: the page at 544 bytes, the entry script `assets/index-CITyIdqU.js` at 39,652 bytes, the stylesheet at 9,895 bytes, the web manifest at 425 bytes, the service worker registration at 150 bytes, and the lazy 3D chunk at 596,587 bytes. The hashes match the build, so the live page is this commit. **Bundle:** Initial JavaScript 14,356 gzip bytes and lazy 3D chunk 151,876 gzip bytes, both unchanged because the only source addition is a comment. See the notes under this table. |
 | fix | Draw the tray for 30 dice and derive that target from the caps | Done | #5 | The tray was drawn for 25 dice against an incomplete composition. The artifact ladder ends at a rating of six, which is d12 plus d12 (two dice). The difficulty modifier reaches plus three, which adds three bonus dice. Both sources were omitted from the pool count. The largest first roll therefore holds 27 dice at difficulty 0 and 30 dice at plus 3, with no push at all. The tray has no ceiling. The third profile holds no push limit and adds one stress die before every re-throw, so a walk with an adversarial source reached 230 dice and was still rising. `worstCaseState` in `src/shell/state.ts` derives the target from the caps, the artifact ladder and the difficulty limit. `src/shell/drawn-screen.test.ts` counts the drawn screen against that derivation, so a raised cap turns the suite red and names the layout for a re-measure. The number is written down nowhere. The owner set the draw target at 30, and the tray scrolls past it per Decision 6. The keyboard order was re-derived from the drawn screen, not scaled: 11 visits before the throw and 35 after it. Both instruments read the list out of the design and walk it, under jsdom and under real Tab presses in Firefox. The artifact tile at its cap made the phone builder wider than the phone. That tile alone may now wrap. Branding gate `files_scanned=115`, `hits=0`, exit 0. |
 | fix | Rate the step attribute and skill on independent scales | Done | #6 | The step model paired the two die sizes on one list of eight states. That list held eight of the sixteen pairs, so a large attribute beside a small skill was unwritable. It also tied a skill-less roll to a d6 attribute. The reference rates the attribute and the skill on two independent scales, and each rating names its own die size. Store the base pair and store the difficulty as one integer. Compute the rolled sizes from the two through a split table that reads the base pair alone. A round trip and the composition of two modifiers stay true by construction, which is what the eight-state list existed to give, and they now hold where a size clamps as well. The new table enumerates four attribute sizes, five skill states and seven modifiers, counts its own denominator, and asserts the split, the round trip, the composition and the clamp at both ends. The pool bar holds the same six tiles in both modes. In step mode the attribute tile and the skill tile each step their own die size. Branding gate `files_scanned=115`, `hits=0`, exit 0. |
+| 2.3 | Roll again, and deploy the slice | Done | #8 | One tap on the roll button re-throws the built pool. The behaviour was already in place. This unit adds five checks that prove it and records what the difficulty readout is once the builder collapses. `src/app.test.tsx` gained five checks and `src/app.tsx` gained one comment block; no behaviour changed. **The five checks:** the re-throw calls the core and the core is the oracle; the re-throw is a new roll and not a continuation, generations back to one over every die; the stress counter carries in over a case where a push raised it; the difficulty on `roll-button` after a throw is the one the throw took; and the control inventory of section 3 holds at both rest states, 16 cells read out of the design. Each check was proved red by an injection that landed and named its gate. **The difficulty is settled.** Section 3 of `docs/design/0002-screen-design.md` keeps the difficulty control and its preview sentence in rest A alone because the builder collapses on a roll. Section 8 states that no control of rest B can change the difficulty, so what the last throw took and what the next throw will take are one number. The design treats the whole after-throw difficulty readout as the signed value on `roll-button`. **Validation:** `npm run lint` 0, `npm run typecheck` 0, `npm test` 0 over 230 vitest tests and 20 node --test tests, `npm run build` 0. Branding gate `files_scanned=116` `hits=0`. **Deploy:** PR #8 merged `2a4d751`, CI SUCCESS. Six URLs answered 200: the page at 544 bytes, the entry script `assets/index-CITyIdqU.js` at 39,652 bytes, the stylesheet at 9,895 bytes, the web manifest at 425 bytes, the service worker registration at 150 bytes, and the lazy 3D chunk at 596,587 bytes. The hashes match the build, so the live page is this commit. **Bundle:** Initial JavaScript 14,356 gzip bytes and lazy 3D chunk 151,876 gzip bytes, both unchanged because the only source addition is a comment. See the notes under this table. |
+| 3.7 | Capability probe, fallback, context loss — the interface half | Done. The 3D tray still draws no result. | #10 | `src/shell/renderer.ts` is the choice and it is pure: it reads the probe answer and the stored record and answers which renderer draws the dice. `src/app.tsx` runs the probe once at startup, draws flat dice until it answers, and mounts the table only where the probe clears the bar, so a browser below the bar fetches no part of the 3D chunk. Three events fall to flat dice for good and every one records the flag and tells the player once: a probe below the bar, a table that does not mount, and a lost WebGL context. The notice carries `role="status"` and holds no tab stop, so both keyboard walks of section 6 stay at 11 visits and 35. The way back is `sheet-tray-renderer`, a ninth control on the sheet, which carries no share of the control budget of section 3. Decision 8 of `docs/design/0012-settled-decisions.md` records it. **The defect Unit 2.3 reported is fixed:** the die cell is keyed by a throw ordinal in `AppState`, and the old key held the count of the values a die carries, which reads the same before and after a re-throw. **The acceptance:** `node scripts/browser.mjs --blocked-chunk` removes the service worker and Cache Storage, refuses the chunk at the network layer, counts every refused abort, and then walks every rule and every affordance on the flat dice. On the graphics card outside the sandbox it exits 0 at `checks=11 failures=0 skipped=0`, with the probe reading `true`, one chunk request refused, 0 refused aborts, 0 encoded bytes, 0 canvases and the stored flag true. Eight injections were proved red and every one was restored by editing the injection back. Initial JavaScript moves from 14,356 to 16,355 gzip bytes and the lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=118`, `hits=0`, exit 0. **Open:** the 3D tray draws no result yet, for three measured reasons. See the notes under this table. |
 
 ## Unit 0.5 — CI, public repository, protection
 
@@ -3907,3 +3908,185 @@ page is this commit and not a stale one.
 **Bundle:** Initial JavaScript 14,356 gzip bytes and lazy 3D chunk 151,876 gzip bytes, both
 unchanged because the only source addition is a comment block. Point at `budgets.json` for the
 ceilings rather than restating them.
+
+## Unit 3.7 — the interface half
+
+The engine half landed earlier and nothing of it is rebuilt here. This half is the call site: the
+screen asks the decision, mounts one renderer or the other, records the fall, says so once, and
+offers the way back.
+
+### What landed
+
+- **The choice, pure.** `src/shell/renderer.ts` names no browser API. `chooseRenderer` reads the
+  probe answer and the settings record and answers a renderer, a cause and the readings below the
+  bar. `startRenderer`, `withDecision`, `fallToFlat` and `askForTray` are the four changes over that
+  record, and every one of them is a function of the state before it.
+- **The call site.** `src/app.tsx` runs the probe once, in one effect, and draws flat dice until it
+  answers. A fall nothing measured is never recorded, so the opening state writes nothing. The
+  screen is the only place that reads the store and writes it, so the choice stays pure and a test
+  hands over a store, a probe answer and a mount of its own.
+- **The table mounts only where the probe clears the bar.** The dynamic import is behind that
+  guard, so a browser below the bar fetches no part of the 3D chunk at all.
+- **Context loss is wired.** `mountTray` is given `onFallToFlat`, which is the same call the mount
+  failure takes. The engine half built the watcher and this half connects it to the store.
+- **The notice, once.** `flat-fallback-note` is in the document from the first paint with no text,
+  so a reader is already watching the region when it fills. CSS hides an empty one, so the drawn
+  screen is unchanged while the table runs. It holds no tab stop and section 3 lists it under the
+  read-only parts.
+- **The way back.** `sheet-tray-renderer` on the disclosure sheet, with a note that names the cause
+  every time.
+- **The shake.** `AppState` gains `throwOrdinal` and the die cell is keyed by it.
+
+### Three decisions, each with its reason
+
+**The platform is read before the record.** Both can hold at once, because a probe below the bar
+records the fall as well. The platform limit is the useful answer of the two: it is the one the
+toggle cannot clear, so the sheet can say why the control is dead and name every reading that
+failed.
+
+**"Says so once" is tied to the fall and not to the state.** A session that opens on a recorded
+fall says nothing, because the player was told in the session that fell. A second lost context
+writes nothing and says nothing, because the record already holds the fall. A fall the player asked
+for through the toggle is not announced back.
+
+**The notice is not a control.** It takes no press and holds no tab stop, so the eleven visits
+before the throw and the thirty-five after it are unchanged. Both instruments still read those
+lists out of section 6 and both still walk them.
+
+### The counted denominators
+
+| Check | Denominator |
+|---|---|
+| The choice table | 8 cases, a cross product of 4 probe answers and 2 stored records. The count is asserted against the product and against the length of the answer table beside it. |
+| Causes reached | The set of causes the 8 cases produce holds all three plus the tray itself. A cause no case reaches fails. |
+| Words for the readings | The keys of `FALL_REASON_TEXT` are asserted equal to `FALL_REASONS`, so a reading added to the probe cannot reach the screen with no words. |
+| Sheet notes | 4 states, 4 distinct sentences, both counts asserted. |
+| The shake, under jsdom | Every die that stayed in the zone it was in, counted, with a floor above zero. A re-throw that moved every die would prove nothing about the key. |
+| The shake, in the browser | Every die on the table, twice. The first re-throw proves the instrument answers before the second one is judged. |
+| The dice on the table | The 30 names section 6 lists, with the shelf and the zone summing to that number. |
+| The keyboard walk | The 35 names of section 6, read out of the document. |
+| The kept dice | The count the screen put on the shelf, with a floor above zero. |
+| Every die answers a press | The pool size. The pressed count and the refused count sum to it and both carry a floor above zero. |
+
+### The acceptance, measured
+
+`node scripts/browser.mjs --blocked-chunk --url http://localhost:4173/clatter/`, on the graphics
+card with the sandbox off, exits 0 at `checks=11 failures=0 skipped=0`:
+
+```
+browser: blocked-chunk before registrations=1 caches=1 entries=8 after registrations=0 caches=0
+browser: blocked-chunk decision=true renderer=flat canvases=0 chunk_requests=1 refused_aborts=0
+  chunk_entries=1 chunk_bytes=0 caches=0 controller=null stored_flat_fallback=true
+browser: blocked-chunk built_clicks=32 throws=4 dice=30 kept=7 loose=23 push_disabled=false
+browser: blocked-chunk push kept=7 kept_same=7 loose=23 loose_moved=20 dice_after=31
+browser: blocked-chunk re-throw 1 shook 30 of 30 dice
+browser: blocked-chunk re-throw 2 shook 30 of 30 dice
+browser: blocked-chunk press pool=30 toggled=28 refused=2
+```
+
+**Two stores can answer a request the network refused, and both are closed by measurement.** Unit
+5.1 precaches the chunk, so the run unregisters the worker and deletes Cache Storage and reads both
+counts before and after. Firefox refuses `request.abort()` once the worker owns the request, so
+every refused abort is counted and one refusal fails the run. The worker and its registration
+script are blocked with the chunk, so no worker can install again mid-run.
+
+**The proof that the chunk did not arrive is positive on both sides.** The screen decided the table
+could run and asked for the chunk once, which is what proves this run exercised the fall rather
+than a screen that never asked. The chunk's resource timing entry carries 0 encoded bytes, the page
+holds 0 canvases, and the screen reads `renderer=flat`.
+
+### The skip, named
+
+`blocked-chunk.the-chunk-was-refused` prints `NOT JUDGED` where the startup probe answers below the
+bar, because the screen then draws flat dice from the first paint and never asks for the chunk.
+Measured by turning WebGL off in the driver preferences and running again: `decision=false`,
+`chunk_requests=0`, the notice reads `This browser cannot draw the table. The dice are flat now.`,
+the stored flag is true, and the run exits 0 at `checks=11 failures=0 skipped=1`. Every other
+check held, so the acceptance still ran on that machine. The preference was restored by editing it
+back and the file hash matches the saved copy.
+
+The harness itself always runs outside the sandbox, because the owner excluded
+`node scripts/browser.mjs*`, so the sandbox cannot produce that reading on this host.
+
+### Eight red-proofs
+
+Each injection landed, each failure names the gate it broke, and each file was restored by editing
+the injection back. No git command touched the bytes. The four source files and the driver were
+copied outside the repository first and every restored hash matches its copy.
+
+1. **The old key, back.** `${die.id}:${die.values.length}` in place of the ordinal.
+   Under jsdom: `every die cell is rebuilt on a re-throw, so the shake plays again on all of them:
+   expected [ 'die-at1', 'die-at2', …(5) ] to deeply equal []`. In the browser:
+   `FAIL blocked-chunk.every-re-throw-shakes-every-die the first re-throw shook 30 of 30 dice, ...
+   and the second shook 11 of 30`. **The two rounds are why this reads at all.** The first re-throw
+   follows a push, where the re-rolled dice carry two values and the fresh roll carries one, so
+   every key changes and the old code passes. Only the second re-throw is the one-to-one case.
+2. **The player is not told.** `fallToFlat` left `noticed` false.
+   `AssertionError: the player is told: expected false to be true`, and in the browser
+   `the one it holds reads ""`.
+3. **The stored fall ignored.** The `settings.flatFallback` branch removed from `chooseRenderer`.
+   The table went red naming the case: `- "above the bar, a fall recorded: flat, recordedFall"`
+   against `+ "above the bar, a fall recorded: tray, null"`.
+4. **The mount guard dropped.** `!wanted` removed from the table effect.
+   `and nothing of the 3D chunk is fetched: expected 1 to be +0`, twice: once before the probe
+   answers and once below the bar.
+5. **The block made a no-op.** The chunk pattern removed from the request interception. The chunk
+   arrived and the tray mounted: `chunk_bytes=151876`, and four checks went red, among them
+   `the table holds 1 canvas elements and the screen reads renderer=tray`. This is also the reading
+   that shows the application does reach the 3D tray on this host when the chunk is served.
+6. **The precache left in place.** The `caches.delete` loop removed.
+   `0 registrations and 1 caches were left, 1 caches remain after the reload`.
+7. **The push made a whole re-throw.** `pushNow` took a fresh roll in place of the core's answer.
+   `1 of the 9 kept dice hold the face they held`.
+8. **A press made a no-op.** `toggleDie` answered every id with the state it was given.
+   `0 answered by changing aria-pressed and 6 refused ... [die-at2 did not answer the press:
+   aria-pressed stayed false; ...]`.
+
+### One check of another unit was moved, and why
+
+`offline.the-lazy-3d-chunk-is-precached` counted the requests the application made through the
+table. The application now asks for the chunk only where the probe clears the bar, so a browser
+with no WebGL context would never ask and the check would report a missing graphics card as a
+precache failure. That is the exact fault the mount check beside it was split out to avoid. The
+check now asks for the chunk from the page and reads the bytes back, so the claim is about the
+service worker alone: `status=200 bytes=596587`, with the application's own request count reported
+beside it. The wait after the roll gained a third end for the same reason, because the table is now
+sometimes never asked for at all.
+
+**The offline mount check is judged for the first time.** It has been `SKIP` since Unit 5.1. On the
+graphics card with the sandbox off, `--offline` reads `renderer=tray` and the tray mounts from the
+precached chunk with the origin stopped: `checks=8 failures=0 skipped=0`.
+
+### What is still open, and why
+
+**The 3D tray draws no result yet.** The choice governs the table, and the flat dice draw every
+throw in both paths. Three measured reasons, none of them inside this unit:
+
+1. **The push cannot be acted out.** `pushPool` refuses a die the tray never spawned, and the
+   shipped profile adds one stress die before every re-throw. Unit 3.4 recorded the follow-up:
+   spawn the added die through `box.add` and rebuild the index map, because `add` appends to
+   `diceList` while `trayOrder` sorts by face count.
+2. **A 3D die has no DOM cell**, so the 35 visits of section 6, the accessible names and
+   `aria-pressed` have nowhere to live. That is the open screen half of Unit 3.5.
+3. **A sighted player could not click a 3D die.** The raycast route exists in the harness alone,
+   also under Unit 3.5.
+
+Making the 3D tray the result renderer before those land would ship a screen a keyboard cannot use
+and a push the tray would refuse. The renderer choice, the fall, the notice, the toggle and the
+acceptance are all built and proved, and this is the part that waits.
+
+**Also open:** the `--hardware` phone reading of Unit 3.8 stays with the owner.
+
+### Measurements
+
+| Number | Value |
+|---|---|
+| New tests | 18, in `src/shell/renderer.test.ts` and `src/app.test.tsx` |
+| Test total | 230 to 248 vitest tests over 27 files, plus 20 node tests, unchanged |
+| Initial JavaScript | 14,356 to 16,355 gzip bytes. Budget in `budgets.json`. |
+| Lazy 3D chunk | 151,876 gzip bytes, unchanged |
+| Service worker | 5,958 to 5,975 gzip bytes over 2 files, reported with no budget |
+| `npm run perf` | 203 steps against the recorded bound, scene digest unchanged, exit 0 |
+| Branding gate | `files_scanned=118`, `binary_skipped=47`, `hits=0`, exit 0, `accounted=165` against an independent 165 |
+| Harness | `--blocked-chunk` 11/0/0, `--shell` 8/0/0, `--offline` 8/0/0 |
+| Validate | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, all exit 0 |

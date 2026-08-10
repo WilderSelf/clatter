@@ -15,6 +15,7 @@ import { resolve } from 'node:path';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { TrayMount, TrayProbe } from './app';
 import { App } from './app';
 import type { Die } from './rules/die';
 import { appendValue, latestValue } from './rules/die';
@@ -24,8 +25,12 @@ import type { PushProfile } from './rules/push-profile';
 import { isLocked, PUSH_PROFILES } from './rules/push-profile';
 import type { RandomSource } from './rules/random';
 import { seededRandom } from './rules/seeded-random';
+import type { TrayDecision } from './tray/capability';
 import type { RollResult } from './rules/roll';
 import { roll } from './rules/roll';
+import type { Settings, SettingsStore } from './settings/settings';
+import { DEFAULT_SETTINGS, SETTINGS_KEY, readSettings } from './settings/settings';
+import { noticeText, startRenderer } from './shell/renderer';
 import type { AppState, Counts } from './shell/state';
 import {
   builderOf,
@@ -225,10 +230,28 @@ function walk(document: Document): Visit[] {
 
 let root: HTMLElement | null = null;
 
-function mount(props: { random?: RandomSource; initial?: AppState } = {}): HTMLElement {
+/**
+ * A probe that never answers, which is the state the screen opens in.
+ *
+ * Every check below the renderer section is about the flat dice, and the flat
+ * dice are what a screen draws until the probe has answered. jsdom gives no
+ * WebGL context and no `toBlob`, so the real probe would answer `false` after
+ * its own timeout and would make every one of those checks wait on a clock.
+ */
+const pendingProbe: TrayProbe = () => new Promise<TrayDecision>(() => {});
+
+function mount(
+  props: {
+    random?: RandomSource;
+    initial?: AppState;
+    store?: SettingsStore | null;
+    probe?: TrayProbe;
+    mount?: TrayMount;
+  } = {},
+): HTMLElement {
   root = document.createElement('div');
   document.body.appendChild(root);
-  act(() => render(<App {...props} />, root as HTMLElement));
+  act(() => render(<App probe={pendingProbe} store={null} {...props} />, root as HTMLElement));
   return root;
 }
 
@@ -951,5 +974,296 @@ describe('both rest states are reachable', () => {
     click(element('edit-pool-button'));
     expect(document.querySelector('[data-el="pool-builder"]')).not.toBeNull();
     expect(element('collapse-button').textContent).toBe('Done');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The renderer choice — Unit 3.7
+//
+// The screen asks `decideTray` once, at startup, and draws flat dice until it
+// answers. Below the bar, a table that does not mount, and a lost context are
+// all permanent falls: the record is written, the player is told once, and the
+// only way back is the toggle in the sheet.
+//
+// The probe, the store and the mount are all handed to `App` here, so no check
+// below depends on the platform the test runner happens to sit on.
+// ---------------------------------------------------------------------------
+
+/** A store that holds what was written, so a check can read it back. */
+function fakeStore(opening?: Settings): SettingsStore & { written: number } {
+  const held = new Map<string, string>();
+  if (opening !== undefined) held.set(SETTINGS_KEY, JSON.stringify(opening));
+  return {
+    written: 0,
+    getItem(key: string): string | null {
+      return held.get(key) ?? null;
+    },
+    setItem(key: string, value: string): void {
+      held.set(key, value);
+      this.written += 1;
+    },
+  };
+}
+
+/** A mount that answers, and counts the containers it was handed. */
+function fakeMount(answer: 'mounts' | 'refuses'): TrayMount & { calls: HTMLElement[] } {
+  const calls: HTMLElement[] = [];
+  const mount: TrayMount = (container) => {
+    calls.push(container);
+    return answer === 'mounts'
+      ? Promise.resolve({})
+      : Promise.reject(new Error('the lazy 3D chunk did not arrive'));
+  };
+  return Object.assign(mount, { calls });
+}
+
+const answers =
+  (decision: TrayDecision): TrayProbe =>
+  () =>
+    Promise.resolve(decision);
+
+/** Let the probe promise and the effects it starts run to the end. */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+function screen(): HTMLElement {
+  const found = document.querySelector<HTMLElement>('.screen');
+  if (found === null) throw new Error('the screen is not on the page');
+  return found;
+}
+
+function notice(): HTMLElement {
+  return element('flat-fallback-note');
+}
+
+/** Every notice element on the page. "Once" is a count, so it is counted. */
+function notices(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-el="flat-fallback-note"]')];
+}
+
+const ABOVE_THE_BAR: TrayDecision = { tray: true, reasons: [] };
+const BELOW_THE_BAR: TrayDecision = { tray: false, reasons: ['no-webgl2', 'low-core-count'] };
+
+describe('the renderer choice', () => {
+  it('draws flat dice until the probe answers, and mounts nothing', async () => {
+    const store = fakeStore();
+    const mounting = fakeMount('mounts');
+    mount({ store, mount: mounting });
+
+    // Rest A holds no table. `Done` is what shows it, so the mount can only be
+    // refused by the choice and never by the table staying hidden.
+    click(element('collapse-button'));
+    await settle();
+
+    expect(screen().dataset['trayDecision'], 'the probe has not answered').toBe('pending');
+    expect(screen().dataset['renderer'], 'so the dice are flat').toBe('flat');
+    expect(mounting.calls.length, 'and nothing of the 3D chunk is fetched').toBe(0);
+    expect(store.written, 'a fall nothing measured is not recorded').toBe(0);
+    expect(notice().textContent, 'and the player is told nothing').toBe('');
+  });
+
+  it('mounts the table once, when the probe clears the bar', async () => {
+    const store = fakeStore();
+    const mounting = fakeMount('mounts');
+    mount({ store, probe: answers(ABOVE_THE_BAR), mount: mounting });
+    await settle();
+
+    expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
+    expect(mounting.calls.length, 'the table is hidden at rest A, so nothing mounts yet').toBe(0);
+
+    click(element('collapse-button'));
+    await settle();
+    expect(mounting.calls.length, 'the table shows and the tray mounts once').toBe(1);
+    expect(mounting.calls[0], 'it mounts into the table element').toBe(element('dice-table'));
+    expect(notice().textContent, 'nothing fell, so nothing is said').toBe('');
+    expect(store.written, 'and nothing is recorded').toBe(0);
+    expect(readSettings(store).flatFallback, 'the record still holds no fall').toBe(false);
+  });
+
+  it('falls to flat dice when the table does not mount, and says so once', async () => {
+    const store = fakeStore();
+    const mounting = fakeMount('refuses');
+    // A pool the re-throws below can put back on the table.
+    const opening = {
+      ...builtState({ attribute: 3, skill: 2 }, 'pool-banes-damage-ratings'),
+      builderOpen: true,
+    };
+    mount({
+      store,
+      probe: answers(ABOVE_THE_BAR),
+      mount: mounting,
+      initial: opening,
+      random: seededRandom(8),
+    });
+    await settle();
+    expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
+
+    click(element('collapse-button'));
+    await settle();
+
+    expect(mounting.calls.length, 'the mount was asked for and it refused').toBe(1);
+    expect(screen().dataset['renderer'], 'so the dice are flat now').toBe('flat');
+    expect(screen().dataset['trayDecision'], 'and the probe still reads what it read').toBe('true');
+    expect(readSettings(store).flatFallback, 'the fall is permanent, so it is recorded').toBe(true);
+    expect(notices().length, 'one notice, not two').toBe(1);
+    expect(notice().textContent, 'and it names the fall and the way back').toBe(
+      noticeText(startRenderer(ABOVE_THE_BAR, { ...DEFAULT_SETTINGS, flatFallback: true }).choice),
+    );
+
+    // "Once" is the claim, so the throws are what test it. The element itself
+    // is compared, not only its text: a live region that is rebuilt is read
+    // out again, and a reader would then hear the notice on every throw.
+    const said = notice();
+    const text = said.textContent;
+    const writes = store.written;
+    click(element('roll-button'));
+    click(element('roll-button'));
+    click(element('roll-button'));
+    await settle();
+
+    expect(
+      facesOnTable().size,
+      'the throws landed, so the check is about a screen that rolled',
+    ).toBe(5);
+    expect(notices().length, 'still one notice after three throws').toBe(1);
+    expect(notice(), 'the same element, so no reader reads it again').toBe(said);
+    expect(notice().textContent, 'and the same words').toBe(text);
+    expect(store.written, 'and the record is written once, not once per throw').toBe(writes);
+    expect(mounting.calls.length, 'the table is never asked for again').toBe(1);
+  });
+
+  it('records the fall and says so once when the probe answers below the bar', async () => {
+    const store = fakeStore();
+    const mounting = fakeMount('mounts');
+    mount({ store, probe: answers(BELOW_THE_BAR), mount: mounting });
+    await settle();
+
+    expect(screen().dataset['renderer']).toBe('flat');
+    expect(screen().dataset['trayDecision']).toBe('false');
+    expect(readSettings(store).flatFallback, 'a platform below the bar falls for good').toBe(true);
+    expect(notice().textContent, 'the notice names the platform, not a load that failed').toBe(
+      'This browser cannot draw the table. The dice are flat now.',
+    );
+
+    click(element('collapse-button'));
+    await settle();
+    expect(mounting.calls.length, 'and the 3D chunk is never fetched').toBe(0);
+  });
+
+  it('says nothing at startup to a player who already fell', async () => {
+    const store = fakeStore({ ...DEFAULT_SETTINGS, flatFallback: true });
+    mount({ store, probe: answers(ABOVE_THE_BAR), mount: fakeMount('mounts') });
+    await settle();
+
+    expect(screen().dataset['renderer'], 'the record decides, and it holds a fall').toBe('flat');
+    expect(notice().textContent, 'the player was told in the session that fell').toBe('');
+    expect(store.written, 'and nothing is written again').toBe(0);
+  });
+
+  it('gives the table back through the sheet, and takes it away again', async () => {
+    const store = fakeStore({ ...DEFAULT_SETTINGS, flatFallback: true });
+    const mounting = fakeMount('mounts');
+    mount({ store, probe: answers(ABOVE_THE_BAR), mount: mounting });
+    await settle();
+    expect(screen().dataset['renderer']).toBe('flat');
+
+    click(element('disclosure-toggle'));
+    const box = (): HTMLInputElement => {
+      const found = element('sheet-tray-renderer').querySelector<HTMLInputElement>('input');
+      if (found === null) throw new Error('the sheet holds no renderer toggle');
+      return found;
+    };
+    expect(box().checked, 'the toggle reads the renderer the screen draws').toBe(false);
+    expect(box().disabled, 'a platform above the bar may be asked for the table').toBe(false);
+    expect(element('sheet-tray-note').textContent, 'and the note names the way back').toBe(
+      'The dice are flat. Switch this on to ask for the table again.',
+    );
+
+    click(box());
+    await settle();
+    expect(screen().dataset['renderer'], 'the player asked for the table').toBe('tray');
+    expect(readSettings(store).flatFallback, 'so the recorded fall is cleared').toBe(false);
+    expect(box().checked).toBe(true);
+
+    click(box());
+    await settle();
+    expect(screen().dataset['renderer'], 'and the same switch goes back').toBe('flat');
+    expect(readSettings(store).flatFallback, 'which records the fall again').toBe(true);
+    expect(notice().textContent, 'a fall the player asked for is not announced back').toBe('');
+  });
+
+  it('refuses the toggle below the bar and names every reading that failed', async () => {
+    const store = fakeStore();
+    mount({ store, probe: answers(BELOW_THE_BAR), mount: fakeMount('mounts') });
+    await settle();
+
+    click(element('disclosure-toggle'));
+    const box = element('sheet-tray-renderer').querySelector<HTMLInputElement>('input');
+    if (box === null) throw new Error('the sheet holds no renderer toggle');
+    expect(box.checked).toBe(false);
+    expect(box.disabled, 'the toggle cannot give a platform what it does not have').toBe(true);
+    // One sentence per reading below the bar, and the count is the denominator.
+    const note = element('sheet-tray-note').textContent ?? '';
+    expect(note).toBe(
+      'This browser cannot draw the table. The browser gives no 3D drawing surface. ' +
+        'The device reports too few processor cores.',
+    );
+    expect(
+      note.split('.').filter((part) => part.trim().length > 0).length,
+      'one opening sentence and one per reading',
+    ).toBe(1 + BELOW_THE_BAR.reasons.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The shake, on a re-throw — the defect Unit 2.3 reported
+// ---------------------------------------------------------------------------
+
+describe('the shake of a re-throw', () => {
+  it('rebuilds every die cell, so a die that stayed in its zone shakes too', () => {
+    const only = profile('pool-banes-damage-ratings');
+    const opening = builtState({ attribute: 3, skill: 3, gear: 2 }, only.id);
+    mount({ initial: opening, random: seededRandom(8) });
+
+    click(element('roll-button'));
+    const zoneOf = (name: string): string =>
+      element(name).closest('[data-el="kept-shelf"]') === null ? 'throw-zone' : 'kept-shelf';
+    const before = new Map(
+      [...document.querySelectorAll<HTMLElement>('[data-el^="die-"]')].map((slot) => [
+        slot.dataset.el ?? '',
+        { node: slot, zone: zoneOf(slot.dataset.el ?? '') },
+      ]),
+    );
+    expect(before.size, 'the first roll is on the table').toBe(8);
+
+    click(element('roll-button'));
+
+    // The dice that stayed in their zone are the ones the defect kept. They are
+    // the denominator, and it must not be empty: a re-throw that moved every
+    // die would prove nothing about the key.
+    const stayed: string[] = [];
+    const reused: string[] = [];
+    for (const [name, was] of before) {
+      const now = document.querySelector<HTMLElement>(`[data-el="${name}"]`);
+      expect(now, `${name} is still on the table after the re-throw`).not.toBeNull();
+      if (now === null) continue;
+      if (zoneOf(name) !== was.zone) continue;
+      stayed.push(name);
+      if (now === was.node) reused.push(name);
+    }
+    expect(stayed.length, 'some dice stayed in the zone they were in').toBeGreaterThan(0);
+    expect(
+      reused,
+      'every die cell is rebuilt on a re-throw, so the shake plays again on all of them',
+    ).toEqual([]);
+    expect(
+      [...document.querySelectorAll('.slot.thrown')].length,
+      'and every die of the new roll is marked as thrown',
+    ).toBe(before.size);
   });
 });
