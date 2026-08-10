@@ -48,6 +48,12 @@ import {
 // URL here. The working directory is the root Vitest was configured from.
 const DESIGN = readFileSync(resolve(process.cwd(), 'docs/design/0002-screen-design.md'), 'utf8');
 
+// The affordance fetches the vendored bundle on demand, and it is 763 KB of
+// source for the transform to chew. Warming it here takes that cost out of the
+// first tray check, so a wait below measures the tray and never the loader. A
+// slow machine failed on that difference: measured in CI on 2026-08-10.
+await import('./tray/vendor/dice-tray.js');
+
 /** The number words the document may count in. An unknown word is a failure. */
 const NUMBER_WORDS: Readonly<Record<string, number>> = {
   one: 1,
@@ -1147,11 +1153,15 @@ async function settle(): Promise<void> {
  * promise, so the tray runs over several tasks and not several microtasks.
  */
 async function settleTray(until: () => boolean = () => true): Promise<void> {
-  for (let step = 0; step < 300; step += 1) {
+  const deadline = Date.now() + TRAY_WAIT_MS;
+  for (let step = 0; ; step += 1) {
     await act(async () => {
-      await new Promise((done) => setTimeout(done, 0));
+      await new Promise((done) => setTimeout(done, 1));
     });
     if (step >= 4 && until()) return;
+    if (Date.now() > deadline) {
+      throw new Error(`the tray never answered inside ${TRAY_WAIT_MS} ms`);
+    }
   }
 }
 
@@ -1169,6 +1179,15 @@ function notice(): HTMLElement {
 function notices(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>('[data-el="flat-fallback-note"]')];
 }
+
+/**
+ * How long a tray wait may take before it is called a failure.
+ *
+ * A wait that runs out throws and names itself, so a slow machine reports the
+ * wait rather than a downstream assertion about a tray that had not answered
+ * yet. The vendored bundle is warmed above, so this covers the tray alone.
+ */
+const TRAY_WAIT_MS = 15000;
 
 const ABOVE_THE_BAR: TrayDecision = { tray: true, reasons: [] };
 const BELOW_THE_BAR: TrayDecision = { tray: false, reasons: ['no-webgl2', 'low-core-count'] };
@@ -1358,193 +1377,206 @@ describe('the renderer choice', () => {
 // ---------------------------------------------------------------------------
 
 describe('the 3D tray inside the application', () => {
-  it('acts out the roll the core decided, and lays a cell over every die', async () => {
-    const only = profile('pool-banes-damage-ratings');
-    const opening = builtState({ attribute: 3, skill: 2, gear: 1 }, only.id);
-    const mounting = fakeMount('mounts');
-    mount({
-      store: fakeStore(),
-      probe: answers(ABOVE_THE_BAR),
-      mount: mounting,
-      initial: opening,
-      random: seededRandom(8),
-    });
-    await settle();
-    await settleTray();
-    expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
-    expect(mounting.tray.thrown.length, 'an empty table is not acted out').toBe(0);
+  it(
+    'acts out the roll the core decided, and lays a cell over every die',
+    async () => {
+      const only = profile('pool-banes-damage-ratings');
+      const opening = builtState({ attribute: 3, skill: 2, gear: 1 }, only.id);
+      const mounting = fakeMount('mounts');
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        mount: mounting,
+        initial: opening,
+        random: seededRandom(8),
+      });
+      await settle();
+      await settleTray();
+      expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
+      expect(mounting.tray.thrown.length, 'an empty table is not acted out').toBe(0);
 
-    click(element('roll-button'));
-    await settleTray(() => mounting.tray.thrown.length > 0);
+      click(element('roll-button'));
+      await settleTray(() => mounting.tray.thrown.length > 0);
 
-    // The oracle. The same builder, the same difficulty and the same seed the
-    // screen was given, asked outside it, so no face is written down here.
-    const oracle = rollNow(opening, seededRandom(8));
-    if (oracle.result === null) throw new Error('the fixture rolled nothing');
-    const order = trayIndexOf(oracle.result.dice);
-    const values = [...oracle.result.dice]
-      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
-      .map((die) => latestValue(die) as number);
+      // The oracle. The same builder, the same difficulty and the same seed the
+      // screen was given, asked outside it, so no face is written down here.
+      const oracle = rollNow(opening, seededRandom(8));
+      if (oracle.result === null) throw new Error('the fixture rolled nothing');
+      const order = trayIndexOf(oracle.result.dice);
+      const values = [...oracle.result.dice]
+        .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+        .map((die) => latestValue(die) as number);
 
-    expect(mounting.tray.thrown.length, 'the tray acted the throw out once').toBe(1);
-    expect(
-      (mounting.tray.thrown[0] ?? '').split('@')[1],
-      'and it acted out the values the core decided, in tray order',
-    ).toBe(values.join(','));
-    expect(mounting.tray.diceList.length, 'one body per die of the pool').toBe(
-      oracle.result.dice.length,
-    );
+      expect(mounting.tray.thrown.length, 'the tray acted the throw out once').toBe(1);
+      expect(
+        (mounting.tray.thrown[0] ?? '').split('@')[1],
+        'and it acted out the values the core decided, in tray order',
+      ).toBe(values.join(','));
+      expect(mounting.tray.diceList.length, 'one body per die of the pool').toBe(
+        oracle.result.dice.length,
+      );
 
-    // The flat dice draw nothing over the table. Every cell is empty and every
-    // one lies over the die it names, at the place this file put that die.
-    const cells = [...document.querySelectorAll<HTMLElement>('[data-el^="die-"]')];
-    expect(cells.length, 'one cell per die').toBe(oracle.result.dice.length);
-    expect(
-      cells.filter((cell) => (cell.textContent ?? '') !== '').length,
-      'no cell draws a flat copy of the die under it',
-    ).toBe(0);
-    const placed = oracle.result.dice.map((die) => ({
-      name: dieElement(die),
-      drawn: cellSpot(dieElement(die)),
-      wanted: fakeSpot(order.get(die.id) ?? -1),
-    }));
-    expect(placed.length).toBe(oracle.result.dice.length);
-    for (const { name, drawn, wanted } of placed) {
-      expect(drawn, `${name} lies over the die the tray put down`).toEqual(wanted);
-    }
-
-    // Every cell still carries its name and its state, exactly as the flat
-    // renderer does. Section 6 walks the same list either way.
-    expect(cells.filter((cell) => (cell.getAttribute('aria-label') ?? '') !== '').length).toBe(
-      cells.length,
-    );
-    expect(
-      cells.filter(
-        (cell) => cell.getAttribute('aria-pressed') !== null || cell.getAttribute('role') === 'img',
-      ).length,
-      'a die is a button that answers a press, or an image the rules hold',
-    ).toBe(cells.length);
-  });
-
-  it('acts the push out on the table, and spawns the die the profile added', async () => {
-    // The third preset raises stress by one BEFORE the re-throw, so the core
-    // creates a die the tray never spawned. That is the defect this unit
-    // closes.
-    const held = profile('pool-stress-and-complications');
-    expect(held.stressBehaviour, 'the preset adds a die before the re-throw').toBe(
-      'addBeforeReroll',
-    );
-    const opening = builtState({ attribute: 3, skill: 2 }, held.id);
-    const first = rollNow(opening, seededRandom(4));
-    if (first.result === null) throw new Error('the fixture rolled nothing');
-
-    const mounting = fakeMount('mounts');
-    mount({
-      store: fakeStore(),
-      probe: answers(ABOVE_THE_BAR),
-      mount: mounting,
-      initial: first,
-      random: seededRandom(9),
-    });
-    await settle();
-    await settleTray(() => mounting.tray.thrown.length > 0);
-    expect(mounting.tray.thrown.length, 'the first roll is on the table').toBe(1);
-
-    // The oracle, outside the screen, over the same result and the same seed.
-    const oracle = push(first.result, held, seededRandom(9));
-    if (oracle.kind !== 'pushed') throw new Error('the core refused the fixture push');
-    expect(oracle.stressAdded, 'the core added a stress die').not.toBeNull();
-
-    const before = mounting.tray.thrown.length;
-    click(pushButton());
-    await settleTray(() => mounting.tray.rerolled.length > 0);
-
-    const order = trayIndexOf(first.result.dice);
-    const added = oracle.dice.find((die) => die.id === oracle.stressAdded);
-    if (added === undefined) throw new Error('the core named a die it did not add');
-    expect(mounting.tray.thrown.length, 'a push is not a fresh throw of the whole pool').toBe(
-      before,
-    );
-    expect(
-      mounting.tray.added,
-      'the tray spawned the die the push added, on its own value',
-    ).toEqual([`1d${added.faces}@${latestValue(added) as number}`]);
-    // The re-throw names the other loose dice, by tray index, and never the
-    // die `add` has already landed.
-    const wanted = oracle.rerolled
-      .filter((id) => id !== oracle.stressAdded)
-      .map((id) => order.get(id) ?? -1);
-    expect(mounting.tray.rerolled.length).toBe(1);
-    expect(mounting.tray.rerolled[0]?.[0]).toEqual(wanted);
-    expect(mounting.tray.diceList.length, 'the table now holds one more body').toBe(
-      first.result.dice.length + 1,
-    );
-    // And the screen shows the same pool the tray holds.
-    expect(facesOnTable().size).toBe(oracle.dice.length);
-  });
-
-  it('walks the thirty-five visits of section 6 with the table running', async () => {
-    const list = walkList(DESIGN, 'After');
-    expect(list.names.length, 'the numbered list is as long as the prose says').toBe(list.stated);
-
-    const held = profile('pool-stress-and-complications');
-    const dice = throwDice(worstCaseState());
-    const kept = new Set(
-      list.names.slice(1, 1 + list.names.filter((name) => name.startsWith('die-')).length),
-    );
-    // The same fixture the flat walk uses: the document says which dice it
-    // keeps and the screen decides the order.
-    const shelfNames = new Set(list.names.filter((name) => name.startsWith('die-')).slice(0, 9));
-    const rolled = showing(
-      dice,
-      dice.map((die) => (shelfNames.has(dieElement(die)) ? 6 : 3)),
-    );
-    expect(kept.size).toBeGreaterThan(0);
-
-    const mounting = fakeMount('mounts');
-    mount({
-      store: fakeStore(),
-      probe: answers(ABOVE_THE_BAR),
-      mount: mounting,
-      initial: tableState(rolled, held.id, 10),
-    });
-    await settle();
-    await settleTray(() => mounting.tray.thrown.length > 0);
-
-    expect(screen().dataset['renderer'], 'the table is the renderer here').toBe('tray');
-    expect(element('dice-table').hidden, 'and it is on the screen').toBe(false);
-    expect(element('dice-tray').className, 'the cells lie over it').toContain('over');
-
-    const visits = walk(document);
-    expect(visits.map((visit) => visit.name)).toEqual(list.names);
-    expect(visits.length, 'the walk reached every named visit and no other').toBe(list.stated);
-    const positions = (by: 'tab' | 'arrow'): number[] =>
-      visits.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
-    expect(positions('tab')).toEqual(list.tab);
-    expect(positions('arrow')).toEqual(list.arrow);
-
-    // A press still keeps a die and a rule lock still refuses, over the same
-    // cells the walk reached. The denominator is the whole pool.
-    let pressedCount = 0;
-    let refusedCount = 0;
-    for (const name of list.names.filter((one) => one.startsWith('die-'))) {
-      const cell = element(name);
-      const was = cell.getAttribute('aria-pressed');
-      click(cell);
-      const now = element(name).getAttribute('aria-pressed');
-      if (was === null) {
-        expect(now, `${name} is held by the rules and takes no press`).toBeNull();
-        refusedCount += 1;
-        continue;
+      // The flat dice draw nothing over the table. Every cell is empty and every
+      // one lies over the die it names, at the place this file put that die.
+      const cells = [...document.querySelectorAll<HTMLElement>('[data-el^="die-"]')];
+      expect(cells.length, 'one cell per die').toBe(oracle.result.dice.length);
+      expect(
+        cells.filter((cell) => (cell.textContent ?? '') !== '').length,
+        'no cell draws a flat copy of the die under it',
+      ).toBe(0);
+      const placed = oracle.result.dice.map((die) => ({
+        name: dieElement(die),
+        drawn: cellSpot(dieElement(die)),
+        wanted: fakeSpot(order.get(die.id) ?? -1),
+      }));
+      expect(placed.length).toBe(oracle.result.dice.length);
+      for (const { name, drawn, wanted } of placed) {
+        expect(drawn, `${name} lies over the die the tray put down`).toEqual(wanted);
       }
-      expect(now, `${name} answered the press`).not.toBe(was);
-      pressedCount += 1;
-      click(element(name));
-    }
-    expect(pressedCount + refusedCount).toBe(dice.length);
-    expect(pressedCount).toBeGreaterThan(0);
-    expect(refusedCount).toBeGreaterThan(0);
-  });
+
+      // Every cell still carries its name and its state, exactly as the flat
+      // renderer does. Section 6 walks the same list either way.
+      expect(cells.filter((cell) => (cell.getAttribute('aria-label') ?? '') !== '').length).toBe(
+        cells.length,
+      );
+      expect(
+        cells.filter(
+          (cell) =>
+            cell.getAttribute('aria-pressed') !== null || cell.getAttribute('role') === 'img',
+        ).length,
+        'a die is a button that answers a press, or an image the rules hold',
+      ).toBe(cells.length);
+    },
+    TRAY_WAIT_MS + 5000,
+  );
+
+  it(
+    'acts the push out on the table, and spawns the die the profile added',
+    async () => {
+      // The third preset raises stress by one BEFORE the re-throw, so the core
+      // creates a die the tray never spawned. That is the defect this unit
+      // closes.
+      const held = profile('pool-stress-and-complications');
+      expect(held.stressBehaviour, 'the preset adds a die before the re-throw').toBe(
+        'addBeforeReroll',
+      );
+      const opening = builtState({ attribute: 3, skill: 2 }, held.id);
+      const first = rollNow(opening, seededRandom(4));
+      if (first.result === null) throw new Error('the fixture rolled nothing');
+
+      const mounting = fakeMount('mounts');
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        mount: mounting,
+        initial: first,
+        random: seededRandom(9),
+      });
+      await settle();
+      await settleTray(() => mounting.tray.thrown.length > 0);
+      expect(mounting.tray.thrown.length, 'the first roll is on the table').toBe(1);
+
+      // The oracle, outside the screen, over the same result and the same seed.
+      const oracle = push(first.result, held, seededRandom(9));
+      if (oracle.kind !== 'pushed') throw new Error('the core refused the fixture push');
+      expect(oracle.stressAdded, 'the core added a stress die').not.toBeNull();
+
+      const before = mounting.tray.thrown.length;
+      click(pushButton());
+      await settleTray(() => mounting.tray.rerolled.length > 0);
+
+      const order = trayIndexOf(first.result.dice);
+      const added = oracle.dice.find((die) => die.id === oracle.stressAdded);
+      if (added === undefined) throw new Error('the core named a die it did not add');
+      expect(mounting.tray.thrown.length, 'a push is not a fresh throw of the whole pool').toBe(
+        before,
+      );
+      expect(
+        mounting.tray.added,
+        'the tray spawned the die the push added, on its own value',
+      ).toEqual([`1d${added.faces}@${latestValue(added) as number}`]);
+      // The re-throw names the other loose dice, by tray index, and never the
+      // die `add` has already landed.
+      const wanted = oracle.rerolled
+        .filter((id) => id !== oracle.stressAdded)
+        .map((id) => order.get(id) ?? -1);
+      expect(mounting.tray.rerolled.length).toBe(1);
+      expect(mounting.tray.rerolled[0]?.[0]).toEqual(wanted);
+      expect(mounting.tray.diceList.length, 'the table now holds one more body').toBe(
+        first.result.dice.length + 1,
+      );
+      // And the screen shows the same pool the tray holds.
+      expect(facesOnTable().size).toBe(oracle.dice.length);
+    },
+    TRAY_WAIT_MS + 5000,
+  );
+
+  it(
+    'walks the thirty-five visits of section 6 with the table running',
+    async () => {
+      const list = walkList(DESIGN, 'After');
+      expect(list.names.length, 'the numbered list is as long as the prose says').toBe(list.stated);
+
+      const held = profile('pool-stress-and-complications');
+      const dice = throwDice(worstCaseState());
+      const kept = new Set(
+        list.names.slice(1, 1 + list.names.filter((name) => name.startsWith('die-')).length),
+      );
+      // The same fixture the flat walk uses: the document says which dice it
+      // keeps and the screen decides the order.
+      const shelfNames = new Set(list.names.filter((name) => name.startsWith('die-')).slice(0, 9));
+      const rolled = showing(
+        dice,
+        dice.map((die) => (shelfNames.has(dieElement(die)) ? 6 : 3)),
+      );
+      expect(kept.size).toBeGreaterThan(0);
+
+      const mounting = fakeMount('mounts');
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        mount: mounting,
+        initial: tableState(rolled, held.id, 10),
+      });
+      await settle();
+      await settleTray(() => mounting.tray.thrown.length > 0);
+
+      expect(screen().dataset['renderer'], 'the table is the renderer here').toBe('tray');
+      expect(element('dice-table').hidden, 'and it is on the screen').toBe(false);
+      expect(element('dice-tray').className, 'the cells lie over it').toContain('over');
+
+      const visits = walk(document);
+      expect(visits.map((visit) => visit.name)).toEqual(list.names);
+      expect(visits.length, 'the walk reached every named visit and no other').toBe(list.stated);
+      const positions = (by: 'tab' | 'arrow'): number[] =>
+        visits.flatMap((visit, index) => (visit.by === by ? [index + 1] : []));
+      expect(positions('tab')).toEqual(list.tab);
+      expect(positions('arrow')).toEqual(list.arrow);
+
+      // A press still keeps a die and a rule lock still refuses, over the same
+      // cells the walk reached. The denominator is the whole pool.
+      let pressedCount = 0;
+      let refusedCount = 0;
+      for (const name of list.names.filter((one) => one.startsWith('die-'))) {
+        const cell = element(name);
+        const was = cell.getAttribute('aria-pressed');
+        click(cell);
+        const now = element(name).getAttribute('aria-pressed');
+        if (was === null) {
+          expect(now, `${name} is held by the rules and takes no press`).toBeNull();
+          refusedCount += 1;
+          continue;
+        }
+        expect(now, `${name} answered the press`).not.toBe(was);
+        pressedCount += 1;
+        click(element(name));
+      }
+      expect(pressedCount + refusedCount).toBe(dice.length);
+      expect(pressedCount).toBeGreaterThan(0);
+      expect(refusedCount).toBeGreaterThan(0);
+    },
+    TRAY_WAIT_MS + 5000,
+  );
 });
 
 // ---------------------------------------------------------------------------
