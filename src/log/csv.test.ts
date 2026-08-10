@@ -41,7 +41,7 @@ const NOTES: readonly string[] = [
 function builderFor(mode: Mode) {
   return mode === 'pool'
     ? poolBuilder({ attribute: 2, skill: 1, gear: 1, artifact: [8] })
-    : stepBuilder(4, [
+    : stepBuilder({ attribute: 10, skill: 8 }, [
         { type: 'gear', faces: 6 },
         { type: 'artifact', faces: 10 },
       ]);

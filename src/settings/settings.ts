@@ -42,8 +42,8 @@ export const SETTINGS_VERSION = 6;
  *
  * The preset holds `PoolCounts`, which is what `poolBuilder` takes, so a
  * recalled preset goes straight back into the rules core. Step mode is not
- * saved: its pool is one index on the ladder plus the extras, and Unit 4.3 asks
- * for a named pool.
+ * saved: its pool is two rated die sizes plus the extras, and Unit 4.3 asks for
+ * a named pool.
  *
  * **The name is user-editable text.** Storage keeps it exactly as the player
  * typed it, markup and all, and nothing here escapes it or strips it. Every

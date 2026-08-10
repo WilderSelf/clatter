@@ -1,7 +1,7 @@
 // Rules core. No browser API, no module-level mutable state.
-// The step ladder, the difficulty range, the removal order, the help limit and
-// the mode switch come from specs/0001-rules-model.md, sections "The step
-// ladder — enumerated, not procedural" and "Other rules".
+// The step dice, the difficulty range, the removal order, the help limit and
+// the mode switch come from specs/0001-rules-model.md, sections "Step dice —
+// two independent scales" and "Other rules".
 
 import type { Die, DieType, Faces } from './die';
 import { createDie } from './die';
@@ -20,34 +20,23 @@ export interface DiceSpec {
 }
 
 /**
- * One state of the step ladder. State 0 holds a lone attribute die, so the
- * skill die is absent there.
+ * A step-mode pair.
+ *
+ * The attribute and the skill are rated on two independent scales, so all
+ * sixteen size pairs are expressible, a d12 beside a d6 among them. A skill of
+ * `null` is no skill die at all, and it is independent of the attribute size:
+ * the player rolls the attribute die alone, at whatever size it holds.
  */
-export interface LadderState {
+export interface StepDice {
   readonly attribute: Faces;
   readonly skill: Faces | null;
 }
 
-/**
- * The eight states, in order. A modifier is an index offset into this list.
- *
- * Prose rules that step the lower die up and the higher die down are
- * path-dependent, so `+2` then `-1` would not reliably equal `+1`. An index
- * offset makes reversibility true by construction. Do not replace this list
- * with a procedural stepping rule.
- */
-export const STEP_LADDER: readonly LadderState[] = [
-  { attribute: 6, skill: null },
-  { attribute: 6, skill: 6 },
-  { attribute: 8, skill: 6 },
-  { attribute: 8, skill: 8 },
-  { attribute: 10, skill: 8 },
-  { attribute: 10, skill: 10 },
-  { attribute: 12, skill: 10 },
-  { attribute: 12, skill: 12 },
-];
+/** The four sizes of a step die, smallest first. Both scales run over it. */
+export const STEP_SIZES: readonly Faces[] = [6, 8, 10, 12];
 
-const LAST_STEP = STEP_LADDER.length - 1;
+/** Where a step pool starts: the smallest attribute and no skill die. */
+export const START_STEP_DICE: StepDice = { attribute: 6, skill: null };
 
 /** Difficulty runs from +3 to -3. There is no target number. */
 export const MODIFIER_LIMIT = 3;
@@ -62,17 +51,66 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
 
-/** The ceiling and the floor of the ladder are the ends of the list. */
-export function stepIndex(index: number, offset: number): number {
-  return clamp(index + offset, 0, LAST_STEP);
+function rankOf(faces: Faces): number {
+  return STEP_SIZES.indexOf(faces);
 }
 
-export function ladderState(index: number): LadderState {
-  const state = STEP_LADDER[clamp(index, 0, LAST_STEP)];
-  if (state === undefined) {
-    throw new Error(`no step-ladder state at index ${index}`);
+/** The size at one rank of the scale. Both ends of the scale clamp. */
+function sizeAt(rank: number): Faces {
+  const size = STEP_SIZES[clamp(rank, 0, STEP_SIZES.length - 1)];
+  if (size === undefined) {
+    throw new Error(`no step size at rank ${rank}`);
   }
-  return state;
+  return size;
+}
+
+/**
+ * How one modifier splits across the two dice, as data rather than as branching
+ * code. The row is chosen by the modifier alone. The first number is the steps
+ * the lower-rated die takes and the second is the steps the higher-rated one
+ * takes, so a modifier raises the weaker die first and lowers the stronger die
+ * first. On a tie the attribute counts as the lower die.
+ *
+ * The rows are read off the progression the earlier eight-state list held, so
+ * every pair that list could express steps exactly as it did.
+ */
+const MODIFIER_SPLIT: readonly (readonly [number, number])[] = [
+  [-1, -2], // -3
+  [-1, -1], // -2
+  [0, -1], // -1
+  [0, 0], //  0
+  [1, 0], // +1
+  [1, 1], // +2
+  [2, 1], // +3
+];
+
+/**
+ * The sizes a modifier rolls, from the base pair and the modifier alone.
+ *
+ * **It reads the base pair and never a pair it produced earlier.** The base and
+ * the modifier are both stored, so `+2` and then `-1` is the stored integer
+ * `+1` and lands where a single `+1` lands, and `-n` after `+n` returns the
+ * base whether the sizes clamped or not. A rule that stepped the pair it last
+ * produced would be path-dependent, and `+2` then `-1` would not reliably equal
+ * `+1`. That is the defect the earlier eight-state list was written to avoid,
+ * and a stored modifier avoids it without tying the two scales together.
+ */
+export function steppedDice(base: StepDice, modifier: number): StepDice {
+  const split = MODIFIER_SPLIT[clamp(modifier, -MODIFIER_LIMIT, MODIFIER_LIMIT) + MODIFIER_LIMIT];
+  if (split === undefined) {
+    throw new Error(`no modifier split for ${modifier}`);
+  }
+  const [lower, higher] = split;
+  if (base.skill === null) {
+    // No skill die stays no skill die. The whole modifier falls on the lone
+    // attribute die, which is what the pair would have taken between them.
+    return { attribute: sizeAt(rankOf(base.attribute) + lower + higher), skill: null };
+  }
+  const attributeIsLower = rankOf(base.attribute) <= rankOf(base.skill);
+  return {
+    attribute: sizeAt(rankOf(base.attribute) + (attributeIsLower ? lower : higher)),
+    skill: sizeAt(rankOf(base.skill) + (attributeIsLower ? higher : lower)),
+  };
 }
 
 /** Counts per dice type. An artifact die carries its own size, so it is listed. */
@@ -90,21 +128,25 @@ export interface PoolBuilder {
   readonly dice: readonly DiceSpec[];
 }
 
-export interface StepBuilder {
+/**
+ * Step mode. The base pair is what the player rated, and `modifier` is the
+ * stored difficulty. The rolled sizes are computed from the two when the pool
+ * is built, so nothing ever writes a stepped size back over a base one.
+ */
+export interface StepBuilder extends StepDice {
   readonly mode: 'step';
-  /** An index into STEP_LADDER. */
-  readonly step: number;
+  readonly modifier: number;
   /** Gear, artifact, bonus and stress dice, added to the step roll unchanged. */
   readonly dice: readonly DiceSpec[];
 }
 
 export type Builder = PoolBuilder | StepBuilder;
 
-/** The types a step-dice roll takes on top of the ladder pair. */
+/** The types a step-dice roll takes on top of the rated pair. */
 const STEP_EXTRA_TYPES: readonly DieType[] = ['gear', 'artifact', 'bonus', 'stress'];
 
 export function emptyBuilder(mode: Mode): Builder {
-  return mode === 'pool' ? { mode, dice: [] } : { mode, step: 0, dice: [] };
+  return mode === 'pool' ? { mode, dice: [] } : { mode, ...START_STEP_DICE, modifier: 0, dice: [] };
 }
 
 /**
@@ -134,15 +176,15 @@ export function poolBuilder(counts: PoolCounts): PoolBuilder {
   };
 }
 
-/** Step mode. The ladder gives the attribute and skill dice. */
-export function stepBuilder(index: number, extras: readonly DiceSpec[] = []): StepBuilder {
-  const built: StepBuilder = { mode: 'step', step: clamp(index, 0, LAST_STEP), dice: [] };
+/** Step mode. The rated pair gives the attribute and skill dice. */
+export function stepBuilder(base: StepDice, extras: readonly DiceSpec[] = []): StepBuilder {
+  const built: StepBuilder = { mode: 'step', ...base, modifier: 0, dice: [] };
   return extras.reduce<StepBuilder>((builder, spec) => addDice(builder, spec, 1), built);
 }
 
 export function addDice<B extends Builder>(builder: B, spec: DiceSpec, count = 1): B {
   if (builder.mode === 'step' && !STEP_EXTRA_TYPES.includes(spec.type)) {
-    throw new Error(`step mode takes its ${spec.type} die from the ladder, not from the pool`);
+    throw new Error(`step mode takes its ${spec.type} die from its size, not from the pool`);
   }
   return { ...builder, dice: [...builder.dice, ...repeat(spec, count)] };
 }
@@ -168,11 +210,18 @@ function removeDice(dice: readonly DiceSpec[], count: number): readonly DiceSpec
  * A positive modifier in pool mode adds bonus dice, because a bonus die scores
  * and carries no cost. A negative modifier removes dice in REMOVAL_ORDER, so
  * bonus, stress and artifact dice stay.
+ *
+ * Step mode adds the modifier to the one the builder already holds and changes
+ * no size. `toSpecs` computes the sizes from the base pair and that total, so
+ * two calls compose as arithmetic: `+2` and then `-1` holds `+1`.
  */
 export function applyDifficulty<B extends Builder>(builder: B, modifier: number): B {
   const size = clamp(modifier, -MODIFIER_LIMIT, MODIFIER_LIMIT);
   if (builder.mode === 'step') {
-    return { ...builder, step: stepIndex(builder.step, size) };
+    return {
+      ...builder,
+      modifier: clamp(builder.modifier + size, -MODIFIER_LIMIT, MODIFIER_LIMIT),
+    };
   }
   if (size >= 0) {
     return addDice(builder, { type: 'bonus', faces: 6 }, size);
@@ -189,10 +238,12 @@ function toSpecs(builder: Builder): readonly DiceSpec[] {
   if (builder.mode === 'pool') {
     return builder.dice;
   }
-  const state = ladderState(builder.step);
-  const pair: DiceSpec[] = [{ type: 'attribute', faces: state.attribute }];
-  if (state.skill !== null) {
-    pair.push({ type: 'skill', faces: state.skill });
+  // The sizes are computed here, from the base pair and the stored modifier.
+  // The builder keeps both, so no stepped size is ever read back as a base.
+  const rolled = steppedDice(builder, builder.modifier);
+  const pair: DiceSpec[] = [{ type: 'attribute', faces: rolled.attribute }];
+  if (rolled.skill !== null) {
+    pair.push({ type: 'skill', faces: rolled.skill });
   }
   return [...pair, ...builder.dice];
 }
