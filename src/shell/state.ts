@@ -25,12 +25,21 @@ import {
 } from '../rules/pool';
 import type { PushPreviewOutcome } from '../rules/push';
 import { generations, previewPush, push } from '../rules/push';
-import type { LockState, PushCostUnit, PushProfile } from '../rules/push-profile';
-import { isLocked, lockState, PUSH_PROFILES } from '../rules/push-profile';
+import type {
+  LockState,
+  PushCostUnit,
+  PushProfile,
+  PushProfileOverride,
+} from '../rules/push-profile';
+import { isLocked, lockState, mergeProfile, profileById } from '../rules/push-profile';
 import type { RandomSource } from '../rules/random';
 import type { RollResult } from '../rules/roll';
 import { baneCount, successCount } from '../rules/roll';
-import { score } from '../rules/success';
+import type { ArtifactCurveId } from '../rules/success';
+import { curveFor, score } from '../rules/success';
+import type { Settings } from '../settings/settings';
+import { DEFAULT_SETTINGS } from '../settings/settings';
+import { NO_OVERRIDE, normaliseOverride } from '../settings/profile-fields';
 import { clickDie } from '../tray/affordance';
 
 /**
@@ -97,14 +106,18 @@ const ZERO_COUNTS: Counts = Object.freeze({
 });
 
 /**
- * The profile the application rolls under.
+ * The profile the application opens under.
  *
  * The drawn screen shows the third preset, where the price of a push is a
  * stress rise and a stress bane stops the sequence. Section 7 of
- * `docs/design/0002-screen-design.md` names it. Unit 4.1 turns this into a
- * choice behind the disclosure, and nothing here branches on the id.
+ * `docs/design/0002-screen-design.md` names it. Unit 4.1 turns it into a choice
+ * behind the disclosure, and nothing here branches on the id.
+ *
+ * **The stored record is the one home of this value.** This name is the same
+ * value under the name the shell has used since Unit 2.1, so the screen and the
+ * store cannot open under two different rulesets.
  */
-export const DEFAULT_PROFILE_ID = 'pool-stress-and-complications';
+export const DEFAULT_PROFILE_ID = DEFAULT_SETTINGS.presetId;
 
 export interface AppState {
   readonly mode: Mode;
@@ -115,8 +128,15 @@ export interface AppState {
   /** The builder is open at rest A and collapsed at rest B. */
   readonly builderOpen: boolean;
   readonly sheetOpen: boolean;
-  /** The push profile in force, by id. Unit 4.1 lets the player change it. */
+  /** The push profile in force, by id. `sheet-ruleset` changes it. */
   readonly profileId: string;
+  /**
+   * The change the player made on top of that preset. `sheet-overrides` builds
+   * it and `mergeProfile` applies it. An empty record is the preset unchanged.
+   */
+  readonly override: PushProfileOverride;
+  /** The curve the artifact dice score on. `sheet-artifact-curve` changes it. */
+  readonly artifactCurve: ArtifactCurveId;
   /** The dice on the table, or `null` while the table is empty. */
   readonly result: RollResult | null;
   /** The dice the last throw moved. Those dice shake and no other does. */
@@ -161,6 +181,8 @@ export function emptyState(mode: Mode): AppState {
     builderOpen: true,
     sheetOpen: false,
     profileId: DEFAULT_PROFILE_ID,
+    override: NO_OVERRIDE,
+    artifactCurve: DEFAULT_SETTINGS.artifactCurve,
     result: null,
     thrown: [],
     throwOrdinal: 0,
@@ -169,13 +191,102 @@ export function emptyState(mode: Mode): AppState {
   };
 }
 
-/** The profile record itself. An unknown id is a fault, not a fallback. */
+/** The preset the player chose, before any override. */
+export function presetOf(state: AppState): PushProfile {
+  return profileById(state.profileId);
+}
+
+/**
+ * The profile in force: the chosen preset with the player's override on top of
+ * it. Every reading the screen takes goes through this one call, so the panel,
+ * the cost row, the zones and the tray cannot run under three different rules.
+ */
 export function profileOf(state: AppState): PushProfile {
-  const held = PUSH_PROFILES.find((profile) => profile.id === state.profileId);
-  if (held === undefined) {
-    throw new Error(`no push profile is named ${state.profileId}`);
-  }
-  return held;
+  return mergeProfile(presetOf(state), state.override);
+}
+
+// ---------------------------------------------------------------------------
+// The rules the player chose — Units 4.1 and 4.2
+//
+// **A change of rules clears the table.** Decision 10 of
+// `docs/design/0012-settled-decisions.md` holds the reason: the price of a push
+// is read before the player commits to it, so a roll already on the table was
+// committed to at one price and must never be re-read at another. The pool
+// survives, because nothing about a pool depends on the profile, and the screen
+// goes back to rest A, because a collapsed builder over an empty table is
+// neither rest state of section 1.
+// ---------------------------------------------------------------------------
+
+/** What a change of rules leaves standing, and what it clears. */
+function withRules(state: AppState, rules: Partial<AppState>): AppState {
+  return {
+    ...state,
+    ...rules,
+    builderOpen: true,
+    result: null,
+    thrown: [],
+    lastThrow: null,
+    stressAdded: null,
+  };
+}
+
+/**
+ * Choose a preset. The override stays, because it is a change on top of
+ * whichever preset is chosen, and a leaf the new preset already holds drops out
+ * of it by itself.
+ */
+export function withPreset(state: AppState, presetId: string): AppState {
+  const preset = profileById(presetId);
+  return withRules(state, {
+    profileId: presetId,
+    override: normaliseOverride(preset, state.override),
+  });
+}
+
+/** Change one field of the profile record, on top of the chosen preset. */
+export function withOverride(state: AppState, override: PushProfileOverride): AppState {
+  return withRules(state, { override: normaliseOverride(presetOf(state), override) });
+}
+
+/** Go back to the preset, unchanged. */
+export function withoutOverride(state: AppState): AppState {
+  return withRules(state, { override: NO_OVERRIDE });
+}
+
+export function withArtifactCurve(state: AppState, artifactCurve: ArtifactCurveId): AppState {
+  return withRules(state, { artifactCurve });
+}
+
+/**
+ * The state a stored record opens the screen in.
+ *
+ * The four rules fields are the ones Units 4.1 and 4.2 store. Everything else a
+ * session holds — the pool, the difficulty, the table — is not stored, so it
+ * comes from `emptyState`.
+ */
+export function stateFromSettings(settings: Settings): AppState {
+  const state = emptyState(settings.mode);
+  return {
+    ...state,
+    profileId: settings.presetId,
+    override: normaliseOverride(profileById(settings.presetId), settings.profileOverride),
+    artifactCurve: settings.artifactCurve,
+  };
+}
+
+/**
+ * The stored record after a change of rules, or the record itself where nothing
+ * moved. The caller writes only a record that changed.
+ */
+export function settingsFromState(settings: Settings, state: AppState): Settings {
+  const next: Settings = {
+    ...settings,
+    mode: state.mode,
+    presetId: state.profileId,
+    artifactCurve: state.artifactCurve,
+    profileOverride: state.override,
+  };
+  return JSON.stringify(next) === JSON.stringify(settings) ? settings : next;
 }
 
 function clamp(value: number, low: number, high: number): number {
@@ -368,7 +479,13 @@ export function withDifficulty(state: AppState, value: number): AppState {
  * with it, because a roll of the old pool cannot be pushed under the new one.
  */
 export function withMode(state: AppState, mode: Mode): AppState {
-  return { ...emptyState(mode), sheetOpen: state.sheetOpen, profileId: state.profileId };
+  return {
+    ...emptyState(mode),
+    sheetOpen: state.sheetOpen,
+    profileId: state.profileId,
+    override: state.override,
+    artifactCurve: state.artifactCurve,
+  };
 }
 
 /**
@@ -621,10 +738,19 @@ const STATE_SENTENCE: Readonly<Record<LockState, string>> = {
   loose: 'It goes back in the cup. Press to keep it.',
 };
 
-export function dieView(die: Die, profile: PushProfile): DieView {
+/**
+ * What one die shows.
+ *
+ * `artifactCurve` is the curve the artifact dice score on. It changes what a
+ * die is WORTH and never whether it locks: both artifact curves pay from a face
+ * of six upwards, so `score(die) > 0` reads the same under either one.
+ * `src/rules/success.test.ts` asserts that over every artifact face, which is
+ * what lets the lock read the die's own default curve.
+ */
+export function dieView(die: Die, profile: PushProfile, artifactCurve?: ArtifactCurveId): DieView {
   const value = latestValue(die);
   const state = lockState(die, profile);
-  const successes = score(die);
+  const successes = score(die, curveFor(die, artifactCurve));
   const bane = value === 1;
   const worth =
     successes === 0 ? '' : successes === 1 ? ' One success.' : ` ${successes} successes.`;
@@ -657,7 +783,7 @@ export interface Readout {
 export function readout(state: AppState): Readout {
   const result = state.result;
   return {
-    successes: result === null ? 0 : successCount(result),
+    successes: result === null ? 0 : successCount(result, state.artifactCurve),
     banes:
       result === null
         ? 0
