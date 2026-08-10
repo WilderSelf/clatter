@@ -33,13 +33,16 @@
 //     --url http://localhost:4173/clatter/ --capture-shell docs/design
 //
 // `--history` needs `--url` over a preview server, because it drives the BUILT
-// bundle. It is the browser half of Units 4.4, 4.5 and 4.6: it writes rolls and
-// reads them back out of IndexedDB through its own connection, walks the summary
-// and the record with real key presses, judges the transposed matrix against the
-// stored entry, intercepts the file the export button hands the browser and
-// compares it byte for byte against `exportCsvInChunks` run in node, drives that
-// file back in through a real file picker, and refuses an oversized file while
-// counting the reads of it. `--capture-shell <dir>` writes four frames.
+// bundle. It is the browser half of Units 4.4, 4.5, 4.6 and 4.7: it writes rolls
+// and reads them back out of IndexedDB through its own connection, walks the
+// summary, the record and the charts with real key presses, judges the
+// transposed matrix against the stored entry, intercepts the file the export
+// button hands the browser and compares it byte for byte against
+// `exportCsvInChunks` run in node, drives that file back in through a real file
+// picker, refuses an oversized file while counting the reads of it, and judges
+// every chart value, every bar length, every glyph shape and every chart colour
+// against the record `summariseLog` returns in node.
+// `--capture-shell <dir>` writes six frames.
 // Build first, then run it alone:
 //   npm run build && node scripts/browser.mjs --history \
 //     --url http://localhost:4173/clatter/ --capture-shell docs/design
@@ -8666,6 +8669,646 @@ async function runRecordAndExport(page, options, checks, design) {
   });
 }
 
+/**
+ * The controls one history view carries, read out of the design's own table.
+ *
+ * The row states its count as well, so the table cannot disagree with itself
+ * and no check here carries a number of its own.
+ */
+function designViewControls(design, view) {
+  const from = design.indexOf('### The history is a separate destination');
+  const row = design
+    .slice(from, design.indexOf('###', from + 1))
+    .split('\n')
+    .find((line) => line.trim().startsWith(`| ${view}`));
+  const names = [...(row ?? '').matchAll(/`([a-z-]+)`/g)].map((match) => match[1]).sort();
+  const stated = Number((row ?? '').split('|').map((cell) => cell.trim())[3]);
+  return { names, stated };
+}
+
+/** `rgb(r, g, b)` as the WCAG relative luminance of that colour. */
+function luminanceOfRgb(text) {
+  const found = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(text);
+  if (found === null) return null;
+  const channels = [1, 2, 3].map((at) => {
+    const value = Number(found[at]) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+/** The WCAG contrast ratio between two `rgb()` strings, or null. */
+function ratioOfRgb(a, b) {
+  const first = luminanceOfRgb(a);
+  const second = luminanceOfRgb(b);
+  if (first === null || second === null) return null;
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
+/**
+ * Every value the record carries, enumerated HERE and formatted here.
+ *
+ * The oracle is `summariseLog`, run in node over the rolls this file reads out
+ * of IndexedDB through its own connection. This walk turns that record into the
+ * paths and the text the screen must carry, and it never reads the document.
+ */
+function statisticsValues(stats, noPushText) {
+  const wanted = new Map();
+  const percent = (rate) => `${(rate * 100).toFixed(1)}%`;
+  wanted.set('entriesRead', String(stats.entriesRead));
+  stats.byPoolSize.forEach((row, at) => {
+    wanted.set(`byPoolSize.${at}.poolSize`, String(row.poolSize));
+    wanted.set(`byPoolSize.${at}.rolls`, String(row.rolls));
+    wanted.set(`byPoolSize.${at}.rollsWithASuccess`, String(row.rollsWithASuccess));
+    wanted.set(`byPoolSize.${at}.successes`, String(row.successes));
+    wanted.set(`byPoolSize.${at}.successRate`, percent(row.successRate));
+  });
+  for (const field of STATS_PUSH_FIELDS) wanted.set(`pushes.${field}`, String(stats.pushes[field]));
+  for (const unit of STATS_COST_UNITS) {
+    wanted.set(`pushes.costByUnit.${unit}`, String(stats.pushes.costByUnit[unit]));
+  }
+  wanted.set('paidOffRate', stats.paidOffRate === null ? noPushText : percent(stats.paidOffRate));
+  wanted.set('paidOffDefinition', stats.paidOffDefinition);
+  return wanted;
+}
+
+/** The seven scalar push fields and the four cost units, restated here. */
+const STATS_PUSH_FIELDS = [
+  'pushedRolls',
+  'pushes',
+  'better',
+  'same',
+  'worse',
+  'successesBefore',
+  'successesAfter',
+];
+const STATS_COST_UNITS = ['ratingPoint', 'healthPoint', 'refereePoint', 'complicationCheck'];
+
+/** The three push outcomes, and the four series that carry a shape. */
+const STATS_OUTCOMES = ['better', 'same', 'worse'];
+const STATS_SERIES = ['success', 'better', 'same', 'worse'];
+
+/** The floors, restated. WCAG 2.2 SC 1.4.3 for text, SC 1.4.11 for a graphic. */
+const STATS_TEXT_FLOOR = 4.5;
+const STATS_NON_TEXT_FLOOR = 3;
+
+/**
+ * What every value, every bar and every mark of the charts reads in the
+ * browser. One pass over the document, so no reading can come from a different
+ * paint than another.
+ */
+async function readCharts(page) {
+  return page.evaluate(() => {
+    const charts = document.querySelector('[data-el="history-stats"]');
+    if (charts === null) return { missing: true };
+
+    // The name a screen reader reaches a value by. A table cell is named by its
+    // row header and its column header, resolved through `headers` against the
+    // table it sits in. A description value is named by the term beside it.
+    // Nothing is assumed: an identifier that names no header answers null.
+    const readerName = (each) => {
+      if (each.closest('[aria-hidden="true"]') !== null) return null;
+      const cell = each.closest('td, th, dd');
+      if (cell === null) return null;
+      if (cell.tagName === 'DD') {
+        const terms = [...(cell.parentElement?.querySelectorAll('dt') ?? [])];
+        if (terms.length !== 1) return null;
+        const term = (terms[0].textContent ?? '').trim();
+        return term === '' ? null : term;
+      }
+      const table = cell.closest('table');
+      if (table === null) return null;
+      const ids = (cell.getAttribute('headers') ?? '').split(' ').filter(Boolean);
+      const heads = ids.map((id) => table.querySelector(`#${id}`));
+      if (heads.some((head) => head === null)) return null;
+      const scopes = heads.map((head) => head.getAttribute('scope') ?? '');
+      if (cell.tagName === 'TH') {
+        if (ids.length !== 1 || scopes[0] !== 'col') return null;
+      } else if (ids.length !== 2 || scopes[0] !== 'row' || scopes[1] !== 'col') {
+        return null;
+      }
+      return heads.map((head) => (head.textContent ?? '').trim()).join(', ');
+    };
+
+    // The first ancestor that really paints a colour. It is the colour the ink
+    // in front of it is judged against, and it is resolved rather than read out
+    // of a stylesheet.
+    const groundOf = (each) => {
+      for (let at = each.parentElement; at !== null; at = at.parentElement) {
+        const paint = getComputedStyle(at).backgroundColor;
+        if (paint !== 'transparent' && !/,\s*0\)$/.test(paint)) return paint;
+      }
+      return getComputedStyle(document.body).backgroundColor;
+    };
+
+    const values = [...charts.querySelectorAll('[data-stat]')].map((each) => ({
+      path: each.dataset.stat,
+      text: (each.textContent ?? '').trim(),
+      name: readerName(each),
+    }));
+
+    const bars = [...charts.querySelectorAll('[data-bar]')].map((bar) => {
+      const track = bar.parentElement;
+      return {
+        path: bar.dataset.bar,
+        series: bar.dataset.series,
+        barPx: bar.getBoundingClientRect().width,
+        trackPx: track === null ? 0 : track.getBoundingClientRect().width,
+        inTrack: track !== null && track.classList.contains('chart-track'),
+      };
+    });
+
+    const marks = [...charts.querySelectorAll('.cmark')].map((each) => {
+      const style = getComputedStyle(each);
+      const box = each.getBoundingClientRect();
+      return {
+        series: each.dataset.series,
+        shape: `border-radius:${style.borderRadius} clip-path:${style.clipPath}`,
+        colour: style.backgroundColor,
+        width: box.width,
+        height: box.height,
+      };
+    });
+
+    // Every drawn mark must be decoration a reader never meets.
+    const decoration = [...charts.querySelectorAll('.cmark, .chart-track')];
+    const hidden = decoration.filter(
+      (each) => each.closest('[aria-hidden="true"]') !== null,
+    ).length;
+
+    // The colours, resolved. Text against its ground and a mark against its
+    // ground, each with the floor it answers to.
+    const paints = [];
+    for (const each of charts.querySelectorAll(
+      '.chart td, .chart thead th, .chart th[scope="row"], .chart caption, .chart-note dd',
+    )) {
+      paints.push({
+        what: `text in ${each.tagName.toLowerCase()}`,
+        ink: getComputedStyle(each).color,
+        ground: groundOf(each),
+        kind: 'text',
+      });
+    }
+    for (const each of charts.querySelectorAll('.chart-bar, .cmark')) {
+      paints.push({
+        what: `the ${each.dataset.series} ${each.classList.contains('cmark') ? 'glyph' : 'bar'}`,
+        ink: getComputedStyle(each).backgroundColor,
+        ground: groundOf(each),
+        kind: 'graphic',
+      });
+    }
+
+    return {
+      missing: false,
+      values,
+      bars,
+      marks,
+      decoration: decoration.length,
+      hidden,
+      paints,
+      tabStopsInside: [...charts.querySelectorAll('*')].filter((each) => each.tabIndex >= 0).length,
+      // Every tab stop of the whole document, named by the composite it belongs
+      // to. A Tab walk proves the stops it reaches; this proves there is no
+      // second one it never got to.
+      documentStops: [...document.querySelectorAll('*')]
+        .filter(
+          (each) =>
+            each.tabIndex >= 0 &&
+            !each.hasAttribute('disabled') &&
+            each.getAttribute('aria-hidden') !== 'true',
+        )
+        .map((each) => (each.closest('[data-composite]') ?? each).dataset.el ?? 'unnamed')
+        .sort(),
+      charts: charts.querySelectorAll('[data-el^="chart-"]').length,
+    };
+  });
+}
+
+/**
+ * The charts over the log — Unit 4.7, in a driven browser.
+ *
+ * Five things this file can judge and jsdom cannot: the bar lengths in real
+ * pixels against a bound taken from the track, the glyph shapes as the engine
+ * resolved them, the colours as the engine resolved them, real Tab presses, and
+ * a 360 px layout.
+ */
+async function runStatistics(page, options, checks, design) {
+  // A log worth charting: two pool sizes and a push under a rule set that does
+  // not block one. The stress counter is reset first, because the third profile
+  // blocks a push as soon as a stress die shows a bane.
+  await clearLog(page);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 30000 });
+  await chooseRuleset(page, 'pool-banes-damage-ratings');
+  await pressTile(page, 'attribute', 'p', 3);
+  let pushesPressed = 0;
+  for (const round of [0, 1, 2, 3]) {
+    if (round === 2) {
+      if ((await page.$('[data-el="edit-pool-button"]')) !== null) {
+        await page.click('[data-el="edit-pool-button"]');
+        await settleScreen(page);
+      }
+      await pressTile(page, 'skill', 'p', 2);
+    }
+    await page.click('[data-el="roll-button"]');
+    await settleScreen(page);
+    const live = await page.evaluate(() => {
+      const button = document.querySelector('[data-el="push-button"]');
+      return button !== null && !button.disabled;
+    });
+    if (live) {
+      await page.click('[data-el="push-button"]');
+      pushesPressed += 1;
+      await settleScreen(page);
+    }
+    await logHolds(page, round + 1);
+  }
+
+  await openHistory(page);
+  await page.waitForSelector('[data-el="history-list"]', { timeout: 15000 });
+  await page.click('[data-el="statistics-button"]');
+  await page.waitForSelector('[data-el="history-stats"]', { timeout: 15000 });
+  await settleScreen(page);
+
+  // The oracle. `summariseLog` runs HERE, in node, over the rolls this file
+  // read out of IndexedDB through its own connection. The page cannot build it:
+  // this mode drives the BUILT bundle, which exports nothing.
+  const statistics = await import('../src/log/statistics.ts');
+  const rolls = (await readLogRolls(page)).rolls;
+  const stats = statistics.summariseLog(rolls);
+  const wanted = statisticsValues(stats, 'No roll has pushed yet.');
+  const drawn = await readCharts(page);
+  if (drawn.missing) {
+    checks.push({
+      name: 'statistics.the-destination-draws-the-charts',
+      ok: false,
+      detail: 'the destination holds no history-stats at all.',
+    });
+    return;
+  }
+
+  // ---- A. The charts draw the record, field by field. ----
+  const drawnValues = new Map(drawn.values.map((each) => [each.path, each.text]));
+  const wrong = [];
+  for (const [path, value] of wanted) {
+    if (drawnValues.get(path) !== value) {
+      wrong.push(`${path}: drew ${JSON.stringify(drawnValues.get(path) ?? null)} for ${value}`);
+    }
+  }
+  const stray = [...drawnValues.keys()].filter((path) => !wanted.has(path));
+  // A value a screen reader cannot reach is a value the chart drew for one
+  // reader only. The name is resolved through the table headers or the term
+  // beside the value, never assumed.
+  const unnamed = drawn.values.filter((each) => each.name === null || each.name === '');
+  // The denominator, counted a second way: a sum over the shape of the record
+  // rather than the size of the map that was just built.
+  const wantedCount =
+    1 + stats.byPoolSize.length * 5 + STATS_PUSH_FIELDS.length + STATS_COST_UNITS.length + 1 + 1;
+  console.log(
+    `browser: statistics values rolls=${rolls.length} pushes_pressed=${pushesPressed} ` +
+      `pool_sizes=${stats.byPoolSize.length} fields=${wanted.size} counted=${wantedCount} ` +
+      `drawn=${drawnValues.size} wrong=${wrong.length} stray=${stray.length} ` +
+      `unnamed=${unnamed.length} charts=${drawn.charts}` +
+      (wrong.length ? ` [${wrong.slice(0, 4).join('; ')}]` : '') +
+      (unnamed.length ? ` [unnamed: ${unnamed.map((each) => each.path).join(', ')}]` : ''),
+  );
+  checks.push({
+    name: 'statistics.every-chart-value-is-a-field-of-the-record',
+    ok:
+      rolls.length > 1 &&
+      stats.byPoolSize.length > 1 &&
+      stats.pushes.pushedRolls > 0 &&
+      wanted.size === wantedCount &&
+      drawnValues.size === wanted.size &&
+      wrong.length === 0 &&
+      stray.length === 0 &&
+      unnamed.length === 0,
+    detail:
+      `${drawnValues.size} values were read off the charts and compared against the ` +
+      `${wanted.size} fields of the record summariseLog returned IN NODE, over the ` +
+      `${rolls.length} rolls a connection this file opened read out of IndexedDB. The ` +
+      `denominator is counted a second way as a sum over the shape of the record: ` +
+      `1 + ${stats.byPoolSize.length} pool sizes by 5 + ${STATS_PUSH_FIELDS.length} push fields ` +
+      `+ ${STATS_COST_UNITS.length} cost units + 2 is ${wantedCount}, so a missing value is a ` +
+      `red and not an unread cell. ${wrong.length} disagreed and ${stray.length} were drawn that ` +
+      `the record does not hold. ${unnamed.length} are drawn where a screen reader reaches no ` +
+      `name for them, resolved through the table headers or the term beside the value. The log ` +
+      `carries more than one pool size and more than one pushed roll, so a chart of one row ` +
+      `could not pass.` +
+      (wrong.length ? ` [${wrong.slice(0, 4).join('; ')}]` : '') +
+      (unnamed.length ? ` [unnamed: ${unnamed.map((each) => each.path).join(', ')}]` : ''),
+  });
+
+  // ---- B. Every bar is drawn at the length the record fixes, in pixels. ----
+  //
+  // The bound is the geometry's own: one device pixel over the width of the
+  // track the bar lies in. Nothing here picks a forgiving number.
+  const wantedBars = new Map();
+  stats.byPoolSize.forEach((row, at) => {
+    wantedBars.set(`byPoolSize.${at}.successRate`, row.successRate);
+  });
+  if (stats.pushes.pushedRolls > 0) {
+    for (const id of STATS_OUTCOMES) {
+      wantedBars.set(`pushes.${id}`, stats.pushes[id] / stats.pushes.pushedRolls);
+    }
+  }
+  if (stats.paidOffRate !== null) wantedBars.set('paidOffRate', stats.paidOffRate);
+  const barReadings = [];
+  let barsCompared = 0;
+  for (const bar of drawn.bars) {
+    const want = wantedBars.get(bar.path);
+    if (want === undefined || bar.trackPx <= 0) {
+      barReadings.push(`${bar.path}: no record value or no track`);
+      continue;
+    }
+    const share = bar.barPx / bar.trackPx;
+    const bound = 1 / bar.trackPx;
+    barsCompared += 1;
+    if (Math.abs(share - want) > bound) {
+      barReadings.push(
+        `${bar.path}: drew ${share.toFixed(4)} of its track against ${want.toFixed(4)}, ` +
+          `bound ${bound.toFixed(4)}`,
+      );
+    }
+  }
+  const trackWidths = drawn.bars.map((bar) => Math.round(bar.trackPx));
+  console.log(
+    `browser: statistics bars drawn=${drawn.bars.length} wanted=${wantedBars.size} ` +
+      `compared=${barsCompared} off=${barReadings.length} tracks=[${trackWidths.join(',')}] ` +
+      `lengths=[${drawn.bars.map((bar) => Math.round(bar.barPx)).join(',')}]` +
+      (barReadings.length ? ` [${barReadings.slice(0, 4).join('; ')}]` : ''),
+  );
+  checks.push({
+    name: 'statistics.every-bar-is-the-length-the-record-fixes',
+    ok:
+      wantedBars.size > 2 &&
+      drawn.bars.length === wantedBars.size &&
+      barsCompared === wantedBars.size &&
+      barReadings.length === 0 &&
+      drawn.bars.every((bar) => bar.inTrack && bar.trackPx > 0) &&
+      new Set(drawn.bars.map((bar) => Math.round(bar.barPx))).size > 1,
+    detail:
+      `${barsCompared} bars were measured in real pixels against the ${wantedBars.size} the ` +
+      `record fixes, and the bound is the geometry's own: one device pixel over the width of ` +
+      `the track each bar lies in, which is [${trackWidths.join(', ')}] px this run. ` +
+      `${barReadings.length} were outside it. The bars are not all one length, so a bar that ` +
+      `filled its track whatever the number said could not pass.` +
+      (barReadings.length ? ` [${barReadings.slice(0, 4).join('; ')}]` : ''),
+  });
+
+  // ---- C. Shape carries every meaning colour carries. ----
+  const shapes = new Map(drawn.marks.map((mark) => [mark.series, mark.shape]));
+  const outcomeShapes = new Set(STATS_OUTCOMES.map((id) => shapes.get(id)));
+  const outcomeColours = new Set(
+    STATS_OUTCOMES.map((id) => drawn.marks.find((m) => m.series === id)?.colour),
+  );
+  const invisible = drawn.marks.filter((mark) => mark.width <= 0 || mark.height <= 0);
+  console.log(
+    `browser: statistics shapes marks=${drawn.marks.length} series=${shapes.size} ` +
+      `outcome_shapes=${outcomeShapes.size} outcome_colours=${outcomeColours.size} ` +
+      `invisible=${invisible.length} decoration=${drawn.decoration} hidden=${drawn.hidden} ` +
+      `[${[...shapes.entries()].map(([id, shape]) => `${id}=${shape}`).join(' | ')}]`,
+  );
+  checks.push({
+    name: 'statistics.every-series-is-marked-by-shape-and-not-by-hue-alone',
+    ok:
+      shapes.size === STATS_SERIES.length &&
+      STATS_SERIES.every((id) => shapes.has(id)) &&
+      outcomeShapes.size === STATS_OUTCOMES.length &&
+      outcomeColours.size === STATS_OUTCOMES.length &&
+      shapes.get('success') === shapes.get('better') &&
+      invisible.length === 0 &&
+      drawn.decoration > 0 &&
+      drawn.hidden === drawn.decoration,
+    detail:
+      `${shapes.size} series carry a glyph, against the ${STATS_SERIES.length} the view holds. ` +
+      `The three push outcomes sit in one chart and the engine resolved ` +
+      `${outcomeShapes.size} shapes and ${outcomeColours.size} colours for them, so a greyscale ` +
+      `copy still separates them. A success and a gain share the circle on purpose. ` +
+      `${invisible.length} glyphs drew no box. Every drawn mark is decoration a reader never ` +
+      `meets: ${drawn.hidden} of ${drawn.decoration} glyphs and tracks sit under aria-hidden.`,
+  });
+
+  // ---- D. Contrast, on the colours the engine resolved. ----
+  const failed = [];
+  let tightest = { ratio: Infinity, what: '' };
+  for (const paint of drawn.paints) {
+    const floor = paint.kind === 'text' ? STATS_TEXT_FLOOR : STATS_NON_TEXT_FLOOR;
+    const ratio = ratioOfRgb(paint.ink, paint.ground);
+    if (ratio === null) {
+      failed.push(`${paint.what}: unreadable colour ${paint.ink} on ${paint.ground}`);
+      continue;
+    }
+    if (ratio < floor) failed.push(`${paint.what}: ${ratio.toFixed(2)} to 1 under ${floor}`);
+    if (ratio < tightest.ratio) tightest = { ratio, what: paint.what };
+  }
+  console.log(
+    `browser: statistics contrast measured=${drawn.paints.length} failed=${failed.length} ` +
+      `tightest=${tightest.ratio.toFixed(2)} (${tightest.what})` +
+      (failed.length ? ` [${failed.slice(0, 4).join('; ')}]` : ''),
+  );
+  checks.push({
+    name: 'statistics.every-chart-colour-clears-its-wcag-floor',
+    ok: drawn.paints.length > 12 && failed.length === 0 && tightest.ratio >= STATS_NON_TEXT_FLOOR,
+    detail:
+      `${drawn.paints.length} colours were read as the engine resolved them, each against the ` +
+      `first ancestor that really paints one, and judged at the WCAG 2.2 floors: ` +
+      `${STATS_TEXT_FLOOR} to 1 for text under SC 1.4.3 and ${STATS_NON_TEXT_FLOOR} to 1 for a ` +
+      `graphical object under SC 1.4.11. ${failed.length} missed. The tightest reads ` +
+      `${tightest.ratio.toFixed(2)} to 1 at ${tightest.what}. The same claim over all six ` +
+      `interface palettes of Unit 4.8 runs in src/shell/statistics.test.tsx.` +
+      (failed.length ? ` [${failed.slice(0, 4).join('; ')}]` : ''),
+  });
+
+  // ---- E. The charts are reached and left by keyboard alone. ----
+  //
+  // **The two Enter presses come before the walk, and the reason is measured.**
+  // A Tab walk ends by pressing Tab off the end of the document, where Firefox
+  // hands the focus to its own chrome, and no key press reaches the page after
+  // that. Measured on this host on 2026-08-10: the same Enter that works here
+  // timed out when it followed the walk.
+  const statsControls = designViewControls(design, 'Statistics');
+  const named = await page.evaluate(() => {
+    const back = document.querySelector('[data-el="back-button"]');
+    return {
+      tag: back?.tagName ?? null,
+      name: (back?.textContent ?? '').trim(),
+      state: back?.getAttribute('aria-disabled') ?? null,
+      height: back === null ? 0 : Math.round(back.getBoundingClientRect().height),
+    };
+  });
+  // Back returns to the summary, and the summary carries the control that led
+  // here. Both counts come out of the design and neither is restated.
+  await page.focus('[data-el="back-button"]');
+  await page.keyboard.press('Enter');
+  // A press that landed somewhere else is a red and not a crash, so the wait
+  // is allowed to time out and the reading below says where the press went.
+  await page.waitForSelector('[data-el="history-list"]', { timeout: 8000 }).catch(() => null);
+  await settleScreen(page);
+  const backLanded = await page.evaluate(() => ({
+    list: document.querySelector('[data-el="history-list"]') !== null,
+    charts: document.querySelector('[data-el="history-stats"]') !== null,
+    dice: document.querySelector('[data-el="roll-button"]') !== null,
+  }));
+  // And a real press on the control opens the charts again, with the focus on
+  // something rather than on nothing. The destination is re-opened first when
+  // the press above left it, so the rest of the run still reports.
+  if (!backLanded.list) {
+    if (backLanded.dice) await openHistory(page);
+    await page.waitForSelector('[data-el="history-list"]', { timeout: 8000 }).catch(() => null);
+  }
+  await page.focus('[data-el="statistics-button"]');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-el="history-stats"]', { timeout: 15000 });
+  await settleScreen(page);
+  const afterEnter = await page.evaluate(() => ({
+    charts: document.querySelector('[data-el="history-stats"]') !== null,
+    focus: document.activeElement?.getAttribute('data-el') ?? 'nothing',
+  }));
+  // The walk runs last, and its cap allows for the one stop the browser adds to
+  // a scrollable region. Section 6 of the design names that stop and says it is
+  // reported rather than counted.
+  await startWalkAt(page, 'history-header');
+  const walked = (await walkShell(page, statsControls.names.length + 2)).filter(
+    (visit) => !visit.implicit,
+  );
+  const stops = walked.filter((visit) => visit.by === 'tab').map((visit) => visit.name);
+  console.log(
+    `browser: statistics keyboard stats_stops=[${stops.join(' ')}] ` +
+      `design_stats=[${statsControls.names.join(' ')}] stated=${statsControls.stated} ` +
+      `back_landed=list:${backLanded.list}/charts:${backLanded.charts}/dice:${backLanded.dice} ` +
+      `back=${named.tag}/${named.state}/${named.height}px charts_after_enter=${afterEnter.charts} ` +
+      `focus_after_enter=${afterEnter.focus} inside_tab_stops=${drawn.tabStopsInside} ` +
+      `document_stops=[${drawn.documentStops.join(' ')}]`,
+  );
+  checks.push({
+    name: 'statistics.the-charts-are-reached-and-left-by-keyboard-alone',
+    ok:
+      statsControls.stated > 0 &&
+      statsControls.names.length === statsControls.stated &&
+      stops.slice().sort().join(' ') === statsControls.names.join(' ') &&
+      drawn.documentStops.join(' ') === statsControls.names.join(' ') &&
+      backLanded.list &&
+      !backLanded.charts &&
+      !backLanded.dice &&
+      named.tag === 'BUTTON' &&
+      named.name.length > 0 &&
+      named.state === 'false' &&
+      named.height >= 24 &&
+      drawn.tabStopsInside === 0 &&
+      afterEnter.charts &&
+      afterEnter.focus === 'back-button',
+    detail:
+      `real Tab presses reached [${stops.join(' ')}] in the statistics view, against the ` +
+      `[${statsControls.names.join(' ')}] section 3 of the design names for it, read out of the ` +
+      `document and never restated, and against the ${statsControls.stated} that row states in ` +
+      `its own count column. A real Enter on back returned to the SUMMARY and not to the dice ` +
+      `(list=${backLanded.list} charts=${backLanded.charts} dice=${backLanded.dice}), because the ` +
+      `charts are a view of the destination and not a second destination. A real Enter on ` +
+      `statistics-button opened the charts again ` +
+      `(${afterEnter.charts}) and the focus landed on ${afterEnter.focus}. The back control is a ` +
+      `${named.tag} named "${named.name}" carrying aria-disabled=${named.state}, ` +
+      `${named.height} px tall against the 24 px floor of WCAG 2.2 SC 2.5.8. The charts hold ` +
+      `${drawn.tabStopsInside} tab stops, because section 3 lists them under the read-only parts. ` +
+      `A walk proves the stops it reached, so the claim that it missed none is carried by a ` +
+      `count of every tab stop in the document: [${drawn.documentStops.join(' ')}].`,
+  });
+
+  // ---- F. The charts fit a phone, and nothing runs off the side of it. ----
+  await page.setViewport({ width: 360, height: 760, deviceScaleFactor: 1 });
+  await settleScreen(page);
+  const phone = await page.evaluate(() => {
+    const charts = document.querySelector('[data-el="history-stats"]');
+    const middle = document.querySelector('[data-el="history-mid"]');
+    if (charts === null || middle === null) return null;
+    // An element wider than the phone is a defect only where a box of its own
+    // scrolls sideways to reach it. A chart table sits in `.hist-mx-scroll`,
+    // which degrades by scrolling and never by clipping. Decision 6.
+    //
+    // **The container is named, and the reason is measured.** A walk for any
+    // ancestor whose computed `overflow-x` is auto or scroll exempts
+    // everything: `.shell-m` sets `overflow-y: auto`, and CSS then computes its
+    // `overflow-x` to `auto` as well, so every element of the destination has
+    // such an ancestor and the count can never rise. Measured on this host on
+    // 2026-08-10, with a 900 px meter injected: that walk reported 0.
+    const over = [...charts.querySelectorAll('*')].filter(
+      (each) =>
+        each.getBoundingClientRect().right > window.innerWidth + 1 &&
+        each.closest('.hist-mx-scroll') === null,
+    );
+    const boxes = [...charts.querySelectorAll('[data-el^="chart-"], .chart-meter')].map((each) => {
+      const box = each.getBoundingClientRect();
+      return {
+        name: each.dataset.el ?? 'chart-meter',
+        w: Math.round(box.width),
+        h: Math.round(box.height),
+      };
+    });
+    return {
+      over: over.length,
+      overNames: over.slice(0, 4).map((each) => each.className || each.tagName),
+      boxes,
+      scrolls: middle.scrollHeight > middle.clientHeight,
+      reach: middle.scrollHeight,
+      clientHeight: middle.clientHeight,
+      // The page's own middle region must not scroll sideways at all. A
+      // sideways scroll here is the whole screen moving, not one table.
+      sideways: middle.scrollWidth > middle.clientWidth + 1,
+      scrollWidth: middle.scrollWidth,
+      clientWidth: middle.clientWidth,
+      viewport: window.innerWidth,
+    };
+  });
+  console.log(
+    `browser: statistics phone viewport=${phone?.viewport} over_side=${phone?.over} ` +
+      `boxes=[${(phone?.boxes ?? []).map((box) => `${box.name} ${box.w}x${box.h}`).join(' | ')}] ` +
+      `middle_scrolls=${phone?.scrolls} reach=${phone?.reach}/${phone?.clientHeight} ` +
+      `sideways=${phone?.sideways} width=${phone?.scrollWidth}/${phone?.clientWidth}`,
+  );
+  checks.push({
+    name: 'statistics.the-charts-fit-a-phone-and-nothing-runs-off-the-side',
+    ok:
+      phone !== null &&
+      phone.over === 0 &&
+      !phone.sideways &&
+      phone.boxes.length === 3 &&
+      phone.boxes.every((box) => box.w > 0 && box.h > 0),
+    detail:
+      `at ${phone?.viewport} px, ${phone?.over} elements of the charts sit off the side of the ` +
+      `viewport outside a box of their own that scrolls sideways, and the three charts draw ` +
+      `[${(phone?.boxes ?? []).map((box) => `${box.name} ${box.w}x${box.h}`).join(', ')}]. A ` +
+      `chart table sits in .hist-mx-scroll and degrades by scrolling rather than by clipping, ` +
+      `which is Decision 6, so such a table is not counted. The page's own middle region must ` +
+      `not scroll sideways at all, and it holds ${phone?.scrollWidth} px of content in ` +
+      `${phone?.clientWidth} px (sideways=${phone?.sideways}). It scrolls down as the design ` +
+      `requires: ${phone?.scrolls}, ${phone?.reach} px of content in ${phone?.clientHeight} px.` +
+      (phone?.over ? ` [${(phone.overNames ?? []).join('; ')}]` : ''),
+  });
+
+  // ---- G. The captures the owner looks at. ----
+  if (options.captureShell !== null) {
+    for (const width of [360, 1440]) {
+      await page.setViewport({ width, height: width === 360 ? 760 : 900, deviceScaleFactor: 1 });
+      await settleScreen(page);
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0018-history-stats-${width}.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+    }
+    console.log(`browser: statistics captures written to ${options.captureShell}`);
+  }
+  await page.setViewport({ width: options.viewport.width, height: options.viewport.height });
+  await settleScreen(page);
+  // The destination is left on the summary, which is the view the caller's own
+  // capture step expects to close from. A press that lands elsewhere is already
+  // a red above, so this step recovers rather than throwing.
+  await page.click('[data-el="back-button"]');
+  await page.waitForSelector('[data-el="history-list"]', { timeout: 8000 }).catch(() => null);
+  if ((await page.$('[data-el="history-list"]')) === null) await openHistory(page);
+  await settleScreen(page);
+}
+
 async function runHistory(page, options, checks) {
   const design = readFileSync(join(here, '..', 'docs', 'design', '0002-screen-design.md'), 'utf8');
   await page.evaluate(() => {
@@ -9017,9 +9660,12 @@ async function runHistory(page, options, checks) {
       `${real.quota} bytes. The plan asks this unit to show estimate() in settings.`,
   });
 
-  // ---- 7 to 11: the record, the matrix, the export and the import. ----
+  // ---- 7 to 13: the record, the matrix, the export and the import. ----
   await closeSheet(page);
   await runRecordAndExport(page, options, checks, design);
+
+  // ---- 14 to 19: the charts — Unit 4.7. ----
+  await runStatistics(page, options, checks, design);
 
   // ---- 12. The captures the owner looks at. ----
   //

@@ -104,8 +104,9 @@ the budget, exactly as the disclosure sheet does.
 
 | View | Controls | Count |
 |---|---|---|
-| Summary | `back-button`, `history-list`, `import-button` | 3 |
+| Summary | `back-button`, `history-list`, `statistics-button`, `import-button` | 4 |
 | Record | `back-button`, `export-button` | 2 |
+| Statistics | `back-button` | 1 |
 
 `history-list` is a composite. It holds one visit per logged roll, so its length follows the log.
 The record holds the transposed matrix — one row per die and one column per generation — and exactly
@@ -113,8 +114,15 @@ one export control, in its footer.
 
 **`import-button` sits in the summary and not in the record.** An import replaces the whole log,
 which Unit 4.6 settled, so it belongs beside the list of the whole log and not beside one roll. It
-opens a file picker that carries no tab stop of its own, so the summary counts three controls and
-not four. Decision 13 records the choice and the two options it was taken between.
+opens a file picker that carries no tab stop of its own, so the summary counts the controls above
+and not one more. Decision 13 records the choice and the two options it was taken between.
+
+**The statistics are a third view, and `statistics-button` opens it.** The record is one roll and
+the charts are the whole log, so the charts are a peer of the record and not a part of it.
+`statistics-button` sits beside `import-button` in the summary footer, where the other whole-log
+control already is, and `back-button` returns to the summary from both the record and the charts.
+Decision 14 records the choice and the option it was taken against. The statistics view holds one
+control, because everything in it is read-only.
 
 **The export writes the whole log too.** The control lives in the record because Decision 3 puts it
 there, and the file it writes is every roll. A file of one roll, read back by an import that
@@ -124,7 +132,7 @@ replaces, would take a campaign away.
 the roll flow holds no element at all while the history is on the screen, and neither keyboard walk
 of section 6 can change. Decision 12 records the choice and the two options it was taken between.
 Unit 4.4 built the summary and a record SHELL. Unit 4.5 added the transposed matrix and
-`export-button`, and Unit 4.6 added `import-button`.
+`export-button`, Unit 4.6 added `import-button`, and Unit 4.7 added the statistics view.
 
 ### Read-only, and therefore not counted
 
@@ -139,6 +147,9 @@ through the table semantics.
 - The dice count and the difficulty printed on `roll-button`.
 - The re-throw count and the stress printed on `push-button`.
 - The record statistics and the transposed matrix.
+- The three charts of the statistics view. Each one is a real table, so a screen reader reaches
+  every value by its row and its column. The bar beside a value is `aria-hidden` decoration, and
+  every series carries a shape as well as a colour.
 - `flat-fallback-note`, the one-time notice that the dice fell to flat dice. It is a live region and
   it holds no tab stop, so neither keyboard walk of section 6 changes. Unit 3.7 added it.
 

@@ -64,6 +64,203 @@ Status table for each unit. Every unit appends one row after it lands.
 | 4.4 | Roll log — the screen half: a roll writes an entry, and the history destination reads it | Done. The record view is a shell for Unit 4.5. | #14 | Every roll and every push now reaches IndexedDB through `LogWriter`, and `sheet-history` opens the history destination. **The log's shape decides the write, and the decision is stated: ONE entry per roll, rewritten by every push.** `createLogEntry` takes a whole `RollResult` whose dice carry one value per generation, it derives `pushCount` from the number of generations, and `src/log/csv.ts` rejects a file where one `roll_id` appears twice, so a second entry per push would export a file the application refuses to read back. `src/shell/roll-log.ts` opens the entry on a roll and rewrites it in place on a push, at the key the store acknowledged the insert with. `replaceRoll` in `src/log/store.ts` does that in ONE transaction and checks the key still exists inside it, so a `put` at a trimmed key cannot put a dropped roll back below the oldest. No second store was built. **`profileHash` no longer needs node.** The store half recorded `node:crypto` as unavailable in a browser and named this unit as the one that would settle it. `src/log/sha256.ts` is one synchronous implementation that names no platform API, so the test runner and the browser produce the same digest, and `src/log/sha256.test.ts` holds it against `node:crypto` over every length to 200 bytes and against the published FIPS 180-4 vectors. The pinned digest in `src/log/entry.test.ts` did not move, and the browser wrote `0b489af6...` for the second preset, which is the digest the pure half recorded. **The write is read back out of the database, never out of the queue.** `node scripts/browser.mjs --history` opens its own connection to `clatter-log` and counts: 4 presses on Roll and 6 on Push put 4 entries under 4 distinct roll ids, whose stored push counts sum to 6 and whose stored generations sum to 6. Three counts, one denominator. **The list is counted twice, so the two can disagree.** The summary length is read off the screen and off a second connection to the store at each of three rounds: 1/1/1, 2/2/2, 3/3/3. **The rules core is the oracle for the entry.** `src/shell/roll-log.test.ts` throws a roll and two pushes, then compares every cell of every die and every generation against `score` and `isLocked` under the profile in force, 48 cells against a count taken a second way off the live result, plus the roll-level values against `successCount`, `baneCount`, `generations` and `pushCost`. **The hash is the profile the roll ran under.** The preset changes between two rolls, Decision 10 takes the table from 3 dice to 0, and the two entries carry two distinct digests and name two rule sets. **The destination is a route and not an overlay.** Decision 12 of `docs/design/0012-settled-decisions.md` records it: the roll flow leaves the document, so section 6 still reads eleven visits before the throw and thirty-five after it, in BOTH instruments, with both lists read out of the design. The summary holds exactly `back-button` and `history-list`, read out of section 3 of the design and never restated, and `history-list` is one composite with a roving tab index, 1 of 3 options carrying it, every option holding a role, an accessible name and a state, and no option under the 24 px floor. A real Enter opens the record and the focus lands on `back-button`. **The seven-day note reaches the player**, at `history-storage-note` with `role="note"`, drawing 752x54 px, and it names the seven days, the home screen and the export the plan asks for. **The storage estimate reaches the settings sheet** at `sheet-storage-estimate`, a live region with no tab stop, reading 0.7 MB against the 0.7 MB `navigator.storage.estimate()` answered that run. **A log note is user text and no parser sees it**, drawn through `textContent` in an element holding one node and no element. Constraint 8. Vitest moves from 279 to 302 tests over 31 files. `node scripts/browser.mjs --history` is the new mode at `checks=8 failures=0 skipped=0`, and `--log-store` moves from 13 checks to 13 with one instrument made stronger. Initial JavaScript moves from 22,532 to 28,155 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Eleven injections were proved red and every one was restored by editing the injection back. The captures are `docs/design/0016-history-360.png`, `0016-history-1440.png`, `0016-history-record-360.png` and `0016-history-record-1440.png`. **Open, and owed by Unit 4.4:** nothing. **Left for Unit 4.5:** the transposed matrix and `export-button` inside `history-record`, with the two acceptances row 2.2d carries. See the notes under this table. |
 | 4.5 | CSV export — the record view, the transposed matrix and the export control. **Unit 4.5 is now complete, with one owner decision open.** | Done. `BLOCKED:budget` on the import cap. | #15 | `history-record` now holds the transposed matrix of Decision 3 and `export-button`, which closes the open half of Unit 4.5 and carries the two acceptances row 2.2d holds. **The matrix is one row per die and one column per generation**, a real `<table>` with a caption, `scope="col"` and `scope="row"` headers, and a `headers` attribute on every cell naming one row header and one column header, so a screen reader reaches a cell by its row and its column and not by its text. It holds no tab stop, because section 3 lists it under the read-only parts. **Both 2.2d acceptances are counted twice and neither count reads the matrix.** The cell count is the product taken off the stored entry — 18 cells against 9 dice by 2 generations, read back through the harness's own connection to IndexedDB — and the blank count is a second loop over the same stored cells: a die locked at the generation before carries its value forward, and a die that did not exist yet is absent. Both blank kinds are guaranteed by the fixture and not left to the faces: the run keeps one die by hand before the push, and the third rule set adds a stress die BEFORE the re-roll. Every carry is checked to be a carry, 5 of 5 repeating the value of the cell before it. **The export writes the WHOLE log**, and that is forced rather than chosen: Unit 4.6 settled that an import replaces the log, so a file of one roll would delete a campaign when it was read back. Decision 13 of `docs/design/0012-settled-decisions.md` records it, and the button prints the roll count it will write. **The file is compared byte for byte.** The harness intercepts `URL.createObjectURL`, which is the browser's own call, and compares the blob the button handed over against what `exportCsvInChunks` builds IN NODE from the rolls a separate connection read out of the store: 5,200 bytes against 5,200, 5,200 bytes compared, no difference, and 2 of 2 roll identifiers in the file. A log of one roll could not tell a whole-log export from a one-roll one, so the fixture throws two. **The record capture found a layout defect the green suite did not.** Drawn under the eight readings, the matrix sat below the fold of a 360 px screen, which is the width Decision 3 transposed it for. The matrix now comes first and the readings are compact. Captures `docs/design/0017-history-record-360.png` and `0017-history-record-1440.png`. **A manual keep made after the final generation and never pushed is not in the entry, and the matrix is not wrong for such a roll.** The matrix reads `locked` only at the generation BEFORE a cell, to decide whether that cell is a carry, so the newest generation's `locked` is never drawn. The stored field can still miss such a keep, and the export carries the entry unchanged; that is a limit of the entry and it belongs to Unit 4.4, which reported it. Vitest moves from 302 to 321 tests over 32 files. `--history` moves from 8 checks to 15 at `failures=0 skipped=0`, and `--log-csv` from 10 to 11. Initial JavaScript moves from 28,155 to 31,527 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Nine injections were proved red and every one was restored by editing the injection back. **Open, and it is the owner's:** `BLOCKED:budget` — a full-buffer export leaves 4.026 characters a row under the import cap. The arithmetic and the three priced options are in the notes under this table. |
 | 4.6 | CSV import — the file picker, the size guard and the message. **Unit 4.6 is now complete, less the error surface Unit 4.10 owns.** | Done. `BLOCKED:budget` on the import cap. | #15 | `import-button` sits in the footer of the history summary and opens a hidden file picker. Decision 13 records why it is there and not in the record: an import replaces the whole log, so it belongs beside the list of the whole log and not beside one roll, and the record then keeps the two controls section 3 names. The picker carries `tabindex="-1"` and `aria-hidden`, so the summary counts three controls and not four. **The size is judged on the FILE, before one byte of it is read.** `src/log/import-file.ts` refuses a file over `MAX_IMPORT_BYTES` from `File.size` and never calls `text()` on it. The proof is a call counter on the file's own `text`: a real `File` of 33,554,433 bytes went into the real picker, the patch is proved to have landed, and the control read the file 0 times. A guard that read `text.length` would have read it once, which is the injection that turns the check red. **The byte cap is not a second budget.** It is `MAX_IMPORT_CHARS`, and one number serves both because UTF-8 never spends fewer bytes than the string spends UTF-16 code units, so a file inside the byte cap is always inside the character cap. The inequality is asserted over a corpus covering all four UTF-8 lengths, not described. **The round trip runs through the real controls.** The file the export button wrote goes back in as a real `File` in a real `FileList` through `DataTransfer`: 136 leaf fields against 136 counted a second way, 0 differences, and the log back at 2 rolls. One extra roll is thrown between the export and the import, so an import that wrote nothing cannot pass — the marker roll must be gone. `RollLog.replace` writes it in ONE transaction through `appendRolls`, and it forgets the open roll, so a push after an import cannot `put` at a key an imported roll now holds. **The message is the smallest honest one, and Unit 4.10 still owes the rest.** `history-message` is a live region in both views and names the cause of every refusal: too large, empty, not a log this application wrote, a header with no roll, unreadable, and a store that refused the write. It quotes the file, so it is drawn as text and no parser sees it. Constraint 8. **What 4.10 owes:** a designed error surface rather than one sentence, a recovery route from a failed import, and the same treatment for the other three failures the plan names — a 3D chunk that will not load, an IndexedDB that will not open, and storage that is full. **Open, and it is the owner's:** `BLOCKED:budget`, the same one Unit 4.5 carries. See the notes under this table. |
+| 4.7 | Statistics view — the charts, in a third view of the history destination. **Unit 4.7 is now complete.** | Done. | #16 | Three charts over the record `summariseLog` returns, in `src/shell/statistics.tsx`, drawn in a third view of the history destination. **Decision 14 of `docs/design/0012-settled-decisions.md` records where they live and why**, and section 3 of the design carries the control table: the summary now counts four controls and the statistics view one. The rejected option is a section of the summary, and the reason is Unit 4.5's own defect: a section pushes either the list or the charts below the fold of a 360 px screen. **The screen computes no statistic.** `statistics.tsx` imports no log entry, no push profile and no rule, so there is nothing in it to re-derive a number from. The claim is measured at the CALL SITE and not at the component: the destination is handed a record that disagrees with its own log on all 24 fields, the disagreement is counted first so no field can pass by coincidence, and every drawn value follows the record. **A chart is a table, not a picture.** Every value is text in a real cell that names its row header and its column header, and every bar is `aria-hidden` decoration beside it, so one document serves a screen reader and an eye and the two readings are compared against each other. **The denominator is the record, counted a second way**: 24 values against a sum over the shape of the record, `1 + 2 pool sizes by 5 + 7 push fields + 4 cost units + 2`, so a missing bar is a red and not an unread cell. The oracle for the browser half is `summariseLog` run IN NODE over the rolls a second connection reads out of IndexedDB. **Every bar is measured against the geometry.** In the browser the bar and its track are measured in real pixels and the bound is one device pixel over the track width, 190, 172 and 722 px this run. In the test runner the drawn width is compared against the record with a bound of 0.0005 of a percentage point, taken from the three decimal places the view writes and not chosen; the smallest real difference between two bars of the fixture is 25 percentage points. **Shape carries every meaning colour carries.** Four series, and no chart holds two of one shape: a circle for a success and for a gain, a square for the outcome that did not move, a triangle for the one that went the wrong way. The engine resolved 3 shapes and 3 colours for the three push outcomes. **No chart draws a bane**, because the record holds no bane statistic. **Contrast holds over two denominators.** 13 chart colours are read out of `src/shell.css` by the rule that spends them, resolved against `:root`, and judged at 4.5 to 1 for text and 3 to 1 for a graphical object; the same 13 run over all 6 interface palettes of Unit 4.8 as a product of 78, tightest 4.40 to 1. In the browser 36 colours are read as the engine resolved them, each against the first ancestor that really paints one, 0 missed. **Three degenerate cases answer for themselves**: no roll draws a sentence and no chart, no push reads "No roll has pushed yet." and never a nought per cent, and one roll draws one row. **Keyboard alone reaches the charts and leaves them.** A real Enter on `statistics-button` opens them with the focus on `back-button`, and a real Enter on `back-button` returns to the SUMMARY and not to the dice. The charts hold 0 tab stops. Section 6 is unchanged and measured in both instruments: eleven visits before the throw and thirty-five after it, with both lists read out of the design. Vitest moves from 321 to 334 tests over 33 files. `--history` moves from 15 checks to 21 at `failures=0 skipped=0`. Initial JavaScript moves from 31,527 to 33,449 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Sixteen injections were proved red and every one was restored by editing the injection back, with the three touched files hashed against a saved copy. The captures are `docs/design/0018-history-stats-360.png` and `0018-history-stats-1440.png`. **Open, and owed by Unit 4.7:** nothing. See the notes under this table. |
+
+## Unit 4.7 — the charts, in a third view of the history destination
+
+Unit 4.7 shipped its computation and left the charts open. They land here. `summariseLog` is
+unchanged: this unit added no statistic, moved no definition and re-opened nothing the engine half
+settled.
+
+### The decision, and the option it was taken against
+
+Decision 14 of `docs/design/0012-settled-decisions.md` records it in full. **The charts are a third
+view of the history destination, opened by `statistics-button` in the summary footer.** Section 3 of
+the design gives the summary four controls and the statistics view one, and both counts are read out
+of that table by every check rather than restated.
+
+The rejected option was a section of the summary. The summary is the list of every roll, and a
+player opens it to find one roll. Charts above the list push the list off a 360 px screen. Charts
+below the list are unreachable until the player has scrolled past a campaign. Unit 4.5 met that
+failure once already, on the record view, and only its capture found it.
+
+The control sits beside `import-button` because both act on the whole log. Decision 13 put the
+import there for the same reason, and the record therefore keeps the two controls section 3 names.
+
+### The screen computes no statistic, and the claim is measured at the call site
+
+`src/shell/statistics.tsx` imports no log entry, no push profile and no rule. There is nothing in it
+to re-derive a number from, which makes the component safe by construction — and a check against a
+component that cannot fail proves nothing.
+
+So the claim is measured where it can fail: at the call site in `src/shell/history.tsx`. The test
+mocks `summariseLog` and hands the destination a record that disagrees with its own log on **all 24
+fields**. The disagreement is counted first, so no field can pass by coincidence, and the two records
+are asserted to carry the same field names, so every disagreement is a disagreement of value rather
+than a missing path. The screen then has to follow the record.
+
+The red-proof is the defect itself: `<Statistics stats={{ ...summariseLog(entries), entriesRead:
+entries.length }} />`. The failure read `entriesRead follows the record and not the log: expected '6'
+to be '41'`, and nothing else in the file moved.
+
+### A chart is a table, and the two readings are compared
+
+Every value is text in a real cell. A table cell names its row header and its column header through
+`headers`, and a description value names the term beside it. Every bar and every glyph sits under
+`aria-hidden`, so a screen reader meets the value and never the decoration.
+
+That gives two readings of one number, and the checks compare them against each other and against
+the record:
+
+- **The text**, read out of the document and compared field by field against the record.
+- **The drawn length**, read out of the geometry and compared against the record.
+- **The reader's name**, resolved through the headers or the term, never assumed. A name that
+  resolves to nothing answers null and the count falls.
+
+All three carry the same denominator, and it is counted a second way as a sum over the shape of the
+record: `1 + rows by 5 + 7 push fields + 4 cost units + 2`. Twenty-four values for the fixture, and
+fourteen for an empty log.
+
+### The bound on a bar comes from the geometry
+
+Two instruments, two bounds, and neither is picked:
+
+- In the browser, the bar and its track are measured in real pixels and the bound is **one device
+  pixel over the track width** — 190, 172 and 722 px this run, so 0.0053, 0.0058 and 0.0014 of a
+  track.
+- In the test runner, the drawn width is a percentage the view writes to three decimal places, so
+  the bound is **0.0005 of a percentage point**. The smallest real difference between two bars of
+  the fixture is 25 percentage points, which is fifty thousand times that.
+
+The red-proof drew every bar at nine tenths of its value. The browser named three bars and their
+bounds; the test runner named `byPoolSize.0.successRate is drawn at 60 per cent against the 66.6667
+the record fixes`.
+
+### Shape, and what the charts do not draw
+
+Four series carry a glyph: a circle for a success and for a gain, a square for the outcome that did
+not move, and a triangle for the one that went the wrong way. The circle keeps the sense it has
+everywhere else in this application. `success` and `better` share it on purpose and never appear in
+one chart, so no chart holds two series of one shape — which is the claim, counted per chart against
+the series inside it.
+
+The glyph shapes are read out of the stylesheet in the test runner and off `getComputedStyle` in the
+browser. Both name three shapes and three colours for the three push outcomes.
+
+**No chart draws a bane.** `summariseLog` returns no bane statistic, so a bane bar would be a number
+the log never answered. The plan's shape rule is met by the marks the record does carry.
+
+### Contrast, over two denominators
+
+Thirteen chart colours are named by the RULE that spends them — `.chart td`, `.chart-bar.s-worse`,
+`.cmark.c-same` and so on — read out of `src/shell.css`, resolved against `:root`, and judged at the
+WCAG 2.2 floors: 4.5 to 1 for text under SC 1.4.3 and 3 to 1 for a graphical object under SC 1.4.11.
+No colour is written in the check.
+
+The same thirteen run over **all six interface palettes of Unit 4.8**, as a product of 78. Unit 4.8
+built the palettes and left the stylesheet that spends one open, so a table in the test file maps
+each shipped role variable to the palette token it will become. A variable with no entry in that
+table fails the check rather than going unmeasured, and a second check binds the `ink` each series
+declares in `CHART_SERIES` to the variable the stylesheet really spends, so the claim and the paint
+cannot drift apart.
+
+The browser adds a third reading: 36 colours as the engine resolved them, each against the first
+ancestor that really paints one.
+
+One injection turned all four red at once. `.cmark.c-same` painted in `var(--sunken)` read 1.30 to 1
+against the card in the shipped palette, 1.17 to 1 in the ember palette, and broke the binding with
+`expected 'background' to be 'textMuted'`.
+
+### The three degenerate cases
+
+The engine half answered these for the record. The view answers them for the screen:
+
+- **No roll.** `stats-empty` says so and no pool-size chart is drawn, because no roll made a row. No
+  bar is drawn, because no share exists. The record still reaches the screen in full, so the
+  denominator is fourteen and not zero.
+- **No push.** The paid-off reading is the sentence "No roll has pushed yet." It carries no per cent
+  and no digit, because a nought would read as "pushing never paid off", which is a different claim.
+  The three outcome rows read nought and draw no bar, because a count against a total of nought is
+  not a share of anything.
+- **One roll.** One row, and the denominator is nineteen.
+
+### A check that could not fail, found and repaired before it shipped
+
+The phone check first counted every element whose right edge passed the viewport, exempting anything
+with an ancestor whose computed `overflow-x` is auto or scroll. **That check can never rise.**
+`.shell-m` sets `overflow-y: auto`, and CSS then computes its `overflow-x` to `auto` as well, so
+every element of the destination has such an ancestor. Measured with a 900 px meter injected: the
+walk reported 0 off the side.
+
+The repair names the one container a chart may scroll inside — `.hist-mx-scroll`, which is where
+Decision 6 puts a table too wide for a phone — and adds the load-bearing condition: **the page's own
+middle region must not scroll sideways at all.** The same injection then read 4 elements off the side
+and 916 px of content in 348 px.
+
+### The red proofs
+
+Sixteen injections, each restored by editing the injection back. The three touched files were hashed
+against a copy saved first, and all three match.
+
+| # | The defect | What went red, and what it said |
+|---|---|---|
+| 1 | The call site passes `entriesRead: entries.length` | `entriesRead follows the record and not the log: expected '6' to be '41'` |
+| 2 | Every bar drawn at nine tenths of its value | `byPoolSize.0.successRate is drawn at 60 per cent against the 66.6667 the record fixes` |
+| 3 | The same, in the browser | `3 were outside it. [byPoolSize.0.successRate: drew 0.4500 of its track against 0.5000, bound 0.0053]` |
+| 4 | One cost reading dropped | four tests: `the chart draws one value per field of the record: expected 23 to be 24`, `a reader reaches every field of the record: expected 23 to be 24`, `expected 13 to be 14` for the empty log and `expected 18 to be 19` for the one-roll log |
+| 5 | The square glyph becomes a circle | `the three outcomes carry three shapes: expected 2 to be 3` |
+| 6 | The same, in the browser | `the engine resolved 2 shapes and 3 colours for them` |
+| 7 | A glyph painted in the track colour | four tests: `the same bar: expected '--ink-dim' to be '--sunken'`, `the same glyph reads 1.30 to 1 against the card`, `.cmark.c-same spends a variable this table maps: expected 'background' to be 'textMuted'`, and `ember: the same glyph reads 1.17 to 1 against the card` |
+| 8 | The same, in the browser | `1 missed. The tightest reads 1.30 to 1 at the same glyph` |
+| 9 | A null rate drawn as nought per cent | `expected '0.0%' to be 'No roll has pushed yet.'`, in both degenerate tests |
+| 10 | Back from the charts leaves the destination | `back closes the charts: expected false to be true` |
+| 11 | The same, in the browser | `A real Enter on back returned to the SUMMARY and not to the dice (list=false charts=false dice=true)` |
+| 12 | A tab stop on the charts section | `the charts hold the design's controls, and no other: expected [ 'back-button', 'history-stats' ] to deeply equal [ 'back-button' ]` |
+| 13 | The pool-size header names no column | `byPoolSize.0.poolSize is reachable by name: expected null not to be null` |
+| 14 | The same, in the browser | `2 are drawn where a screen reader reaches no name for them. [unnamed: byPoolSize.0.poolSize, byPoolSize.1.poolSize]` |
+| 15 | A 900 px paid-off meter | `4 elements of the charts sit off the side of the viewport. 916 px of content in 348 px (sideways=true)` |
+| 16 | The same defect against the FIRST form of check 15 | reported 0 off the side and stayed green. The check was repaired, not the defect. |
+
+### What the captures show
+
+`docs/design/0018-history-stats-360.png` and `0018-history-stats-1440.png`, over a log of four rolls
+at two pool sizes with four pushes.
+
+At 1440 px the three charts and the readings all sit above the fold. At 360 px the seven-day note and
+the log count take the first 210 px, the pool-size chart is whole, the outcome chart is most of the
+way there, and the paid-off meter and the definition are one scroll down. Three stacked charts do not
+fit a 760 px phone, and the middle scrolls as Decision 6 requires: 1,101 px of content in 648 px, and
+nothing at all off the side.
+
+The 360 px frame is what moved the log count from a tile that wrapped its own label to one that takes
+two cells of the reading grid. That gained about 30 px and put the first chart higher.
+
+### Measurements
+
+- `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`: exit 0, exit 0, exit 0, exit 0.
+- Vitest 334 tests over 33 files, from 321 over 32.
+- `node scripts/browser.mjs --history`: `checks=21 failures=0 skipped=0`, from 15 checks.
+- `node scripts/browser.mjs --shell`: `checks=8 failures=0 skipped=0`. Eleven authored visits before
+  the throw and thirty-five after it, both read out of section 6 of the design.
+- `npm run perf`: `failures=0`. 203 steps over five runs, spread 0, against the 224 in `budgets.json`.
+- Bundle: `initial_js_gzip_bytes` 33,449 and `lazy_3d_chunk_gzip_bytes` 151,876, both under the
+  ceilings in `budgets.json`, `failures=0`.
+- Branding gate: `files_scanned=133`, `hits=0`, exit 0.
+
+### Reported, not fixed
+
+- **One run in nine of `--history` reported `failures=1`, and the failing check was not captured.**
+  The output was filtered to the statistics lines at the time, so the name of the check was lost, and
+  eight later runs were clean. Every check of that mode drives real presses over faces the throw
+  seed decides, and the seed is fresh on every run. The run before it and the six after it all read
+  `checks=21 failures=0 skipped=0`. It is recorded here rather than dismissed.
+- **`src/shell/words.ts` is new**, and it holds `plural`, `COST_NOUN` and `costReading`. They were in
+  `history.tsx`. `statistics.tsx` needs the cost words, and a cycle between two view modules works
+  until the order of the two imports changes. `history.tsx` re-exports `costReading`, so every
+  existing importer is unchanged.
+- **The seven-day note and the message region are drawn in all three views**, because they belong to
+  the destination and not to one view of it. On a 360 px screen the note takes about 100 px above the
+  first chart. That is Unit 4.4's element and this unit did not move it.
 
 ## Units 4.5 and 4.6 — the record, the matrix, the export and the import
 

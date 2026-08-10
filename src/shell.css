@@ -1343,6 +1343,176 @@ body {
   background: var(--sunken);
 }
 
+/* ---------------- the charts — Unit 4.7 ----------------
+ *
+ * Decision 14: the charts are the third view of the history destination.
+ *
+ * **A chart is a table.** The numbers are text in real cells and the bar beside
+ * each number is `aria-hidden`, so one document serves a reader and an eye.
+ * The tables sit in `.hist-mx-scroll`, so a chart wider than a phone degrades
+ * by scrolling and never by clipping, exactly as the matrix does. Decision 6.
+ *
+ * **Every colour below is a role.** `src/shell/statistics.test.tsx` reads the
+ * variable each rule spends straight out of this file, resolves it against
+ * `:root`, and measures it against the WCAG 2.2 floors — 4.5 to 1 for text and
+ * 3 to 1 for a graphical object. It measures the same claim over all six
+ * interface palettes of `src/theme/themes.ts`, which is the axis Unit 4.8 will
+ * hand this stylesheet. A rule here that changed to a weaker variable turns
+ * that check red.
+ *
+ * **Shape carries every meaning that colour carries.** Section 7 of the screen
+ * design. The three push outcomes differ by glyph — a circle, a square and a
+ * triangle — so a greyscale copy still separates them. */
+
+.stats {
+  display: grid;
+  gap: 10px;
+}
+
+.chart {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--raised);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart caption {
+  caption-side: top;
+  padding: var(--s2) var(--s3);
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
+/* Every cell of a chart shares its spacing. The rule is written over the cells
+   rather than as `.chart th, .chart td`, so each selector below appears once in
+   this file and the check that reads a rule cannot read the wrong one. */
+.chart tr > * {
+  padding: 6px var(--s2);
+  border-top: 1px solid var(--line);
+  text-align: left;
+  vertical-align: bottom;
+  font-size: 14px;
+}
+
+.chart td {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.chart thead th {
+  border-top: 0;
+  vertical-align: bottom;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.chart th[scope='row'] {
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chart th[scope='row'] small {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-dim);
+}
+
+/* The well a bar lies in. The bar is the graphical object and this is the
+   colour it sits against, so the 3 to 1 floor is measured between these two. */
+.chart-track {
+  display: block;
+  height: 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.chart-bar {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+
+.chart-bar.s-success {
+  background: var(--accent);
+}
+
+.chart-bar.s-better {
+  background: var(--accent);
+}
+
+.chart-bar.s-same {
+  background: var(--ink-dim);
+}
+
+.chart-bar.s-worse {
+  background: var(--ink);
+}
+
+.chart-cell {
+  min-width: 76px;
+}
+
+/* The glyphs. A circle is the good outcome, as it is on a die and in the
+   matrix. A square is the outcome that did not move. A triangle is the one
+   that went the wrong way. */
+.cmark {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  flex: none;
+}
+
+.cmark.c-success {
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cmark.c-better {
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cmark.c-same {
+  border-radius: 2px;
+  background: var(--ink-dim);
+}
+
+.cmark.c-worse {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: var(--ink);
+}
+
+/* The paid-off meter and the sentence that defines it. Both span the reading
+   grid, because a bar in a 100 px cell reads nothing and a definition wraps. */
+.chart-meter,
+.chart-note {
+  grid-column: 1 / -1;
+}
+
+/* The count the charts read. It takes two cells, so its term sits on one line
+   and the first chart starts higher up a phone. */
+.chart-total {
+  grid-column: span 2;
+}
+
+.chart-note dd {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
 /* ---------------- wider screens ---------------- */
 
 @media (min-width: 600px) {
