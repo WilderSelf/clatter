@@ -366,13 +366,15 @@ describe('the mode switch', () => {
     if (step === null) throw new Error('the sheet holds no step-dice choice');
     click(step);
 
-    expect(document.querySelector('[data-el="pool-cell-attribute"]')).toBeNull();
+    // Step mode holds the same six tiles. The attribute tile and the skill
+    // tile carry a die size there, and every other tile is unchanged.
     for (const name of ['gear', 'artifact', 'bonus', 'stress']) {
       expect(cellValue(`pool-cell-${name}`), `${name} came back to zero`).toBe(
         name === 'artifact' ? 'none' : '0',
       );
     }
-    expect(cellValue('pool-cell-ladder')).toBe('d6');
+    expect(cellValue('pool-cell-attribute'), 'the attribute tile carries a size').toBe('d6');
+    expect(cellValue('pool-cell-skill'), 'a step roll may take no skill die').toBe('none');
     expect(spoken()).toBe('0 successes. 0 banes. Push 0. The throw takes 1 die. 1 attribute.');
 
     click(element('sheet-mode').querySelector('input[value="pool"]') as Element);

@@ -157,11 +157,18 @@ width, three columns from 600 px and six columns from 1100 px. The builder scrol
 builder is a form, and a form scrolls. Decision 5 settles this.
 
 Two more collapses fall out of the same idea. The artifact tile steps along an enumerated ladder —
-none, d8, d10, d12, d12+d8, d12+d10, d12+d12 — which gives a size and a count from one value, in the
-manner of `STEP_LADDER`. The stress tile **is** the stress counter, because the counter and the
-number of stress dice are the same number, which is why `nextStressId` reads the counter for its
-ordinal. In step mode the attribute tile and the skill tile merge into one ladder tile that reads
-`d10 + d8`, so the bar shrinks to five tiles and the count falls again.
+none, d8, d10, d12, d12+d8, d12+d10, d12+d12 — which gives a size and a count from one value. The
+stress tile **is** the stress counter, because the counter and the number of stress dice are the same
+number, which is why `nextStressId` reads the counter for its ordinal.
+
+**Step mode holds the same six tiles.** The one difference is what the attribute tile and the skill
+tile carry: a die size instead of a count. Each of the two steps its own size, because
+`specs/0001-rules-model.md` rates the two on independent scales. The attribute tile walks d6, d8, d10
+and d12. The skill tile walks the same four sizes and holds "none" below them, because a step roll
+may take no skill die at any attribute size. So the bar is six tiles and twelve hit zones in both
+modes, and the control count of section 3 is the same in both. An earlier draft merged the two into
+one tile and shrank the bar to five. Decision 7 of `docs/design/0012-settled-decisions.md` records
+that draft and the note that overruled it.
 
 ## 6. The keyboard order
 

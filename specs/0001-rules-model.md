@@ -31,21 +31,59 @@ Both artifact curves ship. On a d12 the escalating curve averages 4/3 successes 
 flat one, so this is a real setting. Both fractions follow from the thresholds above. The
 success-table test computes them, and the model does not store them.
 
-## The step ladder — enumerated, not procedural
+## Step dice — two independent scales
 
-Prose rules about stepping the lower die up and the higher die down are path-dependent, and `+2` then
-`−1` would not reliably equal `+1`. Replace them with an ordered list of eight states:
+The attribute and the skill carry two independent ratings. Each rating names its own die size, from
+6, 8, 10 or 12. Every pair of sizes is therefore expressible, a d12 attribute beside a d6 skill among
+them. **No skill is independent as well.** A player with no skill rolls the attribute die alone, at
+whatever size the attribute holds.
 
-```
-0: d6            4: d10 + d8
-1: d6 + d6       5: d10 + d10
-2: d8 + d6       6: d12 + d10
-3: d8 + d8       7: d12 + d12
-```
+An earlier draft paired the two sizes on one eight-state list and made a modifier an index offset
+into it. That list could express eight pairs of the sixteen, and it tied "no skill" to a d6
+attribute. It is withdrawn.
 
-A modifier is an index offset clamped to `[0,7]`. The ceiling and the floor become the ends of the
-list. Reversibility is true by construction. The test is the full table: 8 states × 7 offsets from −3
-to +3 = **56 cases**, a counted denominator, plus a round-trip assertion.
+**The reason it was written still holds.** Prose rules about stepping the lower die up and the higher
+die down are path-dependent, and `+2` then `−1` would not reliably equal `+1`. This model answers
+that reason a different way:
+
+- The base pair is stored, and it never changes when the difficulty changes.
+- The difficulty is stored as one integer, from −3 to +3.
+- The rolled sizes are a pure function of the base pair and that integer. Nothing computes a size
+  from a size it computed earlier.
+
+Reversibility is then arithmetic. `−n` after `+n` leaves the stored integer at zero, so the base pair
+comes back whether a size clamped or not. Two modifiers compose into their sum, so `+2` then `−1`
+lands where `+1` lands.
+
+### How one modifier splits across the two dice
+
+The split is data. The row is chosen by the modifier alone. The first number is the steps the
+lower-rated die takes and the second is the steps the higher-rated die takes. On a tie the attribute
+counts as the lower die.
+
+| Modifier | Lower die | Higher die |
+|---|---|---|
+| −3 | −1 | −2 |
+| −2 | −1 | −1 |
+| −1 | 0 | −1 |
+| 0 | 0 | 0 |
+| +1 | +1 | 0 |
+| +2 | +1 | +1 |
+| +3 | +2 | +1 |
+
+A modifier therefore raises the weaker die first and lowers the stronger die first. Both scales stop
+at 6 and at 12. With no skill die the whole modifier falls on the lone attribute die, and no skill
+die appears.
+
+**The rule reads the base pair.** A rule that read the sizes it last produced would be
+path-dependent, which is the defect above.
+
+### What the test asserts
+
+The test enumerates the whole space: every attribute size, by every skill state including absence, by
+every offset from −3 to +3. It counts its own denominator off that enumeration. Over the whole space
+it asserts the split table, the round trip, the composition of two modifiers into their sum, and the
+clamp at both ends with a count of the cases that clamp.
 
 Gear, artifact, bonus and stress dice are added to a step-dice roll unchanged.
 

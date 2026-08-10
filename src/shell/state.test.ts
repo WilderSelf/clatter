@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPool, emptyBuilder, STEP_LADDER, switchMode } from '../rules/pool';
+import { buildPool, emptyBuilder, STEP_SIZES, switchMode } from '../rules/pool';
 import type { RandomSource } from '../rules/random';
 import { seededRandom } from '../rules/seeded-random';
 import type { AppState, CountKey } from './state';
@@ -9,7 +9,7 @@ import {
   composition,
   difficultyPreview,
   emptyState,
-  ladderLabel,
+  SKILL_STEPS,
   canPush,
   nudge,
   poolCells,
@@ -46,22 +46,26 @@ function fullPool(): AppState {
 }
 
 describe('the tiles', () => {
-  it('holds one tile per counted type in pool mode and merges the pair in step mode', () => {
-    expect(poolCells(emptyState('pool')).map((cell) => cell.key)).toEqual([
-      'attribute',
-      'skill',
-      'gear',
-      'artifact',
-      'bonus',
-      'stress',
+  it('holds the same six tiles in both modes, and only what two of them carry moves', () => {
+    const tiles = ['attribute', 'skill', 'gear', 'artifact', 'bonus', 'stress'];
+    expect(poolCells(emptyState('pool')).map((cell) => cell.key)).toEqual(tiles);
+    // Step mode chooses die sizes instead of counts. Nothing else changes.
+    expect(poolCells(emptyState('step')).map((cell) => cell.key)).toEqual(tiles);
+    expect(poolCells(emptyState('pool')).map((cell) => cell.value)).toEqual([
+      '0',
+      '0',
+      '0',
+      'none',
+      '0',
+      '0',
     ]);
-    // The ladder gives both sizes from one index, so the two tiles become one.
-    expect(poolCells(emptyState('step')).map((cell) => cell.key)).toEqual([
-      'step',
-      'gear',
-      'artifact',
-      'bonus',
-      'stress',
+    expect(poolCells(emptyState('step')).map((cell) => cell.value)).toEqual([
+      'd6',
+      'none',
+      '0',
+      'none',
+      '0',
+      '0',
     ]);
   });
 
@@ -94,24 +98,38 @@ describe('the tiles', () => {
     expect(buildPool(builderOf(state)).map((die) => die.faces)).toEqual([12, 12]);
   });
 
-  it('steps the ladder tile over every state the core holds', () => {
-    let state = emptyState('step');
-    const read: string[] = [];
-    for (let taken = 0; taken < STEP_LADDER.length; taken += 1) {
-      read.push(ladderLabel(state.step));
-      state = nudge(state, 'step', 1);
-    }
-    expect(read).toEqual([
-      'd6',
-      'd6 + d6',
-      'd8 + d6',
-      'd8 + d8',
-      'd10 + d8',
-      'd10 + d10',
-      'd12 + d10',
-      'd12 + d12',
+  it('steps each step-mode size tile over its own scale, and neither reads the other', () => {
+    // The attribute tile walks the four sizes. The skill tile walks the same
+    // four and "none" below them, because the two scales are independent.
+    const walk = (key: 'attribute' | 'skill', places: number): string[] => {
+      let state = emptyState('step');
+      const read: string[] = [];
+      const cell = (): string => poolCells(state).find((each) => each.key === key)?.value ?? '';
+      for (let taken = 0; taken < places; taken += 1) {
+        read.push(cell());
+        state = nudge(state, key, 1);
+      }
+      read.push(cell());
+      return read;
+    };
+
+    expect(walk('attribute', STEP_SIZES.length)).toEqual(['d6', 'd8', 'd10', 'd12', 'd12']);
+    expect(walk('skill', SKILL_STEPS.length)).toEqual(['none', 'd6', 'd8', 'd10', 'd12', 'd12']);
+
+    // The pair the earlier one-index tile could not hold: a large attribute
+    // beside a small skill. It reaches the core, not just the label.
+    let mixed = emptyState('step');
+    for (let taken = 0; taken < 3; taken += 1) mixed = nudge(mixed, 'attribute', 1);
+    mixed = nudge(mixed, 'skill', 1);
+    expect(throwDice(mixed).map((die) => `${die.type}:d${die.faces}`)).toEqual([
+      'attribute:d12',
+      'skill:d6',
     ]);
-    expect(read.length).toBe(STEP_LADDER.length);
+
+    // And a lone attribute die at a size the earlier tile tied to a d6.
+    expect(throwDice(nudge(mixed, 'skill', -1)).map((die) => `${die.type}:d${die.faces}`)).toEqual([
+      'attribute:d12',
+    ]);
   });
 });
 
@@ -122,8 +140,8 @@ describe('a mode switch clears the pool', () => {
 
     const switched = withMode(built, 'step');
     expect(switched.mode).toBe('step');
-    // Step mode always holds the first rung of the ladder, so the empty step
-    // pool is that one die and nothing the player added.
+    // A step pool starts at the smallest attribute and no skill die, so the
+    // empty step pool is that one die and nothing the player added.
     expect(throwDice(switched), 'no pool die survived the switch').toEqual(
       buildPool(emptyBuilder('step')),
     );
@@ -190,20 +208,24 @@ describe('what the difficulty will do', () => {
   });
 
   it('prints the pair a step roll will use', () => {
+    // A d10 attribute beside a d8 skill.
     let state = emptyState('step');
-    for (let taken = 0; taken < 4; taken += 1) {
-      state = nudge(state, 'step', 1);
-    }
-    expect(state.step).toBe(4);
+    for (let taken = 0; taken < 2; taken += 1) state = nudge(state, 'attribute', 1);
+    for (let taken = 0; taken < 2; taken += 1) state = nudge(state, 'skill', 1);
+    expect(state.stepDice).toEqual({ attribute: 10, skill: 8 });
+
     expect(difficultyPreview(state)).toBe('The next roll rolls a d10 and a d8.');
     expect(difficultyPreview(withDifficulty(state, 2))).toBe(
       'The next roll rolls a d12 and a d10.',
     );
-    // The modifier is clamped to −3 first, which lands on the lowest rung.
+    // The modifier is clamped to −3 first, and both scales stop at their floor.
     expect(difficultyPreview(withDifficulty(state, -9))).toBe('The next roll rolls a d6 and a d6.');
-    expect(difficultyPreview(withDifficulty(nudge(state, 'step', -2), -3))).toBe(
-      'The next roll rolls one d6.',
-    );
+
+    // With no skill die the whole modifier falls on the lone attribute die,
+    // and the sentence names one die.
+    const alone = withDifficulty(nudge(state, 'skill', -3), -1);
+    expect(alone.stepDice).toEqual({ attribute: 10, skill: null });
+    expect(difficultyPreview(alone)).toBe('The next roll rolls one d8.');
   });
 
   it('holds the modifier inside the range the core allows', () => {

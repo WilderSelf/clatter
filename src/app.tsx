@@ -126,7 +126,7 @@ function Cell({
   onNudge: (delta: number) => void;
 }) {
   const classes = ['cell'];
-  if (cell.count > 0) classes.push('on');
+  if (!cell.empty) classes.push('on');
   if (cell.atCap) classes.push('cap-hit');
   return (
     <div
@@ -153,7 +153,7 @@ function Cell({
         −
       </button>
       <span class="cell-t">{cell.label}</span>
-      <span class={cell.count === 0 ? 'cell-n zero' : 'cell-n'}>{cell.value}</span>
+      <span class={cell.empty ? 'cell-n zero' : 'cell-n'}>{cell.value}</span>
       <button
         class="cell-p"
         type="button"

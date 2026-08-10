@@ -4,23 +4,24 @@
 // whole store runs under a plain test runner. The shell imports this file and
 // this file imports the rules core. The core imports neither. Constraint 3.
 //
-// Nothing here decides a rule. The pool, the step ladder and the effect of the
+// Nothing here decides a rule. The pool, the step sizes and the effect of the
 // difficulty all come from `src/rules/pool.ts`, and this file only holds what
 // the player has typed and asks the core what it means.
 
 import type { Die, DieType } from '../rules/die';
+import type { Faces } from '../rules/die';
 import { latestValue } from '../rules/die';
-import type { ArtifactFaces, Builder, DiceSpec, Mode } from '../rules/pool';
+import type { ArtifactFaces, Builder, DiceSpec, Mode, StepDice } from '../rules/pool';
 import {
   applyDifficulty,
   buildPool,
   firstRoll,
-  ladderState,
   MODIFIER_LIMIT,
   poolBuilder,
+  START_STEP_DICE,
   stepBuilder,
-  stepIndex,
-  STEP_LADDER,
+  steppedDice,
+  STEP_SIZES,
 } from '../rules/pool';
 import type { PushPreviewOutcome } from '../rules/push';
 import { generations, previewPush, push } from '../rules/push';
@@ -33,9 +34,9 @@ import { score } from '../rules/success';
 import { clickDie } from '../tray/affordance';
 
 /**
- * The artifact tile steps along an enumerated ladder, in the manner of
- * `STEP_LADDER`. One rating gives a size and a count, so the tile holds one
- * number and the pool holds the dice that number names.
+ * The artifact tile steps along an enumerated ladder. One rating gives a size
+ * and a count, so the tile holds one number and the pool holds the dice that
+ * number names.
  *
  * The ladder is an interface affordance and not a rule. `specs/0001-rules-model.md`
  * says which faces an artifact die has and what each face scores. It says
@@ -69,6 +70,18 @@ export const POOL_CAPS = {
   stress: 10,
 } as const;
 
+/**
+ * The positions of the skill tile in step mode, smallest first.
+ *
+ * "No skill die" sits below the smallest size, because the two scales are
+ * independent: a player with no skill rolls the attribute die alone at whatever
+ * size it holds. The attribute tile steps `STEP_SIZES` itself and holds no such
+ * position, because a step roll always throws an attribute die.
+ *
+ * These positions are an interface affordance. The core takes sizes.
+ */
+export const SKILL_STEPS: readonly (Faces | null)[] = [null, ...STEP_SIZES];
+
 /** One counted tile per dice type. The artifact number is a ladder rating. */
 export type CountKey = keyof typeof POOL_CAPS;
 
@@ -96,8 +109,8 @@ export const DEFAULT_PROFILE_ID = 'pool-stress-and-complications';
 export interface AppState {
   readonly mode: Mode;
   readonly counts: Counts;
-  /** An index into `STEP_LADDER`. Step mode reads it, pool mode ignores it. */
-  readonly step: number;
+  /** The rated pair. Step mode reads it, pool mode ignores it. */
+  readonly stepDice: StepDice;
   readonly difficulty: number;
   /** The builder is open at rest A and collapsed at rest B. */
   readonly builderOpen: boolean;
@@ -114,7 +127,7 @@ export function emptyState(mode: Mode): AppState {
   return {
     mode,
     counts: ZERO_COUNTS,
-    step: 0,
+    stepDice: START_STEP_DICE,
     difficulty: 0,
     builderOpen: true,
     sheetOpen: false,
@@ -151,9 +164,9 @@ export function builderOf(state: AppState): Builder {
   if (state.mode === 'pool') {
     return poolBuilder({ ...state.counts, artifact });
   }
-  // The ladder gives the attribute and the skill die. Gear, artifact, bonus and
-  // stress dice are extras the core adds to a step roll unchanged.
-  return stepBuilder(state.step, [
+  // The rated pair gives the attribute and the skill die. Gear, artifact, bonus
+  // and stress dice are extras the core adds to a step roll unchanged.
+  return stepBuilder(state.stepDice, [
     ...repeat({ type: 'gear', faces: 6 }, state.counts.gear),
     ...artifact.map((faces): DiceSpec => ({ type: 'artifact', faces })),
     ...repeat({ type: 'bonus', faces: 6 }, state.counts.bonus),
@@ -183,9 +196,17 @@ export interface PoolCell {
   readonly count: number;
   readonly max: number;
   readonly atCap: boolean;
-  /** The counted type, or `step` for the merged ladder tile. */
-  readonly key: CountKey | 'step';
+  /**
+   * True while the tile puts no die on the table. The screen dims such a tile.
+   * It is not `count === 0`: a step attribute tile at its smallest size still
+   * rolls a die, and a step skill tile at its lowest position rolls none.
+   */
+  readonly empty: boolean;
+  readonly key: CountKey;
 }
+
+/** The two tiles that hold a die size in step mode and a count in pool mode. */
+type SizeKey = 'attribute' | 'skill';
 
 const COUNTED_CELLS: readonly (readonly [CountKey, string])[] = [
   ['attribute', 'attribute'],
@@ -196,10 +217,45 @@ const COUNTED_CELLS: readonly (readonly [CountKey, string])[] = [
   ['stress', 'stress'],
 ];
 
-/** The ladder pair, as the merged tile prints it. */
-export function ladderLabel(step: number): string {
-  const state = ladderState(step);
-  return state.skill === null ? `d${state.attribute}` : `d${state.attribute} + d${state.skill}`;
+/** The largest step die, read off the scale and never typed. */
+function topSize(): Faces {
+  const faces = STEP_SIZES[STEP_SIZES.length - 1];
+  if (faces === undefined) {
+    throw new Error('the step scale holds no size');
+  }
+  return faces;
+}
+
+/** The positions one size tile steps over. */
+function sizeSteps(key: SizeKey): readonly (Faces | null)[] {
+  return key === 'attribute' ? STEP_SIZES : SKILL_STEPS;
+}
+
+/** Where one rated die sits on its own tile. */
+function sizePosition(dice: StepDice, key: SizeKey): number {
+  return sizeSteps(key).indexOf(key === 'attribute' ? dice.attribute : dice.skill);
+}
+
+/**
+ * The attribute tile or the skill tile in step mode. Each one steps its own die
+ * size, and neither reads the other, because the two scales are independent.
+ */
+function sizeCell(key: SizeKey, dice: StepDice): PoolCell {
+  const steps = sizeSteps(key);
+  const count = sizePosition(dice, key);
+  const faces = steps[count] ?? null;
+  const max = steps.length - 1;
+  return {
+    id: `pool-cell-${key}`,
+    label: key,
+    value: faces === null ? 'none' : `d${faces}`,
+    valueText: faces === null ? `no ${key} die` : `a d${faces}`,
+    count,
+    max,
+    atCap: count >= max,
+    empty: faces === null,
+    key,
+  };
 }
 
 function countedCell(key: CountKey, label: string, count: number): PoolCell {
@@ -215,6 +271,7 @@ function countedCell(key: CountKey, label: string, count: number): PoolCell {
       count,
       max,
       atCap: count >= max,
+      empty: count === 0,
       key,
     };
   }
@@ -226,6 +283,7 @@ function countedCell(key: CountKey, label: string, count: number): PoolCell {
     count,
     max,
     atCap: count >= max,
+    empty: count === 0,
     key,
   };
 }
@@ -233,38 +291,34 @@ function countedCell(key: CountKey, label: string, count: number): PoolCell {
 /**
  * The tiles of the pool bar, in the order the keyboard walks them.
  *
- * Step mode merges the attribute tile and the skill tile into one ladder tile,
- * because the ladder gives both sizes from one index. Section 5 of
- * `docs/design/0002-screen-design.md` settles that, and `STEP_LADDER` is why: a
- * pair of independent size pickers is path-dependent and an index is not.
+ * **Both modes hold the same six tiles.** Step mode changes what the attribute
+ * tile and the skill tile carry — a die size instead of a count — and nothing
+ * else. The two scales are independent, so each of the two tiles steps its own
+ * size. Section 5 of `docs/design/0002-screen-design.md` draws it.
  */
 export function poolCells(state: AppState): readonly PoolCell[] {
-  const counted = COUNTED_CELLS.filter(
-    ([key]) => state.mode === 'pool' || (key !== 'attribute' && key !== 'skill'),
-  ).map(([key, label]) => countedCell(key, label, state.counts[key]));
-  if (state.mode === 'pool') {
-    return counted;
+  return COUNTED_CELLS.map(([key, label]) =>
+    state.mode === 'step' && (key === 'attribute' || key === 'skill')
+      ? sizeCell(key, state.stepDice)
+      : countedCell(key, label, state.counts[key]),
+  );
+}
+
+/** Step one die size up or down. Each scale stops at its own two ends. */
+function nudgeSize(dice: StepDice, key: SizeKey, delta: number): StepDice {
+  const steps = sizeSteps(key);
+  const at = clamp(sizePosition(dice, key) + delta, 0, steps.length - 1);
+  const faces = steps[at] ?? null;
+  if (key === 'skill') {
+    return { ...dice, skill: faces };
   }
-  const max = STEP_LADDER.length - 1;
-  return [
-    {
-      id: 'pool-cell-ladder',
-      label: 'step dice',
-      value: ladderLabel(state.step),
-      valueText: ladderLabel(state.step).replace(' + ', ' and '),
-      count: state.step,
-      max,
-      atCap: state.step >= max,
-      key: 'step',
-    },
-    ...counted,
-  ];
+  return faces === null ? dice : { ...dice, attribute: faces };
 }
 
 /** Move one tile up or down. Every tile stops at its own cap and at zero. */
-export function nudge(state: AppState, key: CountKey | 'step', delta: number): AppState {
-  if (key === 'step') {
-    return { ...state, step: stepIndex(state.step, delta) };
+export function nudge(state: AppState, key: CountKey, delta: number): AppState {
+  if (state.mode === 'step' && (key === 'attribute' || key === 'skill')) {
+    return { ...state, stepDice: nudgeSize(state.stepDice, key, delta) };
   }
   return {
     ...state,
@@ -287,7 +341,13 @@ export function withMode(state: AppState, mode: Mode): AppState {
 
 /**
  * The state that puts the most dice on the table with one throw: every tile at
- * its cap, the ladder at its top, and the difficulty at its limit.
+ * its cap, both step dice at the top of their scales, and the difficulty at its
+ * limit.
+ *
+ * Step mode reaches a smaller table than pool mode, because it rolls two dice
+ * whatever their sizes are and its difficulty steps those sizes instead of
+ * adding bonus dice. The drawn screen is therefore measured in pool mode, which
+ * is the worst case of the two.
  *
  * This is the one derivation of the draw target. `throwDice(worstCaseState())`
  * counts it, and `docs/design/0013-screen-final.html` is drawn at that count.
@@ -304,7 +364,7 @@ export function worstCaseState(mode: Mode = 'pool'): AppState {
   return {
     ...emptyState(mode),
     counts: { ...POOL_CAPS },
-    step: STEP_LADDER.length - 1,
+    stepDice: { attribute: topSize(), skill: topSize() },
     difficulty: MODIFIER_LIMIT,
     builderOpen: false,
   };
@@ -362,7 +422,9 @@ export function signedDifficulty(value: number): string {
  */
 export function difficultyPreview(state: AppState): string {
   if (state.mode === 'step') {
-    const after = ladderState(stepIndex(state.step, state.difficulty));
+    // The core answers from the rated pair and the modifier, so the sentence
+    // names the sizes the next roll really throws.
+    const after = steppedDice(state.stepDice, state.difficulty);
     return after.skill === null
       ? `The next roll rolls one d${after.attribute}.`
       : `The next roll rolls a d${after.attribute} and a d${after.skill}.`;

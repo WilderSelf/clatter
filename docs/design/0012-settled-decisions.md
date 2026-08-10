@@ -225,4 +225,26 @@ the end state and the constraints hold. This changes the method, and it keeps ev
 The bar shrinks to five tiles in step mode, and the control count falls with it. The budget in
 section 3 of the screen design is a ceiling, so a smaller count meets it.
 
+### Overruled by the owner, 2026-08-09
+
+**The decision above is kept as it was written. The owner overruled it on 2026-08-09, after a check
+against the reference.** The screen holds **two size tiles** in step mode, one for the attribute and
+one for the skill, and the bar holds six tiles in both modes.
+
+**The reason is the rules model, not taste.** The reference rates the attribute and the skill on two
+independent scales, and each rating names its own die size. The eight-state list paired the two, so
+it could express eight of the sixteen pairs. A large attribute beside a small skill was unreachable,
+and the reference permits it. The list also tied "no skill die" to a d6 attribute, and the reference
+treats absence as independent of the size.
+
+**What the reason above got right is kept.** A rule that steps one die up and the other down as it
+goes is path-dependent, and `+2` then `−1` would not reliably equal `+1`. The model now stores the
+base pair and stores the difficulty as one integer, and it computes the rolled sizes from the two.
+Reversibility stays true by construction, and it now holds where a size clamps as well.
+`specs/0001-rules-model.md` states the model and the split table.
+
+**The owner's words on the screen:** everything on the edit pool screen is the same in step mode as
+in pool mode, except that the player chooses die sizes instead of counts. Gear, bonus and stress keep
+their counts. The artifact tile keeps its ladder, which is unchanged.
+
 ---
