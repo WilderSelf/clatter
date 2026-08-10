@@ -61,6 +61,198 @@ Status table for each unit. Every unit appends one row after it lands.
 | 3.7 | Capability probe, fallback, context loss — the interface half | Done. The 3D tray still draws no result. | #10 | `src/shell/renderer.ts` is the choice and it is pure: it reads the probe answer and the stored record and answers which renderer draws the dice. `src/app.tsx` runs the probe once at startup, draws flat dice until it answers, and mounts the table only where the probe clears the bar, so a browser below the bar fetches no part of the 3D chunk. Three events fall to flat dice for good and every one records the flag and tells the player once: a probe below the bar, a table that does not mount, and a lost WebGL context. The notice carries `role="status"` and holds no tab stop, so both keyboard walks of section 6 stay at 11 visits and 35. The way back is `sheet-tray-renderer`, a ninth control on the sheet, which carries no share of the control budget of section 3. Decision 8 of `docs/design/0012-settled-decisions.md` records it. **The defect Unit 2.3 reported is fixed:** the die cell is keyed by a throw ordinal in `AppState`, and the old key held the count of the values a die carries, which reads the same before and after a re-throw. **The acceptance:** `node scripts/browser.mjs --blocked-chunk` removes the service worker and Cache Storage, refuses the chunk at the network layer, counts every refused abort, and then walks every rule and every affordance on the flat dice. On the graphics card outside the sandbox it exits 0 at `checks=11 failures=0 skipped=0`, with the probe reading `true`, one chunk request refused, 0 refused aborts, 0 encoded bytes, 0 canvases and the stored flag true. Eight injections were proved red and every one was restored by editing the injection back. Initial JavaScript moves from 14,356 to 16,355 gzip bytes and the lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=118`, `hits=0`, exit 0. **Open:** the 3D tray draws no result yet, for three measured reasons. See the notes under this table. |
 | 3.5 | Locked-dice affordance — the screen half. **Closes Unit 3.5, and puts the 3D tray to work in the application.** | Done | #11 | The 3D tray now draws the result inside the application. Three blockers Unit 3.7 named are closed. **1. The push defect.** `pushPool` in `src/tray/throw.ts` spawns the die a profile adds before the re-throw, through `box.add`, on the value the core decided, and it never throws that die twice. The library appends, so the added die takes the index after every die on the tray and the returned order says so. Two answers to "which die is new" — the set the tray does not hold, and `PushedRoll.stressAdded` — must agree, so a stale order fails by name. **2. The screen half.** Decision 9 of `docs/design/0012-settled-decisions.md`: the die cells are real DOM in both renderers, and over the 3D table they lie on the die each one names, draw no die of their own, and take no pointer. `dice-tray` is still ONE control with a roving tab index, and section 6 still reads 11 visits before the throw and 35 after it in BOTH instruments, with the 3D table running. **3. The click route.** A press with the pointer falls through to the raycast of Unit 3.5, which refuses a rule lock. **A defect the render found and no green suite could:** the library draws one last frame when a throw ends and none at all for a click, so a lock mark added after that frame kept the matrix of the frame before and the player saw the marks of the previous throw standing where the previous dice stood, up to 682 world units away. `drawMarkers` now draws the frame that shows them. `node scripts/browser.mjs --table` is the new mode and it exits 0 at `checks=9 failures=0 skipped=0` on the graphics card: `compared=30 of a pool of 30` up-faces read off the body quaternions against the faces the screen printed, `placed=30 of 30` cells inside 1 px of a centroid the harness projects itself, 23 dice answered a real Enter and 7 refused it, `reached=30 unreachable=0` under a real pointer click, and the push took the table from 30 dice to 31 with `die-st11` spawned and every kept die inside 1 px of where it lay. Nine injections were proved red and every file was restored by editing the injection back. Initial JavaScript 16,355 to 18,944 gzip bytes; the lazy 3D chunk unchanged at 151,876; the three render counters unchanged at 841, 842 and 77. See the notes under this table. |
 | 4.3 | Saved pool presets — the list on the screen. **Unit 4.3 is now complete.** | Done | #13 | `sheet-presets` names a pool, recalls one, reorders the list and deletes a row, behind the one disclosure. **Decision 11 of `docs/design/0012-settled-decisions.md` settles where it lives**, and three reasons put it there: a recall writes over every tile of the built pool, which is the hazard `sheet-mode` already sits behind; a control in the builder would rewrite the drawn screen the owner approved at Unit 2.0 and both keyboard walks of section 6; and saving is rare where building is constant. **Section 3 is untouched at five controls at each rest state against a ceiling of eight**, and that is measured rather than claimed: the inventory check still counts the eight named controls, and a second check reads both rest states and finds no part of the panel there. Section 6 still reads eleven visits before the throw and thirty-five after it, in both instruments. **The rules core is the oracle for the recall.** The recalled pool is thrown and every face is compared against `firstRoll` over the pool the store holds, 13 dice compared face for face, and no record is compared to a record. **The reorder is asserted over three presets in both instruments**, because a move of one of two is not observable, and the browser half moves a row with a real Enter press. **The name is user text and no parser ever sees it.** A name of 54 code points holding markup, both kinds of quote, an ampersand and an emoji draws as 54 code points of text, in a name element holding one node and no element, in a panel holding no element the markup could have made. Constraint 8. **Each of the four refusals reaches the player as a sentence that names its cause**, against a denominator read off the `PresetRefusal` union in the source of the store, so a fifth refusal fails the check until it has words and a route. Nothing is disabled to prevent a refusal, so both caps are reachable by hand: 60 emoji save and 61 are refused, and the twenty-first preset is refused while a replacement is still let through. The fourth refusal has a real route — a player who presses Delete twice before the list is drawn again — and the operations read the record out of a ref rather than out of the render that drew the row. **A stored pool the six tiles cannot hold is refused and says why**, rather than clamped: a count over a tile cap or an artifact list off the ladder is unwritable through the interface and reaches the store only by hand. **Step mode draws one sentence and no control**, because a saved pool holds counts. Every control carries a role, an accessible name that holds the name of the pool it acts on, and a state, and the list is walked with real Tab presses against a list derived from the panel itself. Vitest moves from 272 to 279 tests over 28 files. `node scripts/browser.mjs --sheet` moves from 7 checks to 11 and exits 0 at `checks=11 failures=0 skipped=0`. Initial JavaScript moves from 21,152 to 22,532 gzip bytes; the lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=124`, `hits=0`, exit 0. Thirteen injections were proved red and every one was restored by editing the injection back. See the notes under this table. |
+| 4.4 | Roll log — the screen half: a roll writes an entry, and the history destination reads it | Done. The record view is a shell for Unit 4.5. | #14 | Every roll and every push now reaches IndexedDB through `LogWriter`, and `sheet-history` opens the history destination. **The log's shape decides the write, and the decision is stated: ONE entry per roll, rewritten by every push.** `createLogEntry` takes a whole `RollResult` whose dice carry one value per generation, it derives `pushCount` from the number of generations, and `src/log/csv.ts` rejects a file where one `roll_id` appears twice, so a second entry per push would export a file the application refuses to read back. `src/shell/roll-log.ts` opens the entry on a roll and rewrites it in place on a push, at the key the store acknowledged the insert with. `replaceRoll` in `src/log/store.ts` does that in ONE transaction and checks the key still exists inside it, so a `put` at a trimmed key cannot put a dropped roll back below the oldest. No second store was built. **`profileHash` no longer needs node.** The store half recorded `node:crypto` as unavailable in a browser and named this unit as the one that would settle it. `src/log/sha256.ts` is one synchronous implementation that names no platform API, so the test runner and the browser produce the same digest, and `src/log/sha256.test.ts` holds it against `node:crypto` over every length to 200 bytes and against the published FIPS 180-4 vectors. The pinned digest in `src/log/entry.test.ts` did not move, and the browser wrote `0b489af6...` for the second preset, which is the digest the pure half recorded. **The write is read back out of the database, never out of the queue.** `node scripts/browser.mjs --history` opens its own connection to `clatter-log` and counts: 4 presses on Roll and 6 on Push put 4 entries under 4 distinct roll ids, whose stored push counts sum to 6 and whose stored generations sum to 6. Three counts, one denominator. **The list is counted twice, so the two can disagree.** The summary length is read off the screen and off a second connection to the store at each of three rounds: 1/1/1, 2/2/2, 3/3/3. **The rules core is the oracle for the entry.** `src/shell/roll-log.test.ts` throws a roll and two pushes, then compares every cell of every die and every generation against `score` and `isLocked` under the profile in force, 48 cells against a count taken a second way off the live result, plus the roll-level values against `successCount`, `baneCount`, `generations` and `pushCost`. **The hash is the profile the roll ran under.** The preset changes between two rolls, Decision 10 takes the table from 3 dice to 0, and the two entries carry two distinct digests and name two rule sets. **The destination is a route and not an overlay.** Decision 12 of `docs/design/0012-settled-decisions.md` records it: the roll flow leaves the document, so section 6 still reads eleven visits before the throw and thirty-five after it, in BOTH instruments, with both lists read out of the design. The summary holds exactly `back-button` and `history-list`, read out of section 3 of the design and never restated, and `history-list` is one composite with a roving tab index, 1 of 3 options carrying it, every option holding a role, an accessible name and a state, and no option under the 24 px floor. A real Enter opens the record and the focus lands on `back-button`. **The seven-day note reaches the player**, at `history-storage-note` with `role="note"`, drawing 752x54 px, and it names the seven days, the home screen and the export the plan asks for. **The storage estimate reaches the settings sheet** at `sheet-storage-estimate`, a live region with no tab stop, reading 0.7 MB against the 0.7 MB `navigator.storage.estimate()` answered that run. **A log note is user text and no parser sees it**, drawn through `textContent` in an element holding one node and no element. Constraint 8. Vitest moves from 279 to 302 tests over 31 files. `node scripts/browser.mjs --history` is the new mode at `checks=8 failures=0 skipped=0`, and `--log-store` moves from 13 checks to 13 with one instrument made stronger. Initial JavaScript moves from 22,532 to 28,155 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Eleven injections were proved red and every one was restored by editing the injection back. The captures are `docs/design/0016-history-360.png`, `0016-history-1440.png`, `0016-history-record-360.png` and `0016-history-record-1440.png`. **Open, and owed by Unit 4.4:** nothing. **Left for Unit 4.5:** the transposed matrix and `export-button` inside `history-record`, with the two acceptances row 2.2d carries. See the notes under this table. |
+
+## Unit 4.4 — the screen half: the roll log reaches the screen
+
+The store half built the ring buffer and left four things open: the settings screen that shows the
+estimate, the log view, the export button, and the interface note about the seven-day rule. Three of
+the four land here. The export button belongs to Unit 4.5, which Decision 3 puts in the record view.
+
+### The decision the log's shape forced: one entry per roll
+
+**A roll opens one entry. Every push of that roll rewrites it. A push never writes a second entry.**
+Three separate parts of the shape say so, and each one would break on its own:
+
+1. `createLogEntry` takes a whole `RollResult`, whose dice each carry one value per generation, and
+   it writes `LoggedDie.cells` as one cell per generation. A pushed roll is already a complete entry.
+2. The same call derives `pushCount` from the number of generations. Two entries per pushed roll
+   would hold `pushCount` 0 and 1, and the log would report two rolls where the player threw one.
+3. The export schema carries `roll_id` AND `generation` as separate columns, and `src/log/csv.ts`
+   rejects a file where one `roll_id` appears in two blocks. A push that wrote a second entry would
+   make the application write a file it then refuses to read.
+
+`replaceRoll` is the one new call in the store. It rewrites the entry at the key the insert was
+acknowledged with, in one readwrite transaction, and it counts that key inside the same transaction
+before it writes. **The ring buffer does not move:** a `put` at a key the store already holds
+replaces the value and changes neither the count nor the key order, so no trim is due. The existence
+check is not decoration. Without it a `put` at a key a trim had already dropped would put that roll
+back below the buffer's own oldest key, and the ring would hold a roll it had thrown away.
+
+`LogWriter.queue` obeys the same rule one step earlier: a roll already waiting under the same
+`roll_id` is replaced where it stands, so a push that lands before the first flush cannot make the
+flush write the roll twice.
+
+### `profileHash` runs in a browser now
+
+The store half reported this and named this unit: `node:crypto` has no browser. Two ways to settle
+it were priced. `crypto.subtle.digest` is asynchronous, so `createLogEntry` and every caller would
+have become asynchronous. `src/log/sha256.ts` is the other: one synchronous implementation that
+names no platform API at all, so the test runner and the browser produce the same digest from the
+same code. Two implementations could disagree, and a disagreement here rewrites campaign history,
+because the export and re-import equality check compares the stored hash.
+
+Three oracles hold it, and none of them is a value this unit wrote:
+
+- `node:crypto`, over the empty string, `abc`, text outside ASCII, sorted-key JSON, and every length
+  from 0 to 200 bytes. The corpus is built rather than listed, so its denominator is counted: 4
+  named strings plus one per length, 205 in all, and the test asserts that number.
+- The published FIPS 180-4 vectors, including the million-character one.
+- The pinned digest in `src/log/entry.test.ts`, which `node:crypto` produced before this file
+  existed. It did not move. The browser then wrote `0b489af6...` for the second preset, which is the
+  digest the store half's ledger row already carries.
+
+### The traps this unit was warned about, and what was done
+
+**A write that is queued is not a write that landed.** `node scripts/browser.mjs --history` opens
+its own connection to `clatter-log` and reads the object store. Nothing in that mode asks the
+application what it thinks it wrote. The mode also waits on the count in the database rather than on
+the click, so a check that ran before the write would fail on a timeout instead of passing early.
+
+**A list rendered from a store the check also wrote can agree with itself.** The summary length is
+read three ways at each of three rounds: the presses the run made, the options the list drew, and
+the rolls a second connection read out of IndexedDB. The three agreed at 1/1/1, 2/2/2 and 3/3/3, and
+the red proof that cut the row builder to two rows separated them at `3 pressed / 2 drawn / 3
+stored`.
+
+### The counted denominators
+
+| Claim | Measured | Counted a second way |
+|---|---|---|
+| One entry per roll | 4 entries, 4 distinct roll ids | 4 presses on Roll, counted by the run |
+| A push rewrites its own entry | stored `pushCount` sums to 6 | 6 presses on Push, and the stored generations sum to 6 |
+| Every cell of the entry is the core's answer | every cell of every die over three generations | the cells the live `RollResult` holds, over dice by generations |
+| The summary follows the log | 3 rounds, 3 agreements | presses, options drawn, rolls in the store |
+| The arrow walk reaches every roll | 3 arrow visits | 3 rolls read out of IndexedDB |
+| The summary holds two controls | 2 tab stops | the control names in section 3 of the design |
+| The digest corpus | 205 comparisons | 4 named strings plus one per length from 0 to 200 |
+| Every cost unit has words | one per unit | the units the shipped profiles use |
+
+### The instrument this unit broke, and made stronger
+
+`log-store.persistence-is-asked-for-once-and-the-estimate-is-readable` went red at `calls=0`. The
+application now asks for persistent storage at startup, through `openRollLog`, and the check
+installed its counting proxy after the page had loaded, so the memo was already spent and the proxy
+saw nothing. **The failure was baselined before it was blamed:** with the application's own call
+taken out the check read `calls=1` and passed again, which located the cause in the new call and not
+in the store.
+
+The instrument now installs the proxy before the first line of script the page runs, so the count
+covers the application as well as the harness. The claim is stronger than it was: the application
+AND the harness together ask the browser exactly once. Removing the `??=` from `persistOnce` takes
+the reading to `calls=3` and the check goes red.
+
+### Red proofs
+
+Eleven injections. Each one was saved to a copy outside the repository first and restored by editing
+the injection back, and `sha256sum -c` matched every file afterwards. No checkout and no stash
+touched any file.
+
+| # | The injection | The gate that went red |
+|---|---|---|
+| 1 | `s1` dropped from the message schedule in `sha256.ts` | `the digest of a 0-character string: expected 'fe1ab5bf...' to be 'e3b0c442...'`, the FIPS vector at 3 characters, and the pinned digest in `entry.test.ts` |
+| 2 | `entryForThrow` passes `'artifactFlat'` whatever the screen holds | `the successes of die 8 at generation 0: expected 1 to be 2` |
+| 3 | `entryForThrow` passes a fixed profile | `the hash of the profile in force at the second throw: expected '0b489af6...' to be '36f6bccb...'` |
+| 4 | every throw opens a new sequence, so a push writes a second entry | `4 presses on Roll and 4 on Push put 8 entries in IndexedDB, under 8 distinct roll ids` |
+| 5 | `historyRows` cut to two rows | `a log of 7 rolls draws 7 visits: expected 2 to be 7`, and in the browser `3 pressed / 2 drawn / 3 stored` |
+| 6 | every option carries `tabIndex=0` | `the summary holds the design's two controls, and no third`, and in the browser `roving=3` with the walk reaching `[history-list]` alone |
+| 7 | the seven-day note loses its role and its export prompt | `the note carries a role: expected null to be 'note'`, and in the browser `role=null on_plan=false` |
+| 8 | a `back-button` added to the roll flow footer | `real Tab and arrow presses reached 12 authored visits against the 11 section 6 names`, and 36 against 35 after the throw |
+| 9 | the history drawn beside the roll flow instead of replacing it | `roll-button left the document: expected <button ...> to be null` |
+| 10 | the sheet prints a fixed estimate | `It reads 0 MB against the 0.7 MB navigator.storage.estimate() answers this run` |
+| 11 | `persistOnce` loses its memo | `the browser's own storage manager saw 3 call in all` |
+
+### What the captures show
+
+`docs/design/0016-history-360.png` and `0016-history-1440.png` are the summary. The header carries
+the title and the count and no tab stop. The note sits above the list, marked by a rule down its
+left edge, and it wraps to four lines on the phone and one on the desk. Each row prints the time,
+the successes beside a circle, the banes beside a triangle, the dice count and the push count, so
+shape carries what colour carries. The footer holds one control.
+
+`0016-history-record-360.png` and `0016-history-record-1440.png` are the record shell: eight
+readings in a grid that reflows from two columns to eight, and one sentence naming what Unit 4.5
+adds. **Two defects the render found and the green suite did not.** The cost read `1 ratingPoint`
+and the rule set read `pool-banes-damage-ratings`: two code identifiers on a player's screen. The
+cost now reads in words from a record keyed by the cost union, so a fifth unit is a type error until
+it has words, and the rule set reads the profile's own label with the stored identifier as the
+fallback. A label is a name and never a derived value, so nothing is re-priced by reading it.
+
+### Reported, not fixed
+
+- **A keep chosen after the last throw, and never pushed, is not in the entry.** The log is written
+  on a roll and on a push, and `manualLock` is a field of the die, so a choice made after the final
+  generation reaches the entry only if a push follows it. A push does rewrite the entry, so every
+  keep that decided what a push threw is recorded. The gap is a keep that decided nothing.
+- **The serialisation of two overlapping writes is not red proved.** `openRollLog` puts every
+  `record` call in one chain, because a push that started while its roll's key was still unknown
+  would write a second entry under one `roll_id`. The harness cannot reach that state: the push
+  control does not exist until the roll has rendered, so a roll and its push are always two tasks
+  apart. The guard is reasoned and its reason is written where it stands. No check would go red if
+  it were removed.
+- **The seven-day note prompts an export before the export control exists.** The plan asks this unit
+  to say so and to prompt an export. `export-button` lands with Unit 4.5, in the record view, which
+  is one press from the note. The note and the control are one unit apart.
+- **The log holds no note editor.** `LogEntry.note` is written as an empty string by every roll the
+  screen makes. The field is carried, exported and rendered as text, and no unit of the plan asks
+  for the editor yet.
+
+### A finding the branding gate reported about itself
+
+`src/log/sha256.test.ts` carried two NUL bytes inside a string literal, from an input the test used
+to prove the digest answers 64 hexadecimal characters whatever it is given. The gate reads content
+and not the extension, and NUL is its rule for binary, so it skipped the file: `binary_skipped=60`
+against 55 before this unit, and `.ts` appeared in the list of skipped extensions beside `.jpg` and
+`.png`. **The skip is what caught it.** Unit 0.3 built the gate to report every skip rather than
+pass over it in silence, and that report is the only thing that named a source file the scan never
+read. The literal is now ordinary text, the reading is `files_scanned=130 binary_skipped=59
+hits=0`, and the 59 are the 55 images this repository already held plus the four captures this unit
+adds.
+
+### What Unit 4.5 inherits
+
+`history-record` is a shell. It draws the stored readings of one roll, it holds `back-button` alone
+in its footer, and it prints one sentence saying what is missing. Unit 4.5 adds two things inside
+it: the transposed matrix of Decision 3, one row per die and one column per generation, and
+`export-button` in the footer. Row 2.2d of the table above carries the two matrix acceptances to
+that unit unchanged. `History` already takes the whole `LogEntry` list, so the matrix reads
+`entry.dice[].cells[]` with no new plumbing.
+
+### Validation
+
+| Command | Exit |
+|---|---|
+| `npm run lint` | 0 |
+| `npm run typecheck` | 0 |
+| `npm test` | 0, over 302 vitest tests in 31 files plus the node tests |
+| `npm run build` | 0 |
+| `npm run perf` | 0, 203 steps against the 224 in `budgets.json`, scene digest unchanged |
+
+Harness modes, all outside the sandbox on the graphics card:
+
+    --history        checks=8  failures=0 skipped=0
+    --shell          checks=8  failures=0 skipped=0
+    --sheet          checks=11 failures=0 skipped=0
+    --table          checks=9  failures=0 skipped=0
+    --blocked-chunk  checks=11 failures=0 skipped=0
+    --offline        checks=8  failures=0 skipped=0
+    --log-store      checks=13 failures=0 skipped=0
+    --log-csv        checks=10 failures=0 skipped=0
+
+The two bundle figures are read from `dist/` by `scripts/check-bundle-size.mjs` against
+`budgets.json`: initial JavaScript 28,155 gzip bytes and the lazy 3D chunk 151,876, both inside
+their budgets.
+
 
 ## Unit 0.5 — CI, public repository, protection
 

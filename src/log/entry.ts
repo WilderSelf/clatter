@@ -1,7 +1,16 @@
 // The roll log entry and the profile hash.
 //
-// This module is not the rules core. It reads the core and imports
-// `node:crypto`, which the core may never do.
+// This module is not the rules core. It reads the core, and the core may not
+// read it.
+//
+// **The digest is `src/log/sha256.ts` and no longer `node:crypto`.** Unit 4.4's
+// store half recorded the browser as unable to run this file, because no
+// browser has `node:crypto`. The screen half writes a log entry on every roll,
+// so the file had to run in the browser. One synchronous implementation now
+// serves the test runner and the browser alike, and `src/log/sha256.test.ts`
+// holds it against `node:crypto` and against the published vectors. The pinned
+// digest in `src/log/entry.test.ts` did not move, which is the second oracle:
+// it was produced by `node:crypto` before that file existed.
 //
 // specs/0001-rules-model.md, section "Derived values":
 //
@@ -14,7 +23,6 @@
 // So every derived number the log shows is written into the entry once, at the
 // moment of the roll, and nothing reads it back through the profile again.
 
-import { createHash } from 'node:crypto';
 import type { Die, DieType, Faces } from '../rules/die';
 import type { Mode } from '../rules/pool';
 import { pushCost } from '../rules/push';
@@ -24,6 +32,7 @@ import type { RollResult } from '../rules/roll';
 import { baneCount } from '../rules/roll';
 import type { ArtifactCurveId } from '../rules/success';
 import { curveFor, score } from '../rules/success';
+import { sha256Hex } from './sha256';
 
 /**
  * The two curves an artifact die may take. Every other type has one curve.
@@ -115,7 +124,7 @@ function sortedKeys(_key: string, value: unknown): unknown {
  * produced it. Read it, never re-derive it.
  */
 export function profileHash(profile: PushProfile): string {
-  return createHash('sha256').update(JSON.stringify(profile, sortedKeys)).digest('hex');
+  return sha256Hex(JSON.stringify(profile, sortedKeys));
 }
 
 /**

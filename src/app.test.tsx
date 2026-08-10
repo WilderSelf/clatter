@@ -42,6 +42,7 @@ import {
   PRESET_SAVED_TEXT,
   UNUSABLE_POOL_TEXT,
 } from './shell/presets';
+import { storageLine } from './shell/history';
 import { noticeText, startRenderer } from './shell/renderer';
 import type { AppState, Counts } from './shell/state';
 import {
@@ -2365,5 +2366,93 @@ describe('the saved pool list', () => {
     // And it is one press away, which is the whole of what the disclosure costs.
     click(element('disclosure-toggle'));
     expect(element('sheet-presets'), 'the panel is behind the one disclosure').not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The history destination — Unit 4.4
+//
+// The destination itself is measured in `src/shell/history.test.tsx`, against
+// entries handed straight in. What is measured here is the ROUTE: the sheet
+// opens the destination, the destination replaces the roll flow, and neither
+// keyboard walk of section 6 can change because the roll flow leaves the
+// document while the history is open.
+//
+// jsdom exposes no `indexedDB`, so the log answers `refused` here and the list
+// is empty. That is the point of the split: whether a roll reached the store is
+// read back out of a real IndexedDB by `node scripts/browser.mjs --history`.
+// ---------------------------------------------------------------------------
+
+describe('the history destination', () => {
+  it('is opened by sheet-history and replaces the roll flow', async () => {
+    mount({ store: fakeStore() });
+    click(element('disclosure-toggle'));
+    // Section 4 of the design lists the control against Units 4.4 to 4.7.
+    expect(
+      DESIGN.includes('| `sheet-history` |'),
+      'section 4 lists sheet-history behind the one disclosure',
+    ).toBe(true);
+    const open = element('sheet-history');
+    expect(open.textContent).toContain('Open the history');
+    click(open);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The history is a SEPARATE DESTINATION, so the roll flow is gone. Every
+    // control of section 3 leaves the document with it, which is why neither
+    // walk of section 6 can change.
+    expect(element('history')).not.toBeNull();
+    for (const gone of [
+      'roll-button',
+      'disclosure-toggle',
+      'pool-bar',
+      'difficulty',
+      'shell-footer',
+    ]) {
+      expect(document.querySelector(`[data-el="${gone}"]`), `${gone} left the document`).toBeNull();
+    }
+    expect(document.querySelectorAll('[data-el="history-storage-note"]').length).toBe(1);
+
+    // And back again, with the focus on the control that led here.
+    click(element('back-button'));
+    expect(element('roll-button')).not.toBeNull();
+    expect(document.querySelector('[data-el="history"]')).toBeNull();
+    expect((document.activeElement as HTMLElement).dataset.el).toBe('disclosure-toggle');
+  });
+
+  it('prints the storage estimate in the settings sheet, and no control counts for it', () => {
+    mount({ store: fakeStore() });
+    click(element('disclosure-toggle'));
+    const shown = element('sheet-storage-estimate');
+    // jsdom has no `navigator.storage.estimate`, so `estimateStorage` answers
+    // null and the sentence says so rather than printing a zero.
+    expect(shown.textContent).toBe(storageLine(null));
+    expect(shown.getAttribute('role'), 'the number arrives after the sheet is drawn').toBe(
+      'status',
+    );
+    expect(shown.tabIndex, 'a read-only reading holds no tab stop').toBeLessThan(0);
+  });
+
+  it('leaves both keyboard walks of section 6 exactly where they were', () => {
+    // The two walks are asserted in full at the top of this file. This check
+    // makes the REASON explicit and reads it out of the design rather than
+    // restating it: the history is a separate destination, so neither of its
+    // two controls appears in either walk.
+    const summary = DESIGN.slice(
+      DESIGN.indexOf('### The history is a separate destination'),
+      DESIGN.indexOf('###', DESIGN.indexOf('### The history is a separate destination') + 1),
+    );
+    const named = [...summary.matchAll(/`([a-z-]+)`/g)].map((match) => match[1] as string);
+    expect(named).toContain('history-list');
+    expect(named).toContain('back-button');
+    const before = walkList(DESIGN, 'Before');
+    const after = walkList(DESIGN, 'After');
+    expect(before.stated, 'eleven visits before the throw').toBe(before.names.length);
+    expect(after.stated, 'thirty-five visits after it').toBe(after.names.length);
+    for (const control of new Set(named)) {
+      expect(before.names, `the before-throw walk never names ${control}`).not.toContain(control);
+      expect(after.names, `the after-throw walk never names ${control}`).not.toContain(control);
+    }
   });
 });

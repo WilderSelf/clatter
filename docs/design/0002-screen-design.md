@@ -111,6 +111,12 @@ the budget, exactly as the disclosure sheet does.
 The record holds the transposed matrix — one row per die and one column per generation — and exactly
 one export control, in its footer.
 
+**The destination replaces the roll flow while it is open.** It is a route and not an overlay, so
+the roll flow holds no element at all while the history is on the screen, and neither keyboard walk
+of section 6 can change. Decision 12 records the choice and the two options it was taken between.
+Unit 4.4 built the summary and a record SHELL; the transposed matrix and `export-button` arrive with
+Unit 4.5, which is why the record row above lists a control this build does not draw yet.
+
 ### Read-only, and therefore not counted
 
 These carry no input and hold no tab stop. A screen reader reaches them through the live region and
@@ -140,7 +146,7 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | `sheet-presets` | The saved pools. A name field, one save control, and one row per saved pool carrying recall, move up, move down and delete. It draws no control in step mode, because a saved pool holds counts and step mode holds two rated sizes. Decision 11. | 4.3 |
 | `sheet-artifact-curve` | Escalating or flat. | 4.1 |
 | `sheet-theme` | Three axes — surface, accent and dice material — plus the colour builder. | 4.8 |
-| `sheet-history` | Opens the history destination. The log, its statistics and its export live there, not here. | 4.4 to 4.7 |
+| `sheet-history` | Opens the history destination. The log, its statistics and its export live there, not here. A read-only storage reading sits beside it, `sheet-storage-estimate`, which holds no tab stop. | 4.4 to 4.7 |
 | `sheet-stress-reset` | Sets the stress counter back to zero. | 2.1 |
 | `sheet-tray-renderer` | Rolls the dice on the table, or draws them flat. It clears a permanent fall to flat dice. | 3.7 |
 | `sheet-close` | Closes the sheet and returns focus to `disclosure-toggle`. | 2.1 |
