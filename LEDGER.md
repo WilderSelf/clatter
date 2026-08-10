@@ -50,6 +50,7 @@ Status table for each unit. Every unit appends one row after it lands.
 | fix | The branding gate scanned binary as text | Done | — | **Done:** The gate reported four surfaces while producing garbage tokens from every binary file. It went red on a rendered screen image; the matched token was a three-letter fragment of decoded image bytes at index 2112, between other fragments, with one image yielding 11,598 such tokens. A file is treated as binary when a NUL byte appears in its first 8,000 bytes. Content decides, not the extension, because an extension can lie. The rule was verified against git's decision in `xdiff-interface.c` line 197. The skip is counted, not silent. The gate prints `files_scanned`, `binary_skipped`, `unreadable`, `enumerated` and `terms_loaded` on every run, and adds the first three to check against the fourth. Today: 110, 47, 0 and 157. `scripts/check-branding-count.sh` enumerates independently from tracked files plus built output, and reaches 157 too. The gate now names what it does not read: binary metadata goes unscanned, and the gate names the formats. A per-format chunk parser was rejected, because this repository draws every image with its own script and no foreign metadata arrives. The document records the trigger to add one. `loadConfig` never checked that the hash list held anything. An empty list would have scanned every file, matched nothing, printed no hits and exited 0: a gate reporting full coverage while checking for nothing. An empty list now exits 2 with a message naming the cause. The run prints how many terms it loaded (from the loaded set), so a drop is visible in a log. No expected count was hard-coded, because a second copy would be a cache with no invalidation. Neither `npm run lint` nor CI ran prettier. The lint script now runs it. Four files predated the check and were formatted in a separate commit, so the reformat did not hide inside the gate fix. Three measurements were compared before and after to show behaviour did not change: the test counts, the two bundle figures, and the branding counts line. Point at `budgets.json` rather than restating a budget. Five red-proofs passed, each restored by editing the injection back rather than by any git command that discards bytes. Branding gate `files_scanned=110`, `binary_skipped=47`, `hits=0`, exit 0. |
 | 0.5 | CI, public repository, protection | Done | — | **Done:** Public repository created and branch protection live. History squashed to one parentless commit `1488de8` using `git commit-tree`, with three guards verified before push: tree SHA matched the pre-squash state, content diff was empty, and commit held no parent. **The owner ran `git push -u origin main`** because the permission deny list refuses the pattern, and branch protection did not yet exist to distinguish this bootstrap push from a bypass attempt. **Incident documented:** `git switch --orphan` empties the working tree while `git checkout --orphan` keeps it. A mistaken use of `switch` deleted every tracked file from the working tree. The files were gone from disk. `git add -A` then found only what remained: `node_modules` and `dist`. Recovery verified by every measure: branding gate counted 104 tracked files matching the pre-squash count, `npm ci` restored 529 packages, `npm run build` recreated the output, and `git reset --hard` restored the tree without loss. All commit objects survived. CI ran green on the pushed commit including the branding gate over four surfaces (tree, dist, commit messages, repository metadata) and bundle-size check against `budgets.json`. Branch protection installed: required status check `CI` with strict true, enforce_admins false, no required reviews, force pushes and deletions blocked, auto-merge and squash enabled, delete-on-merge enabled. Gate proved to block via test/gate-proof PR: `mergeStateStatus: BLOCKED` with `mergeable: MERGEABLE`, showing protection blocks merges while not falsely reporting conflict-detection as protection. All test branches torn down, no open PR. Incident and workaround recorded in `docs/release-checklist.md`. |
 | 0.6 | Pages deploy | Done | — | **Done:** GitHub Pages enabled with build source set to GitHub Actions workflow. The first deploy run failed because Pages was not yet enabled when `deploy.yml` ran. Pages enabled, deploy re-ran and succeeded. The site answers at `https://wilderself.github.io/clatter/` with HTTP 200. **Every referenced asset verified:** not the page alone, because a wrong base path produces HTTP 200 with a blank screen. All three asset paths answered 200: the entry script at `/clatter/assets/index-Bpwk-FIa.js`, the web manifest, and the service worker registration script. The base path `/clatter/` in `vite.config.ts` matches the repository name. No asset path was guessed or restated; every URL comes from fetching the page itself. All steps recorded in `docs/release-checklist.md`. |
+| 2.1 | Application shell and pool builder | Done | — | The Preact shell, the state store and the pool builder, drawn from `docs/design/0013-screen-final.html`. `src/shell/state.ts` holds the whole state and asks the rules core every question: the pool, the caps, the step ladder and the effect of the difficulty. The shell decides no rule. **The keyboard order is read out of the design, never restated.** `src/app.test.tsx` parses section 6 of `docs/design/0002-screen-design.md`, which states the same walk three ways, and asserts the walk against all three: 11 numbered names, the count in words, and the sentence splitting Tab from the arrow keys. Tab reached items 1, 2, 9, 10 and 11 and the arrows reached 3 to 8, in both instruments. `node scripts/browser.mjs --shell` presses the real keys in a real browser and reads the same 11. **The browser adds one tab stop of its own at `shell-mid`,** because a scrollable box earns one so a keyboard can scroll it. It is reported by name and not counted, and the drawn screen earns the same stop. The live region is the status line, and it moves from `The throw takes no dice. A roll of no dice fails.` to `The throw takes 25 dice. 5 attribute, 5 skill, 3 gear, 2 bonus, 10 stress.` A mode switch clears a pool of 25 dice, and the core is the oracle: the switched builder equals `switchMode` over the same builder. Four red-proofs passed. The three widths are captured and compared against the `0013-screen-final-builder-*` renders: the builder card, the header and the footer match at 360, 768 and 1440, and every difference is a part no throw has produced yet. Initial JavaScript moves from 7,160 to 10,663 gzip bytes against the 61,440 in `budgets.json`. The lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=115`, `hits=0`, exit 0. **Open:** the dice on the table, the push button and the difficulty on `Roll again` all wait for Unit 2.2. See the notes under this table. |
 
 ## Unit 0.5 — CI, public repository, protection
 
@@ -3587,3 +3588,99 @@ reports 203 steps against a budget of 224, with the scene digest unchanged.
 The summary composition, the download button and the Web Share call. What text sits on the card and
 how it is laid out is design work, and it waits at `BLOCKED:owner-gate` on Unit 2.0. **Unit 4.9 is
 not complete.**
+
+## Unit 2.1 — application shell and pool builder
+
+### What landed
+
+`src/shell/state.ts` holds the application state and every reading the screen takes from it. It
+names no browser API and it decides no rule. The pool, the caps, the step ladder and the effect of
+the difficulty all come from `src/rules/pool.ts`. `src/app.tsx` is the screen: the status line, the
+pool builder, the difficulty, the footer and the one disclosure. `src/shell.css` carries the tokens
+and the layout of `docs/design/0013-screen-final.html`, with the container queries of the drawn
+frames rewritten as media queries over the viewport.
+
+The shell throws no dice. `Roll` collapses the builder and shows the table, and `Edit pool` brings
+the builder back, so both rest states of section 1 are reachable. The table mounts the vendored
+tray through the dynamic import Unit 3.1 left, which is the routing to the tray this unit owes.
+
+### Two instruments for one keyboard order, and why both
+
+`src/app.test.tsx` runs under jsdom and enumerates the tab stops itself, because jsdom runs no
+sequential focus navigation. `node scripts/browser.mjs --shell` presses the real keys in a real
+browser. The first runs in `npm test` on every change and the second needs a browser, so neither
+one covers the other.
+
+Both read the list out of section 6 of `docs/design/0002-screen-design.md` rather than restating
+it. That section states the same walk three ways — 11 numbered names, a count in words, and a
+sentence splitting Tab from the arrow keys — and every statement is asserted, so the list carries a
+denominator that can fail.
+
+The walk knows no answer. At each stop it presses one arrow key. Focus that moves means a composite
+the arrows walk, so the walk follows it until it comes back. Focus that stays means a control whose
+arrows change a value, so the press is undone and no inner visit is recorded.
+
+**The browser adds one tab stop the markup never asked for.** Firefox gives `.shell-m` a stop of its
+own, because the box scrolls and a keyboard must be able to scroll it. The drawn screen earns the
+same stop, since it carries the same `overflow-y: auto`. The run identifies such a stop by measure —
+no `tabindex` attribute and a scroll height over its client height — reports it by name, and does
+not count it against the authored list.
+
+### The four red-proofs
+
+1. The minus end of every pool tile lost its `tabindex="-1"`. The walk went from 11 visits to 154
+   and the failure printed both lists.
+2. The artifact tile was dropped from the bar. The walk read 10 against the document's 11 and named
+   `pool-cell-artifact`.
+3. `withMode` kept the counts. The switch check went red naming the gear tile, which read 1.
+4. The live region was frozen at the empty sentence. The change check went red on the press that
+   added the first die.
+
+### Three decisions taken, each with its reason
+
+**The bonus tile caps at 2, and the drawn screen prints no cap label on it.** Decision 1 fixes the
+pool at 15 dice from an attribute of 5, a skill of 5, a gear of 3 and a bonus of 2, so 2 is the cap
+and the tile prints `max` there like every other tile at its cap. The drawn file marks the other
+five and not this one.
+
+**Step mode holds one ladder tile, not two size pickers.** The plan's unit line asks for two size
+pickers. Section 5 of the screen design merges them into one tile, and `STEP_LADDER` is why: the
+core holds a step roll as one index into eight states, on purpose, because a pair of independently
+stepped sizes is path-dependent and an index is not. Two pickers cannot be built without
+reimplementing the ladder. The tile prints both sizes, `d10 + d8`, and steps the index.
+
+**The artifact ladder lives in the shell, not in the core.** `specs/0001-rules-model.md` says which
+faces an artifact die has and what each face scores. It says nothing about how a rating becomes
+dice. Section 5 of the screen design is what asks for the enumerated ladder, so the mapping sits
+beside the tile that steps it.
+
+### The three widths, against the drawn renders
+
+Captured from the running application at 360 by 760, 768 by 1024 and 1440 by 900, with the drawn
+pool built by pressing the plus ends, and compared against `0013-screen-final-builder-*`. The
+status line, the builder card, the six tiles, the difficulty row, the preview sentence and the
+footer geometry match at all three widths. Every difference is a part no throw has produced yet:
+
+- The status line reads 0 successes, 0 banes and push 0, where the drawn screen reads 6, 4 and 1.
+- The kept shelf and the throw zone are absent. No die exists before Unit 2.2.
+- The footer holds two buttons and no cost row. `Push` and `Edit pool` belong to a table with dice
+  on it, and `Roll` carries the accent because it is the only throw on the screen.
+- The bonus tile prints `max`, for the reason above.
+
+### Reported, not fixed
+
+- The stress counter is application state and is not persisted. `Settings` holds no field for it,
+  and adding one is a settings version and a migration step that no acceptance here asks for.
+- The mode is not persisted either. `src/settings/local-store.ts` is built and unread. The settings
+  screen is Unit 4.1.
+- The disclosure sheet holds the three controls section 4 marks as Unit 2.1: the mode switch, the
+  stress reset and the close. The ruleset, the overrides, the artifact curve, the themes and the
+  history are the units that own them.
+- `--shell` stays out of `validate`. It needs a browser.
+
+### How it was run
+
+`npm run build`, then `node scripts/browser.mjs --shell --url http://localhost:4173/clatter/`
+exited 0 over 5 checks, and `--offline` exited 0 over 8. The offline run is what proves the table
+still reaches the lazy 3D chunk: it clicked `Roll` with the origin stopped, the precache answered
+for `dice-tray-Cz13SOUC.js`, and the tray mounted one canvas.
