@@ -26,6 +26,38 @@ Five layout options are drawn at `docs/design/0010-tray-25-option-a.html` throug
 
 Layout choice among the five options is still open.
 
+### Amendment — the tray has no ceiling, and the draw target is 30, taken by the owner 2026-08-09
+
+**The statement above is kept as it was written. It is wrong in two ways, and both were measured.**
+
+**1. The composition omitted the artifact ladder and the difficulty.** The pool of 15 counts the
+attribute, skill, gear and bonus tiles alone. The artifact tile is a seventh source: its ladder in
+`src/shell/state.ts` ends at a rating of 6, which is `d12 + d12`, so it puts two more dice on the
+table. The difficulty is an eighth: a modifier of +3 adds three bonus dice on top of the bonus tile.
+The largest first roll therefore holds 27 dice at difficulty 0 and **30 dice at +3**, with no push at
+all. `worstCaseState` in `src/shell/state.ts` derives that number, and
+`src/shell/drawn-screen.test.ts` counts the drawn screen against it. Neither the number nor its
+arithmetic is written down anywhere else.
+
+**2. The tray has no ceiling at all.** Unit 2.2 found a 26th die. The cause is wider than one die.
+The third profile, `pool-stress-and-complications`, holds `maxPushes` at `Number.MAX_SAFE_INTEGER`
+and adds one stress die before every re-throw. The only stop is the `stressOneShowing` blocker, and a
+sequence that never rolls a stress bane never meets it. **The stress counter caps at 10, where it
+lives in `pushNow`. The tray does not.** A walk with an adversarial source reached 230 dice and was
+still rising when a 200-push safety stop ended it.
+
+**The owner's decision.** The tray is **drawn for 30 dice**, which is the largest first roll the
+shipped interface can produce. Past 30 the tray scrolls, which Decision 6 already settles: the middle
+degrades by scrolling and never by clipping. No rule changes. The third profile keeps its unbounded
+push. **30 is a draw target and not a ceiling**, and no later unit may read it as one.
+
+**The tail, with fair dice.** Measured by
+`npx vitest run src/shell/state.test.ts --disable-console-intercept`, which prints it from 20 seeds
+by 500 rolls of the largest pool under the third profile: p50 30, p90 31, p99 32, p99.9 34, and a
+maximum of 36. The median rests at the target because ten stress dice show a bane about five throws
+in six, which blocks the first push. The figures are reported and never gated. Re-run the command
+rather than trusting this line.
+
 ---
 
 ## Decision 2 — header is status, not navigation, settled 2026-08-09
@@ -80,6 +112,8 @@ History holds two views.
 The die matrix holds one column per die. At 25 dice it needs 780 pixels of minimum content width. A phone screen offers 300 pixels. The matrix overflows by 480 pixels. **The matrix transposes in the record view.**
 
 Instead of one row per generation and one column per die, the matrix becomes one row per die and one column per generation. Twenty-five rows scroll vertically. A phone scrolls vertically natively. Twenty-five columns do not.
+
+**Note, 2026-08-09.** The two figures above were measured at the 25-die tray this document then held. The draw target is now 30, and a pushed roll under the third profile holds more still. The untransposed matrix needs one column per die, so its width grows with the tray while the phone does not, and the overflow the paragraph above measures only gets worse. The transposition is what carries that growth, which is why it was the right shape to choose. Read the row count as the die count of the roll, never as 25.
 
 This layout gives the export control from Unit 4.5 its home. The control had been waiting on this gate.
 
@@ -143,6 +177,21 @@ At both heights the header, the cost row and the `Push` button stay in view, and
 Shrinking the die is the only change that makes the browser tab fit without scrolling. It would also shrink the die in the installed application, which loses nothing today. The manifest exists to serve the installed case. **The primary case is not paid to rescue the secondary one.** So the die keeps its size and the browser tab scrolls.
 
 `.shell-m` carries `overflow-y: auto`. The layout therefore degrades by scrolling and never by clipping. A screen that does not fit gives the player a scroll, not a lost button.
+
+### Re-measured at 30 dice, 2026-08-09
+
+**The table above holds at 25 dice and is kept. At the draw target the amendment to Decision 1 sets, both heights scroll.** The reading below comes from the same file at the same two window heights, with the tray holding 30 dice in the tallest split the target allows: nine dice on the shelf and twenty-one in the zone, which is seven rows of five at 360 px.
+
+| Height | Case | The middle area | `scrollHeight` | `clientHeight` |
+|---|---|---|---|---|
+| 360 by 760 | the installed application | scrolls | 628 | 556 |
+| 360 by 660 | a browser tab | scrolls | 628 | 456 |
+
+At both heights the header, the cost row and the `Push` button stay in view, and the whole kept shelf is visible at rest. The die keeps its 46 px size. **No content is lost at either height.** It is reached by scrolling.
+
+**The reasoning above is unchanged and its conclusion now covers both cases.** Shrinking the die is still the only change that would remove the scroll, and it would still pay the installed application to rescue a case that loses nothing.
+
+What moved is the row count, not the die. A tray of 25 dice fell in six rows. A tray of 30 dice falls in seven rows for every split except the one that fills every row, and `src/shell/drawn-screen.test.ts` holds the drawing at the tallest split, so no later measurement reads the easy case.
 
 ---
 

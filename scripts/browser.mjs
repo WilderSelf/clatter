@@ -5572,6 +5572,13 @@ async function runOffline(page, options, checks, server) {
 
 /** The number words section 6 may count in. An unknown word is a failure. */
 const VISIT_WORDS = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
   eight: 8,
   nine: 9,
   ten: 10,
@@ -5582,6 +5589,24 @@ const VISIT_WORDS = {
   thirty: 30,
   forty: 40,
 };
+
+/**
+ * A count in words, compounds included: `thirty-five` is thirty plus five. An
+ * unknown part gives `undefined`, so the caller fails on a word it cannot read
+ * rather than on a wrong number.
+ *
+ * @param {string|undefined} word
+ */
+function inWords(word) {
+  let total = 0;
+  for (const part of String(word ?? '')
+    .toLowerCase()
+    .split('-')) {
+    if (VISIT_WORDS[part] === undefined) return undefined;
+    total += VISIT_WORDS[part];
+  }
+  return total;
+}
 
 /**
  * Read the before-throw walk out of section 6 of the screen design.
@@ -5598,8 +5623,8 @@ export function beforeThrowVisits(markdown, when = 'Before') {
     throw new Error('section 6 no longer holds a before-throw list and an after-throw list');
   }
   const section = markdown.slice(from, to);
-  const word = new RegExp(`\\*\\*${when} the throw — (\\w+) visits\\.\\*\\*`).exec(section)?.[1];
-  const stated = VISIT_WORDS[word];
+  const word = new RegExp(`\\*\\*${when} the throw — ([\\w-]+) visits\\.\\*\\*`).exec(section)?.[1];
+  const stated = inWords(word);
   if (stated === undefined) {
     throw new Error(`section 6 states the ${when} count as ${word}, which is unread`);
   }
@@ -5633,13 +5658,24 @@ const SHELL_WIDTHS = [
  * The pool the drawn screen holds, from section 8: five attribute, five skill,
  * three gear, no artifact and two bonus dice, with ten stress dice beside them.
  */
+/**
+ * The presses that build the drawn pool: every tile at its cap. The artifact
+ * tile steps a rating rather than a count, so six presses there put two d12
+ * dice on the table, and the difficulty adds three bonus dice on top. The
+ * number of dice is therefore NOT the number of presses, and the check below
+ * counts the dice against the section 6 die list instead.
+ */
 const SHELL_DRAWN_POOL = [
   ['attribute', 5],
   ['skill', 5],
   ['gear', 3],
+  ['artifact', 6],
   ['bonus', 2],
   ['stress', 10],
 ];
+
+/** The notch the drawn screen sits on: the last one, which is +3. */
+const SHELL_DRAWN_DIFFICULTY = 6;
 
 /**
  * What the focused element is called, and whether the browser put it in the tab
@@ -5771,28 +5807,43 @@ async function runShell(page, options, checks) {
 
   // The drawn pool next, so the capture shows the case that fails first: every
   // tile at its cap.
-  const built = await page.evaluate(async (plan) => {
-    let clicks = 0;
-    for (const [type, count] of plan) {
-      const end = document.querySelector(`[data-el="pool-cell-${type}"] .cell-p`);
-      if (end === null) continue;
-      for (let taken = 0; taken < count; taken += 1) {
-        end.click();
+  const built = await page.evaluate(
+    async (plan) => {
+      let clicks = 0;
+      for (const [type, count] of plan.tiles) {
+        const end = document.querySelector(`[data-el="pool-cell-${type}"] .cell-p`);
+        if (end === null) continue;
+        for (let taken = 0; taken < count; taken += 1) {
+          end.click();
+          clicks += 1;
+        }
+      }
+      const notch = document.querySelectorAll('[data-el="difficulty-track"] .tk-n')[plan.notch];
+      if (notch !== undefined) {
+        notch.click();
         clicks += 1;
       }
-    }
-    // The shell renders on a later task, so the reading waits for a frame.
-    await new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
-    const line = document.querySelector('[data-el="status-line"] .sr-only');
-    return { clicks, spoken: line === null ? null : (line.textContent || '').trim() };
-  }, SHELL_DRAWN_POOL);
-  const wanted = SHELL_DRAWN_POOL.reduce((sum, [, count]) => sum + count, 0);
+      // The shell renders on a later task, so the reading waits for a frame.
+      await new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+      const line = document.querySelector('[data-el="status-line"] .sr-only');
+      return { clicks, spoken: line === null ? null : (line.textContent || '').trim() };
+    },
+    { tiles: SHELL_DRAWN_POOL, notch: SHELL_DRAWN_DIFFICULTY },
+  );
+  const presses = SHELL_DRAWN_POOL.reduce((sum, [, count]) => sum + count, 1);
+  // The denominator is the document's own die list, not a sum of the presses.
+  // Six presses on the artifact tile give two dice, and the difficulty gives
+  // three more, so the two numbers are different on purpose.
+  const drawnDice = beforeThrowVisits(design, 'After').names.filter((name) =>
+    name.startsWith('die-'),
+  ).length;
   checks.push({
     name: 'shell.the-pool-builds-under-a-pointer',
-    ok: built.clicks === wanted && (built.spoken || '').includes(`takes ${wanted} dice`),
+    ok: built.clicks === presses && (built.spoken || '').includes(`takes ${drawnDice} dice`),
     detail:
-      `${built.clicks} of the ${wanted} presses the drawn pool needs landed, and the live ` +
-      `region reads ${JSON.stringify(built.spoken)}.`,
+      `${built.clicks} of the ${presses} presses the drawn pool needs landed, and the live ` +
+      `region reads ${JSON.stringify(built.spoken)}. Section 6 names ${drawnDice} dice, which ` +
+      `is the draw target the caps and the difficulty derive.`,
   });
 
   if (options.captureShell !== null) {
@@ -5861,7 +5912,7 @@ async function runShell(page, options, checks) {
       `takes, and the cost row reads ${JSON.stringify(thrown.cost)}. The blocker is a field ` +
       `of the profile, not a state of the screen: a stress die showing a bane stops the push, ` +
       `and ten stress dice show one about five throws in six. The walk below needs the live ` +
-      `push, because the section 6 list holds thirty stops and a dead button holds none.`,
+      `push, because the section 6 list holds a stop for every die and a dead button holds none.`,
   });
   checks.push({
     name: 'shell.the-tray-holds-every-die-once',

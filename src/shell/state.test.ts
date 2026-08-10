@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildPool, emptyBuilder, STEP_LADDER, switchMode } from '../rules/pool';
+import type { RandomSource } from '../rules/random';
+import { seededRandom } from '../rules/seeded-random';
 import type { AppState, CountKey } from './state';
 import {
   ARTIFACT_LADDER,
@@ -8,17 +10,26 @@ import {
   difficultyPreview,
   emptyState,
   ladderLabel,
+  canPush,
   nudge,
   poolCells,
   POOL_CAPS,
+  profileOf,
+  pushNow,
+  readout,
+  rollNow,
   signedDifficulty,
   throwDice,
+  worstCaseState,
   withDifficulty,
   withMode,
 } from './state';
 
-/** The pool the drawn screen holds: 5, 5, 3, no artifact, 2 and 10 stress. */
-function drawnPool(): AppState {
+/**
+ * A full pool with no artifact die: 5, 5, 3, 2 and 10 stress. The drawn screen
+ * holds more than this — see `worstCaseState` and `drawn-screen.test.ts`.
+ */
+function fullPool(): AppState {
   let state = emptyState('pool');
   for (const [key, count] of [
     ['attribute', 5],
@@ -106,7 +117,7 @@ describe('the tiles', () => {
 
 describe('a mode switch clears the pool', () => {
   it('empties a built pool, and the core agrees about what a switch keeps', () => {
-    const built = drawnPool();
+    const built = fullPool();
     expect(throwDice(built).length, 'the pool was built before the switch').toBe(25);
 
     const switched = withMode(built, 'step');
@@ -130,7 +141,7 @@ describe('a mode switch clears the pool', () => {
   });
 
   it('drops the difficulty with the pool', () => {
-    const hard = withDifficulty(drawnPool(), 3);
+    const hard = withDifficulty(fullPool(), 3);
     expect(hard.difficulty).toBe(3);
     expect(withMode(hard, 'step').difficulty).toBe(0);
   });
@@ -144,7 +155,7 @@ describe('what the live region says', () => {
     expect(composition(throwDice(nudge(emptyState('pool'), 'attribute', 1)))).toBe(
       'The throw takes 1 die. 1 attribute.',
     );
-    expect(composition(throwDice(drawnPool()))).toBe(
+    expect(composition(throwDice(fullPool()))).toBe(
       'The throw takes 25 dice. 5 attribute, 5 skill, 3 gear, 2 bonus, 10 stress.',
     );
   });
@@ -157,7 +168,7 @@ describe('what the live region says', () => {
   });
 
   it('reports the dice the difficulty will really throw', () => {
-    const easier = withDifficulty(drawnPool(), 2);
+    const easier = withDifficulty(fullPool(), 2);
     expect(composition(throwDice(easier))).toBe(
       'The throw takes 27 dice. 5 attribute, 5 skill, 3 gear, 4 bonus, 10 stress.',
     );
@@ -166,7 +177,7 @@ describe('what the live region says', () => {
 
 describe('what the difficulty will do', () => {
   it('prints the effect on a pool before the roll', () => {
-    const pool = drawnPool();
+    const pool = fullPool();
     expect(difficultyPreview(pool)).toBe('The next roll takes no dice away and adds none.');
     expect(difficultyPreview(withDifficulty(pool, 1))).toBe('The next roll adds 1 bonus die.');
     expect(difficultyPreview(withDifficulty(pool, 3))).toBe('The next roll adds 3 bonus dice.');
@@ -199,5 +210,64 @@ describe('what the difficulty will do', () => {
     expect(withDifficulty(emptyState('pool'), 9).difficulty).toBe(3);
     expect(withDifficulty(emptyState('pool'), -9).difficulty).toBe(-3);
     expect([3, 0, -3].map(signedDifficulty)).toEqual(['+3', '0', '−3']);
+  });
+});
+
+describe('the tray past the draw target', () => {
+  // Every face is a 2: no success, so nothing locks, and no bane, so no stress
+  // die ever blocks. It is the worst case the third profile allows.
+  const relentless: RandomSource = { face: () => 2 };
+
+  it('grows by one die on every push, and no rule ever stops it', () => {
+    const target = throwDice(worstCaseState()).length;
+    let state = rollNow(worstCaseState(), relentless);
+    expect(state.result?.dice.length).toBe(target);
+    expect(profileOf(state).stressBehaviour).toBe('addBeforeReroll');
+
+    // Forty pushes, each adding one stress die. The count is a floor and not a
+    // limit: the profile holds `Number.MAX_SAFE_INTEGER` pushes, so nothing
+    // here reaches the end of the sequence. That is the finding.
+    for (let taken = 1; taken <= 40; taken += 1) {
+      expect(canPush(state), `push ${taken} is still legal`).toBe(true);
+      state = pushNow(state, relentless);
+      expect(state.result?.dice.length, 'the tray grew by one die').toBe(target + taken);
+      // The counter caps where it lives. The tray does not. Decision 1.
+      expect(state.counts.stress).toBe(POOL_CAPS.stress);
+    }
+    expect(readout(state).dice).toBe(target + 40);
+    expect(readout(state).stress).toBe(POOL_CAPS.stress);
+  });
+
+  it('reports the tail a fair source reaches, which Decision 1 records', () => {
+    const target = throwDice(worstCaseState()).length;
+    const seen: number[] = [];
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const random = seededRandom(seed * 2654435761);
+      for (let trial = 0; trial < 500; trial += 1) {
+        let state = rollNow(worstCaseState(), random);
+        let worst = state.result?.dice.length ?? 0;
+        for (let guard = 0; guard < 5000 && canPush(state); guard += 1) {
+          state = pushNow(state, random);
+          worst = Math.max(worst, state.result?.dice.length ?? 0);
+        }
+        seen.push(worst);
+      }
+    }
+    seen.sort((a, b) => a - b);
+    const at = (quantile: number) =>
+      seen[Math.min(seen.length - 1, Math.floor(quantile * seen.length))];
+    // Reported, never gated. A quantile of a random walk is not a budget, and
+    // `budgets.json` holds every number a check may fail on.
+    console.log(
+      `tray growth over ${seen.length} rolls from the draw target of ${target}: ` +
+        `p50 ${at(0.5)} p90 ${at(0.9)} p99 ${at(0.99)} p99.9 ${at(0.999)} max ${seen[seen.length - 1]}`,
+    );
+    // What is asserted is the shape, not the tail. No roll holds fewer dice
+    // than the draw target, because the pool never shrinks, and some roll holds
+    // more, because a push that is not blocked adds a stress die. Ten stress
+    // dice show a bane about five throws in six, so the median roll is blocked
+    // at once and rests at the target.
+    expect(Math.min(...seen)).toBe(target);
+    expect(seen[seen.length - 1]).toBeGreaterThan(target);
   });
 });
