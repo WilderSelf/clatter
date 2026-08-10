@@ -44,21 +44,38 @@ function fakeMaterial(): FakeMaterial {
 }
 
 /** A stand-in for the library. It records the notation and holds fake dice. */
-function fakeBox(count: number): DiceBox & { seen: string[]; rerolled: [number[], number[]][] } {
+function fakeBox(count: number): DiceBox & {
+  seen: string[];
+  added: string[];
+  rerolled: [number[], number[]][];
+} {
   const seen: string[] = [];
+  const added: string[] = [];
   const rerolled: [number[], number[]][] = [];
-  const diceList = Array.from({ length: count }, () => ({
+  const oneDie = () => ({
     material: [fakeMaterial(), fakeMaterial()],
     body: null,
     getFaceValue: () => ({ value: 0, label: '', reason: '' }),
-  }));
+  });
+  const diceList = Array.from({ length: count }, oneDie);
   return {
     seen,
+    added,
     rerolled,
     diceList,
     roll: async (notation: string) => void seen.push(notation),
+    // The library appends. That is the whole reason `trayOrder` stops
+    // describing the tray once a push adds a die.
+    add: async (notation: string) => {
+      added.push(notation);
+      diceList.push(oneDie());
+    },
     reroll: async (ids: number[], forced: number[]) => void rerolled.push([ids, forced]),
-  } as unknown as DiceBox & { seen: string[]; rerolled: [number[], number[]][] };
+  } as unknown as DiceBox & {
+    seen: string[];
+    added: string[];
+    rerolled: [number[], number[]][];
+  };
 }
 
 describe('trayOrder', () => {
@@ -110,10 +127,11 @@ describe('throwPool', () => {
   });
 });
 
-/** A push of `a` and `c`, as the rules core would hand it over. */
+/** A push of the named dice, as the rules core would hand it over. */
 function pushedRoll(
   next: Readonly<Record<string, number>>,
   extra: readonly Die[] = [],
+  stressAdded: string | null = null,
 ): PushedRoll {
   const rerolled = Object.keys(next);
   return {
@@ -121,7 +139,7 @@ function pushedRoll(
     dice: [...POOL, ...extra].map((die) => appendValue(die, next[die.id] ?? die.values[0] ?? null)),
     stressAfter: 0,
     rerolled,
-    stressAdded: null,
+    stressAdded,
     cost: { unit: 'ratingPoint', total: 0, byType: {} as PushedRoll['cost']['byType'] },
     generation: 1,
   };
@@ -156,12 +174,41 @@ describe('pushPool', () => {
     await expect(pushPool(box, ordered, pushedRoll({}))).rejects.toThrow(/names no dice/);
   });
 
-  it('refuses a die the tray never spawned', async () => {
+  // The defect Unit 3.4 recorded and Unit 3.5 carried: the third preset raises
+  // stress by one BEFORE every re-throw, and the core creates the stress die
+  // for it. The tray used to refuse that die by name. It spawns it now.
+  it('spawns the die the push added, on the value the core decided, at the end of the tray', async () => {
+    const box = fakeBox(POOL.length);
+    const ordered = await throwPool(box, { dice: POOL, stressAfter: 0 });
+    const added = createDie('stress-2', 'stress', 6, 1);
+    const after = await pushPool(
+      box,
+      ordered,
+      pushedRoll({ a: 7, 'stress-2': 4 }, [added], 'stress-2'),
+    );
+
+    // One `add`, for the one die the core named, carrying the value it chose.
+    expect(box.added).toEqual(['1d6@4']);
+    // The added die is not thrown twice: `add` already landed its value, so the
+    // re-throw names the other pushed die alone. `a` is tray index 2.
+    expect(box.rerolled).toEqual([[[2], [7]]]);
+    // The library appends, so the added die takes the index after every die
+    // already on the tray, and the order the caller gets back says so.
+    expect(after.map((die) => die.id)).toEqual(['b', 'd', 'a', 'e', 'c', 'stress-2']);
+    expect(box.diceList.length).toBe(after.length);
+    // The tray coloured it by its type, at that index and no other.
+    const painted = (box.diceList[after.length - 1]?.material ?? []).map(
+      (material) => (material as unknown as { colour: string }).colour,
+    );
+    expect([...new Set(painted)]).toEqual([DIE_TYPE_COLOR.stress]);
+  });
+
+  it('refuses a die the tray does not hold and the push never added', async () => {
     const box = fakeBox(POOL.length);
     const ordered = await throwPool(box, { dice: POOL, stressAfter: 0 });
     const added = createDie('stress-2', 'stress', 6, 1);
     await expect(pushPool(box, ordered, pushedRoll({ 'stress-2': 4 }, [added]))).rejects.toThrow(
-      /no die for stress-2/,
+      /the tray holds no die for stress-2, and the push added nothing/,
     );
   });
 });

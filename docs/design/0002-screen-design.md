@@ -59,7 +59,7 @@ ceiling over both rest states.
 | 1 | `collapse-button` | Closes the builder and shows the table. It reads Done. | yes | no |
 | 2 | `pool-bar` | Six per-type cells, one per dice type. Arrow keys move between the types and change the count. | yes | no |
 | 3 | `difficulty` | One value from −3 to +3, drawn as seven notches. It prints what it will do to the next throw. | yes | no |
-| 4 | `dice-tray` | The dice as they lie, over the kept shelf and the throw zone. Arrow keys move between the dice. A press keeps a die by choice or releases it. | no | yes |
+| 4 | `dice-tray` | The dice as they lie, over the kept shelf and the throw zone. Arrow keys move between the dice. A press keeps a die by choice or releases it. It holds one cell per die in **both** renderers: the flat cell draws the die, and the cell over the 3D table lies on the die the tray put down and draws none of it. Decision 9. | no | yes |
 | 5 | `edit-pool-button` | Reopens the builder. It rides on the cost row. | no | yes |
 | 6 | `disclosure-toggle` | Opens the one sheet that holds everything else. It reads More. | yes | yes |
 | 7 | `roll-button` | Throws the built pool. One tap. It carries the dice count and the difficulty. | yes | yes |
@@ -270,6 +270,16 @@ container by walking up from the focused element, so a change of the active cell
 order. A throw puts that cell back on the first die of the shelf, because the same dice come back
 on every throw and the tray must not open in the middle of itself.
 
+### The list holds in both renderers
+
+The list above is one list. Unit 3.7 chooses between the 3D table and the flat dice at startup, and
+neither walk changes with that choice: the die cells are real DOM either way, and with the table
+running they lie over the dice the tray put down. Decision 9 in `0012-settled-decisions.md` records
+that choice and its reasons. Both instruments walk both renderers — `src/app.test.tsx` under jsdom,
+and `node scripts/browser.mjs --shell` with real key presses in Firefox, whose run reaches the 3D
+table on a machine that can draw one. `node scripts/browser.mjs --blocked-chunk` walks the same list
+on the flat dice, with the 3D chunk refused at the network layer.
+
 ### The stop the browser adds, which the lists above do not hold
 
 The two lists are authored. A browser walks one more stop than the list above holds while the middle
@@ -296,13 +306,22 @@ no such stop; after the throw, with 30 dice on the table, it reported one at `sh
 target the middle scrolls at both phone heights as well, which the dated note under Decision 6
 measures. An earlier reading at 25 dice found no stop at 360 by 760, and that reading is superseded.
 
+**The 3D table earns no such stop, and that is measured too.** The flat dice fill the middle with a
+list that grows with the pool, so the middle overflows. The 3D table takes the middle it is given
+and its walls follow the canvas, so the middle does not overflow and the browser adds no stop.
+Measured on 2026-08-09 through the same command at 800 by 600 with the table running: no stop before
+the throw and none after it, over 30 dice. Both readings stand. Which one a run reports follows the
+renderer the startup probe chose, and neither one changes the authored counts of eleven and thirty.
+
 ## 7. What the interface units inherit from this unit
 
 - **Shape carries every meaning that colour carries.** A success is a circle and a bane is a
   triangle, on the die, in the matrix and in the status line. A badge number on a die is the success
   count of that die, so an artifact die worth two successes reads correctly. The three lock states
   differ by ground and by frame, never by hue alone: a rule lock has a solid frame on a shaded pad,
-  a choice lock has a dashed frame, and a loose die is lifted and carries no pad.
+  a choice lock has a dashed frame, and a loose die is lifted and carries no pad. On the 3D table
+  the same three states ride shape as well, as the marks Unit 3.5 draws on the dice: a closed frame
+  around a rule lock, four corner blocks on a choice, and nothing on a loose die.
 - **Every colour is a role, not a hue.** The drawn screen names every colour as a role variable in
   `:root`, grouped into the three axes of Unit 4.8: surface, accent and dice material. A theme is a
   variable set. No rule in the stylesheet reads a hue, so the three axes stay independent. The
@@ -326,7 +345,7 @@ measures. An earlier reading at 25 dice found no stop at 360 by 760, and that re
   middle scrolls at both phone heights, 760 px and 660 px, and it loses nothing at either. Decision 6
   holds both measurements and the dated note that re-measured them.
 - **Motion respects `prefers-reduced-motion`.** The shake at Unit 2.2 becomes a cut when the setting
-  is on.
+  is on, and the 3D table skips the tumble and lands its dice at once.
 - **The roll result reaches a live region.** The status line is the live region, and it names the
   successes, the banes, the dice count and the stress.
 
