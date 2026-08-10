@@ -53,6 +53,7 @@ Status table for each unit. Every unit appends one row after it lands.
 | 2.1 | Application shell and pool builder | Done | — | The Preact shell, the state store and the pool builder, drawn from `docs/design/0013-screen-final.html`. `src/shell/state.ts` holds the whole state and asks the rules core every question: the pool, the caps, the step ladder and the effect of the difficulty. The shell decides no rule. **The keyboard order is read out of the design, never restated.** `src/app.test.tsx` parses section 6 of `docs/design/0002-screen-design.md`, which states the same walk three ways, and asserts the walk against all three: 11 numbered names, the count in words, and the sentence splitting Tab from the arrow keys. Tab reached items 1, 2, 9, 10 and 11 and the arrows reached 3 to 8, in both instruments. `node scripts/browser.mjs --shell` presses the real keys in a real browser and reads the same 11. **The browser adds one tab stop of its own at `shell-mid`,** because a scrollable box earns one so a keyboard can scroll it. It is reported by name and not counted, and the drawn screen earns the same stop. The live region is the status line, and it moves from `The throw takes no dice. A roll of no dice fails.` to `The throw takes 25 dice. 5 attribute, 5 skill, 3 gear, 2 bonus, 10 stress.` A mode switch clears a pool of 25 dice, and the core is the oracle: the switched builder equals `switchMode` over the same builder. Four red-proofs passed. The three widths are captured and compared against the `0013-screen-final-builder-*` renders: the builder card, the header and the footer match at 360, 768 and 1440, and every difference is a part no throw has produced yet. Initial JavaScript moves from 7,160 to 10,663 gzip bytes against the 61,440 in `budgets.json`. The lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=115`, `hits=0`, exit 0. **Open:** the dice on the table, the push button and the difficulty on `Roll again` all wait for Unit 2.2. See the notes under this table. |
 | 2.2 | Flat dice, roll, push, readout | Done, with one acceptance deferred by a settled decision | — | `Roll` throws the built pool and the dice land flat over the kept shelf and the throw zone of Decision 4. The screen decides no rule: `src/shell/state.ts` asks `firstRoll`, `push`, `previewPush`, `isLocked` and `score`, and `src/app.tsx` renders the answer. The cost row and the push button read one `previewPush`, so the price the player commits to is the price the rules apply. **The history matrix is not built here.** Decision 3 moves it into the history record and transposes it, and the row below carries its acceptance to the unit that builds that record. Four checks, each red-proved by an injection that landed and named its gate: the push button is live below the push limit and dead at it; it is live with no stress bane showing and dead under the blocker; the thirty visits of section 6 are walked in the order the document states; and a push re-throws the loose dice alone, with the core as the oracle. The keyboard order is read out of the design and never restated, in both instruments. `node scripts/browser.mjs --shell` gains the after-throw half and passes 8 of 8 checks against the built output in Firefox. Initial JavaScript moves from 10,663 to 14,166 gzip bytes against the 61,440 in `budgets.json`. The lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=115`, `hits=0`, exit 0. **Open:** the difficulty preview after a throw, the log entry a roll should write, and the 3D renderer, which Unit 3.7 chooses between. See the notes under this table.
 | 2.2d | The history matrix, deferred with its acceptance | Deferred to the unit that builds the history record | — | **This row exists so the deferral has a home and a name.** The plan gives Unit 2.2 the matrix beside the dice, one column per die and one row per generation, with two acceptances: the matrix holds exactly `dice × generations` cells, and the blank count equals an independently computed count of locked-or-absent pairs. Decision 3 in `docs/design/0012-settled-decisions.md` moved the matrix out of the roll flow and into the history record, where it is transposed to one row per die, because 25 columns need 780 pixels of minimum content width against the 300 a phone gives. The settled decision is the authority over the plan text. **Both acceptances travel with the matrix, unchanged.** They land in the unit that builds the record view: Unit 4.5, whose open half is the record and its export control, which Decision 3 puts in the same place. Unit 4.4 builds the summary list beside it. Nothing of the pair is dropped and nothing is weakened. **One dependent item moves with it.** Unit 3.5 records that the keyboard route to a die the 3D tray buries runs through the history matrix of Unit 2.2. The flat tray of Unit 2.2 gives that route already: 25 dice, one arrow walk, every die reachable and named. The matrix route stays owed only for the 3D tray. |
+| 2.3 | Roll again, and deploy the slice | Done | #8 | One tap on the roll button re-throws the built pool. The behaviour was already in place. This unit adds five checks that prove it and records what the difficulty readout is once the builder collapses. `src/app.test.tsx` gained five checks and `src/app.tsx` gained one comment block; no behaviour changed. **The five checks:** the re-throw calls the core and the core is the oracle; the re-throw is a new roll and not a continuation, generations back to one over every die; the stress counter carries in over a case where a push raised it; the difficulty on `roll-button` after a throw is the one the throw took; and the control inventory of section 3 holds at both rest states, 16 cells read out of the design. Each check was proved red by an injection that landed and named its gate. **The difficulty is settled.** Section 3 of `docs/design/0002-screen-design.md` keeps the difficulty control and its preview sentence in rest A alone because the builder collapses on a roll. Section 8 states that no control of rest B can change the difficulty, so what the last throw took and what the next throw will take are one number. The design treats the whole after-throw difficulty readout as the signed value on `roll-button`. **Validation:** `npm run lint` 0, `npm run typecheck` 0, `npm test` 0 over 230 vitest tests and 20 node --test tests, `npm run build` 0. Branding gate `files_scanned=116` `hits=0`. **Deploy:** PR #8 merged `2a4d751`, CI SUCCESS. Six URLs answered 200: the page at 544 bytes, the entry script `assets/index-CITyIdqU.js` at 39,652 bytes, the stylesheet at 9,895 bytes, the web manifest at 425 bytes, the service worker registration at 150 bytes, and the lazy 3D chunk at 596,587 bytes. The hashes match the build, so the live page is this commit. **Bundle:** Initial JavaScript 14,356 gzip bytes and lazy 3D chunk 151,876 gzip bytes, both unchanged because the only source addition is a comment. See the notes under this table. |
 | fix | Draw the tray for 30 dice and derive that target from the caps | Done | #5 | The tray was drawn for 25 dice against an incomplete composition. The artifact ladder ends at a rating of six, which is d12 plus d12 (two dice). The difficulty modifier reaches plus three, which adds three bonus dice. Both sources were omitted from the pool count. The largest first roll therefore holds 27 dice at difficulty 0 and 30 dice at plus 3, with no push at all. The tray has no ceiling. The third profile holds no push limit and adds one stress die before every re-throw, so a walk with an adversarial source reached 230 dice and was still rising. `worstCaseState` in `src/shell/state.ts` derives the target from the caps, the artifact ladder and the difficulty limit. `src/shell/drawn-screen.test.ts` counts the drawn screen against that derivation, so a raised cap turns the suite red and names the layout for a re-measure. The number is written down nowhere. The owner set the draw target at 30, and the tray scrolls past it per Decision 6. The keyboard order was re-derived from the drawn screen, not scaled: 11 visits before the throw and 35 after it. Both instruments read the list out of the design and walk it, under jsdom and under real Tab presses in Firefox. The artifact tile at its cap made the phone builder wider than the phone. That tile alone may now wrap. Branding gate `files_scanned=115`, `hits=0`, exit 0. |
 | fix | Rate the step attribute and skill on independent scales | Done | #6 | The step model paired the two die sizes on one list of eight states. That list held eight of the sixteen pairs, so a large attribute beside a small skill was unwritable. It also tied a skill-less roll to a d6 attribute. The reference rates the attribute and the skill on two independent scales, and each rating names its own die size. Store the base pair and store the difficulty as one integer. Compute the rolled sizes from the two through a split table that reads the base pair alone. A round trip and the composition of two modifiers stay true by construction, which is what the eight-state list existed to give, and they now hold where a size clamps as well. The new table enumerates four attribute sizes, five skill states and seven modifiers, counts its own denominator, and asserts the split, the round trip, the composition and the clamp at both ends. The pool bar holds the same six tiles in both modes. In step mode the attribute tile and the skill tile each step their own die size. Branding gate `files_scanned=115`, `hits=0`, exit 0. |
 
@@ -3826,3 +3827,83 @@ profile record.
 the sandbox off, which passed 8 of 8 checks, and again with `--viewport 360x660` for the scroll
 measurement, which passed 8 of 8. The renderer read `AMD Radeon RX 6700 XT`. `--shell` stays out of
 `validate`, because it needs a browser.
+
+## Unit 2.3 — Roll again, and deploy the slice
+
+### What landed
+
+Five checks prove the re-throw works correctly, and one comment block in `src/app.tsx` records the
+difficulty settlement. No behaviour changed. `src/app.test.tsx` gained 303 lines of test code. The
+five checks run under jsdom and under the browser harness, and both instruments report the same
+outcome.
+
+### The five checks, each red-proved
+
+1. **The re-throw calls the core and the core is the oracle.** Injection: `applyDifficulty` dropped
+   from `rollNow`. Failure: `the re-throw put the whole pool back on the table: expected 7 to be 9`.
+
+2. **The re-throw is a new roll and not a continuation.** Generations back to one, counted as a
+   denominator over every die. Injection: `rollNow` kept the old result. Failure:
+   `the generation count is back at one: expected 2 to be 1`.
+
+3. **The stress counter carries in over a case where a push raised it.** Injection: `rollNow` reset
+   stress when a result exists. Failure:
+   `the re-throw took the counter the push left: expected +0 to be 2`.
+
+4. **The difficulty on `roll-button` after a throw.** Injection: the button printed 0 once
+   collapsed. Failure:
+   `the difficulty after the throw is the one the throw took: expected '5 dice, difficulty 0' to be '5 dice, difficulty +3'`.
+
+5. **The control inventory holds at both rest states, 16 cells read out of the design.** Injection:
+   the builder rendered in both states. Failure:
+   `- "difficulty at rest B: false"` against `+ "difficulty at rest B: true"`.
+
+### The keyboard walk
+
+The keyboard walk reads 11 visits before the throw and 35 after it, in both the jsdom run and the
+browser run. Both lists are read out of section 6 of `docs/design/0002-screen-design.md` and never
+restated in the test.
+
+### The difficulty is settled, from the design document
+
+Section 3 of `docs/design/0002-screen-design.md` marks `difficulty` rest A only. The reason is
+that the builder collapses on a roll and its read-only list separates "the difficulty preview line
+inside the builder" from "the dice count and the difficulty printed on `roll-button`". Line 61
+describes the builder control, not rest B.
+
+Section 8 states the consequence: the throw that filled the table took the same difficulty. The
+whole after-throw difficulty readout is the signed value on `roll-button`. What the last throw took
+and what the next throw will take are one number, because no control of rest B can change it. A
+change needs `Edit pool`, which returns the screen to rest A. Nothing conflicted and no code
+changed.
+
+### Reported, not fixed
+
+**A re-throw does not replay the shake for a die that stays in its zone.** The Preact key is
+`${id}:${values.length}` and both parts are identical on a first roll and on a re-throw, so the
+element is reused and the CSS animation does not restart. A die that changes zone is rebuilt and
+shakes. A throw ordinal in `AppState` would fix it. This is Unit 2.2 renderer behaviour and Unit
+3.7 chooses the renderer.
+
+**The design document line 286 is stale.** It reads "The authored counts stay eleven and thirty"
+inside the browser-stop paragraph, while section 6 states and lists thirty-five. No check reads
+that sentence, so both instruments pass. Unit 4.11 owns those lists.
+
+**No roll is logged.** The log store is built and unread. Unit 4.4 owns the write.
+
+### Validation and deploy
+
+**Validation:** `npm run lint` 0, `npm run typecheck` 0, `npm test` 0 over 230 vitest tests and
+20 node --test tests, `npm run build` 0. The branding gate reports `files_scanned=116` and
+`hits=0`.
+
+**Deploy:** PR #8 merged as commit `2a4d751` at 21:40:18 UTC on 2026-08-09. CI SUCCESS. Every URL
+was read out of the returned HTML, not guessed. Six asset paths answered HTTP 200: the page itself
+at 544 bytes, `assets/index-CITyIdqU.js` at 39,652 bytes, `assets/index-C2iXhYBQ.css` at 9,895
+bytes, `manifest.webmanifest` at 425 bytes, `registerSW.js` at 150 bytes, and the lazy chunk
+`assets/dice-tray-Cz13SOUC.js` at 596,587 bytes. The asset hashes match the build, so the live
+page is this commit and not a stale one.
+
+**Bundle:** Initial JavaScript 14,356 gzip bytes and lazy 3D chunk 151,876 gzip bytes, both
+unchanged because the only source addition is a comment block. Point at `budgets.json` for the
+ceilings rather than restating them.
