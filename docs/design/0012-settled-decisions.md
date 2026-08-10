@@ -144,3 +144,36 @@ Shrinking the die is the only change that makes the browser tab fit without scro
 
 `.shell-m` carries `overflow-y: auto`. The layout therefore degrades by scrolling and never by clipping. A screen that does not fit gives the player a scroll, not a lost button.
 
+---
+
+## Decision 7 — step mode holds one ladder tile, not two size pickers, taken by me 2026-08-09
+
+The plan asks Unit 2.1 for **two size pickers** in step mode. The screen holds **one ladder tile**
+instead, and section 5 of `docs/design/0002-screen-design.md` draws it that way. I took this
+decision. The owner delegated the interface and this is a consequence of the rules model, not of
+taste.
+
+### The reason
+
+`STEP_LADDER` is an enumerated progression of eight states, and `src/rules/pool.ts` says why in its
+own words: a rule that steps the lower die up and the higher die down is path-dependent, so `+2`
+then `−1` does not reliably equal `+1`. An index offset makes reversibility true by construction.
+
+Two independently stepped sizes are exactly that path-dependent pair. A screen that offered them
+would have to answer questions the ladder does not hold — a d10 beside a d6, for one — so it would
+reimplement the ladder in the interface, and the core would stop being the one authority on the
+progression.
+
+**One tile therefore steps the index.** It prints both sizes, as `d10 + d8`, so the player reads the
+pair the ladder names. The difficulty steps the same index, which is why the preview sentence can
+name the pair the next roll will take.
+
+### Why this is a decision and not a defect
+
+The plan states its own method as the intended approach and not as a fixed instruction. The purpose,
+the end state and the constraints hold. This changes the method, and it keeps every one of them.
+
+The bar shrinks to five tiles in step mode, and the control count falls with it. The budget in
+section 3 of the screen design is a ceiling, so a smaller count meets it.
+
+---
