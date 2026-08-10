@@ -12,7 +12,6 @@
 
 import type { Die, Faces } from '../rules/die';
 import { latestValue } from '../rules/die';
-import type { PushedRoll } from '../rules/push';
 import type { RollResult } from '../rules/roll';
 import { DIE_TYPE_COLOR } from './dice-colors';
 import type { DiceBox } from './vendor/dice-tray.js';
@@ -107,8 +106,9 @@ export function poolNotation(dice: readonly Die[]): string {
  * renderer multiplies this colour into the face texture, and the base is white,
  * so the die comes out the colour of its type with the numeral still black.
  */
-function colorByType(box: DiceBox, ordered: readonly Die[]): void {
-  for (const [index, die] of ordered.entries()) {
+function colorByType(box: DiceBox, ordered: readonly Die[], from = 0): void {
+  for (const [step, die] of ordered.entries()) {
+    const index = from + step;
     const mesh = box.diceList[index];
     if (!mesh) throw new Error(`throwPool: the tray holds no die at index ${index}`);
     for (const material of mesh.material) material.color.set(DIE_TYPE_COLOR[die.type]);
@@ -137,58 +137,120 @@ export async function throwPool(
 }
 
 /**
+ * What the tray needs of a push, and nothing else.
+ *
+ * `PushedRoll` from `src/rules/push.ts` satisfies this shape, so a caller hands
+ * the core's own answer straight over. The cost, the generation and the stress
+ * are the screen's business and the tray never reads one.
+ */
+export interface TrayPush {
+  /** The whole pool after the push, including any die the push added. */
+  readonly dice: readonly Die[];
+  /** The dice that go back in the cup, by id. */
+  readonly rerolled: readonly string[];
+  /** The die the profile added before the re-throw, or `null`. */
+  readonly stressAdded: string | null;
+}
+
+/** The value one die carries into the tray. A die with none cannot be acted out. */
+function valueToActOut(die: Die): number {
+  const value = latestValue(die);
+  if (value === null) {
+    throw new Error(`pushPool: die ${die.id} carries no value to act out`);
+  }
+  return value;
+}
+
+/**
+ * Spawn the dice a push added, one at a time, and land each decided value.
+ *
+ * The library appends to `diceList`, so a die added here takes the next index
+ * after every die already on the tray. `trayOrder` sorts by face count and
+ * therefore does NOT describe the tray any more once a die is added, which is
+ * why every caller reads the order this module hands back and never rebuilds it
+ * from the pool.
+ */
+async function addDice(
+  box: DiceBox,
+  ordered: readonly Die[],
+  added: readonly Die[],
+  options: ThrowOptions,
+): Promise<void> {
+  for (const [step, die] of added.entries()) {
+    const settled = box.add(`1d${die.faces}@${valueToActOut(die)}`);
+    if (options.skipTumble) skipTheTumble(box);
+    await settled;
+    colorByType(box, [die], ordered.length + step);
+  }
+}
+
+/**
  * Throw the pushed subset again and land every decided value.
  *
  * `ordered` is the list `throwPool` returned, so index `i` of it is
  * `box.diceList[i]`. `pushed.rerolled` names the dice that go back in the cup,
  * and the tray names no others, so every kept die stays where it lies. The
- * return is the same order carrying the new generation.
+ * return is the tray order carrying the new generation, with any die the push
+ * added last, because that is where the library put it.
  *
- * The rules core decides the subset and the values. This function reads both
- * and adds nothing.
+ * **A profile may add a die before the re-throw.** The third preset raises
+ * stress by one before every push and the core creates the stress die for it,
+ * so the push hands over a die the tray never spawned. That die is spawned here
+ * through `box.add` and it lands on the value the core decided, so it takes no
+ * further throw. Unit 3.4 recorded this as the `box.add` follow-up.
+ *
+ * The rules core decides the subset, the added die and every value. This
+ * function reads all three and adds nothing.
  */
 export async function pushPool(
   box: DiceBox,
   ordered: readonly Die[],
-  pushed: PushedRoll,
+  pushed: TrayPush,
   options: ThrowOptions = {},
 ): Promise<readonly Die[]> {
   const next = new Map(pushed.dice.map((die) => [die.id, die]));
   const trayIndex = new Map(ordered.map((die, index) => [die.id, index]));
 
-  // ponytail: a profile that adds a stress die before the re-roll hands over a
-  // die the tray never spawned. The tray refuses it by name rather than acting
-  // out the wrong dice. Spawn the new die through `box.add` when Unit 4.2 turns
-  // that profile on, and note that `add` appends to `diceList` while
-  // `trayOrder` sorts by face count, so the index map must be rebuilt there.
-  const unknown = pushed.dice.filter((die) => !trayIndex.has(die.id));
-  if (unknown.length > 0) {
+  // Two independent answers to "which dice are new to the tray": the set the
+  // tray does not hold, and the die the core says it added. They must agree. A
+  // caller that handed over a stale order fails here by name rather than acting
+  // out the wrong dice.
+  const added = pushed.dice.filter((die) => !trayIndex.has(die.id));
+  const byCore = pushed.stressAdded === null ? [] : [pushed.stressAdded];
+  const byTray = added.map((die) => die.id);
+  if (byTray.length !== byCore.length || byTray.some((id, at) => id !== byCore[at])) {
     throw new Error(
-      `pushPool: the tray holds no die for ${unknown.map((die) => die.id).join(', ')}`,
+      `pushPool: the tray holds no die for ${byTray.join(', ') || 'nothing'}, ` +
+        `and the push added ${byCore.join(', ') || 'nothing'}`,
     );
   }
 
+  const spawned = new Set(byTray);
   const ids: number[] = [];
   const forced: number[] = [];
   for (const id of pushed.rerolled) {
+    // A die the push added is thrown by `box.add` on the value the core chose,
+    // so it is not thrown a second time here.
+    if (spawned.has(id)) continue;
     const index = trayIndex.get(id);
     const die = next.get(id);
     if (index === undefined || die === undefined) {
       throw new Error(`pushPool: the push names ${id}, which the tray does not hold`);
     }
-    const value = latestValue(die);
-    if (value === null) {
-      throw new Error(`pushPool: die ${id} carries no value to act out`);
-    }
     ids.push(index);
-    forced.push(value);
+    forced.push(valueToActOut(die));
   }
-  if (ids.length === 0) {
+  if (ids.length === 0 && added.length === 0) {
     throw new Error('pushPool: the push names no dice to throw');
   }
 
-  const settled = box.reroll(ids, forced);
-  if (options.skipTumble) skipTheTumble(box);
-  await settled;
-  return ordered.map((die) => next.get(die.id) ?? die);
+  // The added die goes on the table before the re-throw, which is the order the
+  // profile states: `addBeforeReroll`.
+  await addDice(box, ordered, added, options);
+  if (ids.length > 0) {
+    const settled = box.reroll(ids, forced);
+    if (options.skipTumble) skipTheTumble(box);
+    await settled;
+  }
+  return [...ordered.map((die) => next.get(die.id) ?? die), ...added];
 }
