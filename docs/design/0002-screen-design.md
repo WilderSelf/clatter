@@ -66,7 +66,7 @@ ceiling over both rest states.
 | 8 | `push-button` | Pushes the roll on the table. One tap. It carries the re-throw count and the stress. | no | yes |
 | | | **Controls at rest** | **5** | **5** |
 | | | Budget | 8 | 8 |
-| | | Hit targets, reported only | 24 | 19 |
+| | | Hit targets, reported only | 24 | 27 |
 
 **The drawn screen meets the budget.** Five controls at rest A and five at rest B, against a ceiling
 of 8. Three controls of the eight are absent in each state, and no state shows all eight at once.
@@ -74,9 +74,10 @@ of 8. Three controls of the eight are absent in each state, and no state shows a
 The hit targets of state A are one Done, twelve pool cell ends (six cells, a minus end and a plus
 end each), seven difficulty notches, two difficulty step ends, More and Roll.
 
-The hit targets of state B are fifteen dice the player may keep or release, Edit pool, More, Roll
-again and Push. A die the rule holds takes no press, because the player cannot release a rule lock.
-The drawn screen holds ten of its twenty-five dice by the rule.
+The hit targets of state B are twenty-three dice the player may keep or release, Edit pool, More,
+Roll again and Push. A die the rule holds takes no press, because the player cannot release a rule
+lock. The drawn screen holds seven of its thirty dice by the rule, and the player keeps two more by
+choice. Both figures follow the drawn faces and move with them, which is why they carry no budget.
 
 A roll is one tap on `roll-button`. A push is one tap on `push-button`. Neither needs a mode, a menu
 or a confirmation.
@@ -170,11 +171,23 @@ The header holds no stop. The middle holds the builder in state A and the two tr
 Unit 4.11 asserts the list below, so the list is derived and never estimated. It is a walk of the
 DOM of `docs/design/0013-screen-final.html` in document order, with section 2 as the counting rule.
 An earlier note in `0012-settled-decisions.md` predicted 41 visits from the eight-die structure. That
-prediction is withdrawn. This walk reaches the same grand total by coincidence and splits it
-differently: 11 and 30, where the prediction split 10 and 31.
+prediction is withdrawn.
 
-The drawn pool is five attribute dice, five skill dice, three gear dice, no artifact die, two bonus
-dice and ten stress dice. That is 25 dice, which is the ceiling Decision 1 fixes.
+**Re-derived on 2026-08-09 at the draw target of 30 dice.** The die list is counted off the drawn
+screen with a command, and never by hand:
+
+```sh
+sed -n '/pane: roll /,/pane: builder/p' docs/design/0013-screen-final.html | grep -c 'data-el="die-'
+```
+
+The drawn pool is five attribute dice, five skill dice, three gear dice, an artifact rating of six
+which gives two d12 dice, two bonus dice and ten stress dice. The difficulty stands at +3, which adds
+three more bonus dice. That is 30 dice, which is the draw target Decision 1 sets. `worstCaseState`
+in `src/shell/state.ts` derives the number, and `src/shell/drawn-screen.test.ts` counts the drawn
+screen against it.
+
+The difficulty adds its bonus dice after the stress dice, so `Bo3` to `Bo5` come last in pool order.
+That order is the core's, read from `buildPool`, not a choice of this document.
 
 **Before the throw — eleven visits.** The state is rest A: the builder is open and the table is
 empty. Tab reaches items 1, 2, 9, 10 and 11. The arrow keys reach items 3 to 8 inside the pool bar.
@@ -191,45 +204,50 @@ empty. Tab reaches items 1, 2, 9, 10 and 11. The arrow keys reach items 3 to 8 i
 10. `disclosure-toggle`
 11. `roll-button` — Enter here throws the pool and collapses the builder
 
-**After the throw — thirty visits.** The state is rest B: the builder is collapsed and 25 dice lie
-in the two zones. Tab reaches items 1, 27, 28, 29 and 30. The arrow keys reach items 2 to 26 inside
-the tray. The kept shelf comes first and the throw zone second, and pool order holds inside each
-zone.
+**After the throw — thirty-five visits.** The state is rest B: the builder is collapsed and 30 dice
+lie in the two zones. Tab reaches items 1, 32, 33, 34 and 35. The arrow keys reach items 2 to 31
+inside the tray. The kept shelf comes first and the throw zone second, and pool order holds inside
+each zone.
 
 1. `dice-tray`
-2. `die-at1`
-3. `die-at3`
-4. `die-at4`
-5. `die-sk1`
-6. `die-sk3`
-7. `die-sk4`
-8. `die-ge1`
-9. `die-ge2`
-10. `die-bo2`
-11. `die-st1`
-12. `die-st3`
-13. `die-st5`
-14. `die-st7`
-15. `die-at2`
-16. `die-at5`
-17. `die-sk2`
-18. `die-sk5`
+2. `die-at2`
+3. `die-sk1`
+4. `die-sk2`
+5. `die-ge1`
+6. `die-ar2`
+7. `die-st7`
+8. `die-st8`
+9. `die-st10`
+10. `die-bo5`
+11. `die-at1`
+12. `die-at3`
+13. `die-at4`
+14. `die-at5`
+15. `die-sk3`
+16. `die-sk4`
+17. `die-sk5`
+18. `die-ge2`
 19. `die-ge3`
-20. `die-bo1`
-21. `die-st2`
-22. `die-st4`
-23. `die-st6`
-24. `die-st8`
-25. `die-st9`
-26. `die-st10`
-27. `edit-pool-button` — Enter here reopens the builder and returns the order to the first list
-28. `disclosure-toggle`
-29. `roll-button`
-30. `push-button` — Enter here pushes
+20. `die-ar1`
+21. `die-bo1`
+22. `die-bo2`
+23. `die-st1`
+24. `die-st2`
+25. `die-st3`
+26. `die-st4`
+27. `die-st5`
+28. `die-st6`
+29. `die-st9`
+30. `die-bo3`
+31. `die-bo4`
+32. `edit-pool-button` — Enter here reopens the builder and returns the order to the first list
+33. `disclosure-toggle`
+34. `roll-button`
+35. `push-button` — Enter here pushes
 
-**Eleven visits before the throw, thirty after it, forty-one in all.**
+**Eleven visits before the throw, thirty-five after it, forty-six in all.**
 
-Items 2 to 14 are the kept shelf and items 15 to 26 are the throw zone. Thirteen and twelve. The
+Items 2 to 10 are the kept shelf and items 11 to 31 are the throw zone. Nine and twenty-one. The
 split is the only place the tray departs from pool order, and that split is the push decision the
 player is reading.
 
@@ -263,8 +281,10 @@ lists and reports the browser's stops beside them.
 
 The stop appears only while the region overflows, so the reading follows the height and the number
 of dice. Measured on 2026-08-09 through `node scripts/browser.mjs --shell`, over the built output in
-Firefox: at 360 by 660 with 25 dice on the table the walk reported one stop at `shell-mid`; at 360
-by 760 and at 800 by 600 it reported none, because the middle fits at those heights.
+Firefox at 800 by 600: before the throw, with the table empty and the builder open, the walk reported
+no such stop; after the throw, with 30 dice on the table, it reported one at `shell-mid`. At the draw
+target the middle scrolls at both phone heights as well, which the dated note under Decision 6
+measures. An earlier reading at 25 dice found no stop at 360 by 760, and that reading is superseded.
 
 ## 7. What the interface units inherit from this unit
 
@@ -284,16 +304,17 @@ by 760 and at 800 by 600 it reported none, because the middle fits at those heig
   referee point.
 - **The matrix is transposed and rectangular.** The record holds one row per die and one column per
   generation, which is Decision 3. A die that locked early shows a dot for every later generation. A
-  die added mid-roll is blank for every generation before it existed. Twenty-five rows scroll on a
-  phone. Twenty-five columns do not.
+  die added mid-roll is blank for every generation before it existed. Thirty rows scroll on a phone,
+  and a pushed roll under the third profile holds more. Thirty columns do not scroll on a phone at
+  all, which is why the matrix is transposed.
 - **Touch targets are at least 44 px, and the buttons are 50 px tall.** The pool cell ends are 44 px
   wide and full tile height, and the whole tile is the drag surface. The seven difficulty notches
   are the one exception at 39 px wide, measured at 360 px in the drawn file. They clear the 24 px
   floor. Seven 44 px notches need more width than the card gives. Decision 5 records the trade.
 - **The footer is a grid row and never an overlay.** The middle area scrolls and the footer does not
-  move, so the push stays one tap away at every scroll position. At 360 px by 760 px the middle does
-  not scroll at all. At 360 px by 660 px it scrolls and loses nothing. Decision 6 holds both
-  measurements.
+  move, so the push stays one tap away at every scroll position. At the draw target of 30 dice the
+  middle scrolls at both phone heights, 760 px and 660 px, and it loses nothing at either. Decision 6
+  holds both measurements and the dated note that re-measured them.
 - **Motion respects `prefers-reduced-motion`.** The shake at Unit 2.2 becomes a cut when the setting
   is on.
 - **The roll result reaches a live region.** The status line is the live region, and it names the
@@ -302,18 +323,30 @@ by 760 and at 800 by 600 it reported none, because the middle fits at those heig
 ## 8. The state the drawn screen draws
 
 The drawn screen is filled with a real result, not with placeholder text, so the owner judges real
-density. It draws the ceiling, because the ceiling is the case that fails first.
+density. It draws the draw target, because that is the case that fails first.
+
+**The state is constructed through the rules core, never drawn by eye.** It is the first roll of
+`worstCaseState()` from seed 12, under the third profile, with `At2` and `Ge1` pressed to keep.
+`src/shell/drawn-screen.test.ts` rebuilds it and compares it against the file, so a screen the rules
+cannot produce fails the suite.
 
 - Rule set: pool, stress dice and complications.
-- The pool: five attribute dice, five skill dice, three gear dice, no artifact die and two bonus
-  dice. Ten stress dice join them, so the tray holds 25.
-- Difficulty 0, so the next roll takes no dice away and adds none.
-- One push has already landed. The status line reads six successes, four banes, 25 dice, stress 10
-  and push 1. The stress reading is at its cap and is marked.
-- The kept shelf holds thirteen dice: ten the rule holds and three the player chose to keep. The
-  throw zone holds twelve. Every count in the two bands is the length of the list under it.
-- The next push would throw those twelve dice, and a complication check is due.
+- The pool: five attribute dice, five skill dice, three gear dice, an artifact rating of six which
+  gives two d12 dice, and two bonus dice. Ten stress dice join them.
+- Difficulty +3, so the next roll adds three bonus dice. Those three are already on the table,
+  because the throw that filled it took the same difficulty.
+- The tray holds 30 dice, which is the draw target of Decision 1.
+- No push has landed yet. The status line reads ten successes, four banes, 30 dice, stress 10 and
+  push 0. The stress reading is at its cap and is marked.
+- The kept shelf holds nine dice: seven the rule holds and two the player chose to keep. The throw
+  zone holds twenty-one. Every count in the two bands is the length of the list under it.
+- The next push would throw twenty-two dice. That is the twenty-one loose dice plus the stress die
+  the profile adds before the re-throw, and it is why the tray passes 30 on a push.
+- **No complication check is due, and that is a rule and not a choice.** A complication check follows
+  a bane on a stress die, and the same bane blocks every further push. A live `Push` beside a stress
+  bane is unreachable under this profile, so the screen may draw one or the other and never both.
 - The builder pane draws the same screen after `Edit pool`. The pool cells sit at their caps, so the
-  cap labels are drawn where they are hardest to fit.
+  cap labels are drawn where they are hardest to fit. The artifact tile prints `d12 + d12`, which is
+  the one tile value that needs more than one line on a phone.
 - The history record draws a different roll: yesterday at 21:07, 25 dice, nine successes, six banes
   and two pushes. Its matrix draws all three generations and the dots of the dice that locked early.

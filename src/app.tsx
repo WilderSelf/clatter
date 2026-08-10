@@ -482,9 +482,10 @@ function DiceTray({ state, setState }: { state: AppState; setState: (change: Cha
     : (order[0]?.element ?? '');
 
   // A throw puts the roving tab index back on the first die of the shelf. The
-  // same twenty-five dice come back every throw, so a cell the player left it
-  // on is still a cell, and the tray would otherwise open the next throw in
-  // the middle of itself.
+  // same dice come back every throw, so a cell the player left it on is still a
+  // cell, and the tray would otherwise open the next throw in the middle of
+  // itself. A push adds a stress die, which arrives at the end of the zone and
+  // moves no cell the player already reached.
   const first = order[0]?.element ?? '';
   useEffect(() => setActiveId(first), [state.thrown]);
 

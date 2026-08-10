@@ -27,7 +27,7 @@ import { seededRandom } from './rules/seeded-random';
 import type { RollResult } from './rules/roll';
 import { roll } from './rules/roll';
 import type { AppState } from './shell/state';
-import { dieElement, emptyState } from './shell/state';
+import { dieElement, emptyState, readout, throwDice, worstCaseState } from './shell/state';
 
 // A jsdom test is transformed for the web, so `import.meta.url` is not a file
 // URL here. The working directory is the root Vitest was configured from.
@@ -35,6 +35,13 @@ const DESIGN = readFileSync(resolve(process.cwd(), 'docs/design/0002-screen-desi
 
 /** The number words the document may count in. An unknown word is a failure. */
 const NUMBER_WORDS: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
   eight: 8,
   nine: 9,
   ten: 10,
@@ -45,6 +52,22 @@ const NUMBER_WORDS: Readonly<Record<string, number>> = {
   thirty: 30,
   forty: 40,
 };
+
+/**
+ * A count in words, compounds included: `thirty-five` is thirty plus five. An
+ * unknown part gives `undefined`, so the caller still fails on a word it cannot
+ * read rather than on a wrong number.
+ */
+function inWords(word: string | undefined): number | undefined {
+  const parts = (word ?? '').toLowerCase().split('-');
+  let total = 0;
+  for (const part of parts) {
+    const held = NUMBER_WORDS[part];
+    if (held === undefined) return undefined;
+    total += held;
+  }
+  return total;
+}
 
 interface WalkList {
   /** The visit names, in the order the document numbers them. */
@@ -73,8 +96,8 @@ function walkList(markdown: string, when: 'Before' | 'After'): WalkList {
   }
   const section = markdown.slice(from, to);
 
-  const word = new RegExp(`\\*\\*${when} the throw — (\\w+) visits\\.\\*\\*`).exec(section)?.[1];
-  const stated = word === undefined ? undefined : NUMBER_WORDS[word];
+  const word = new RegExp(`\\*\\*${when} the throw — ([\\w-]+) visits\\.\\*\\*`).exec(section)?.[1];
+  const stated = inWords(word);
   if (stated === undefined) {
     throw new Error(
       `section 6 states the ${when.toLowerCase()}-throw count as ${String(word)}, which is unread`,
@@ -457,7 +480,7 @@ describe('the push button', () => {
 });
 
 describe('the keyboard order after the throw', () => {
-  it('visits the thirty named items of section 6, in that order', () => {
+  it('visits the thirty-five named items of section 6, in that order', () => {
     const list = walkList(DESIGN, 'After');
 
     // The document counts its own list three ways before the screen is asked
@@ -466,12 +489,12 @@ describe('the keyboard order after the throw', () => {
     expect([...list.tab, ...list.arrow].sort((a, b) => a - b)).toEqual(
       Array.from({ length: list.stated }, (_, index) => index + 1),
     );
-    expect(list.stated).toBe(30);
+    expect(list.stated).toBe(35);
 
     // Which items are the shelf and which the zone, read out of the same
     // section, with its own two counts in words.
     const split =
-      /Items (\d+) to (\d+) are the kept shelf and items (\d+) to (\d+) are the throw zone\.\s+(\w+) and (\w+)\./.exec(
+      /Items (\d+) to (\d+) are the kept shelf and items (\d+) to (\d+) are the throw zone\.\s+([\w-]+) and ([\w-]+)\./.exec(
         DESIGN,
       );
     if (split === null) throw new Error('section 6 no longer splits the tray into two zones');
@@ -479,7 +502,7 @@ describe('the keyboard order after the throw', () => {
     const keptNames = list.names.slice(Number(shelfFrom) - 1, Number(shelfTo));
     const looseNames = list.names.slice(Number(zoneFrom) - 1, Number(zoneTo));
     const counted = (word: string | undefined): number => {
-      const held = NUMBER_WORDS[(word ?? '').toLowerCase()];
+      const held = inWords(word);
       if (held === undefined)
         throw new Error(`section 6 counts in ${String(word)}, which is unread`);
       return held;
@@ -487,9 +510,12 @@ describe('the keyboard order after the throw', () => {
     expect(keptNames.length, 'the shelf is as long as the prose says').toBe(counted(shelfWord));
     expect(looseNames.length, 'the zone is as long as the prose says').toBe(counted(zoneWord));
 
-    // The pool of section 8, built by the core. Its size is the denominator the
-    // two zones must sum to: a die lost between them fails the sum.
-    const dice = buildPool(poolBuilder({ attribute: 5, skill: 5, gear: 3, bonus: 2, stress: 10 }));
+    // The pool of section 8, built by the core: every tile at its cap and the
+    // difficulty at its limit, which is the draw target of Decision 1. Its size
+    // is the denominator the two zones must sum to, so a die lost between them
+    // fails the sum. `src/shell/drawn-screen.test.ts` holds the same number
+    // against the drawn file.
+    const dice = throwDice(worstCaseState());
     expect(dice.length, 'the drawn pool is as long as the list of dice').toBe(
       list.names.filter((name) => name.startsWith('die-')).length,
     );
@@ -548,6 +574,15 @@ describe('the keyboard order after the throw', () => {
     // The bands print the length of the list under each of them.
     expect(element('kept-shelf').textContent).toContain(`${keptNames.length} dice`);
     expect(element('throw-zone').textContent).toContain(`${looseNames.length} dice`);
+
+    // The readout at the draw target, against the core's own numbers. The
+    // zones alone would not catch a status line that counts the tray wrong.
+    const numbers = readout(tableState(rolled, held.id, 10));
+    expect(numbers.dice).toBe(dice.length);
+    expect(spoken()).toBe(
+      `${numbers.successes} successes. ${numbers.banes} banes. Push ${numbers.pushes}. ` +
+        `The table holds ${dice.length} dice. Stress ${numbers.stress}.`,
+    );
   });
 });
 

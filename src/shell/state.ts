@@ -53,10 +53,12 @@ export const ARTIFACT_LADDER: readonly (readonly ArtifactFaces[])[] = [
 ];
 
 /**
- * The most dice of each type one pool holds, from Decision 1 in
- * `docs/design/0012-settled-decisions.md`: 5 attribute, 5 skill, 3 gear and 2
- * bonus make a pool of 15, and 10 stress dice bring the tray to its 25-die
- * ceiling.
+ * The most dice of each type one pool holds. Decision 1 in
+ * `docs/design/0012-settled-decisions.md` fixes every number: 5 attribute, 5
+ * skill, 3 gear and 2 bonus, with an artifact rating of 6 and 10 stress points.
+ *
+ * These caps are not the tray ceiling. `worstCaseState` below derives what they
+ * put on the table, and a push adds more dice on top of that.
  */
 export const POOL_CAPS = {
   attribute: 5,
@@ -281,6 +283,31 @@ export function withDifficulty(state: AppState, value: number): AppState {
  */
 export function withMode(state: AppState, mode: Mode): AppState {
   return { ...emptyState(mode), sheetOpen: state.sheetOpen, profileId: state.profileId };
+}
+
+/**
+ * The state that puts the most dice on the table with one throw: every tile at
+ * its cap, the ladder at its top, and the difficulty at its limit.
+ *
+ * This is the one derivation of the draw target. `throwDice(worstCaseState())`
+ * counts it, and `docs/design/0013-screen-final.html` is drawn at that count.
+ * Nothing states the number in prose or in a second constant. Raise a cap,
+ * lengthen `ARTIFACT_LADDER` or widen `MODIFIER_LIMIT` and the count moves, so
+ * the check in `src/shell/drawn-screen.test.ts` names the layout for a
+ * re-measure.
+ *
+ * A push adds dice on top of this. Profile 3 adds one stress die per push and
+ * holds no push limit, so the tray itself has no ceiling. Decision 1 records
+ * that the layout is drawn for this number and scrolls past it.
+ */
+export function worstCaseState(mode: Mode = 'pool'): AppState {
+  return {
+    ...emptyState(mode),
+    counts: { ...POOL_CAPS },
+    step: STEP_LADDER.length - 1,
+    difficulty: MODIFIER_LIMIT,
+    builderOpen: false,
+  };
 }
 
 const TYPE_ORDER: readonly DieType[] = [

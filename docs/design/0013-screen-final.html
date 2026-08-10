@@ -335,6 +335,13 @@
         white-space: nowrap;
       }
 
+      /* The artifact tile is the one tile whose value is a pair of die sizes, and
+         `d12 + d12` is wider than a phone tile holds at 21 px. This tile alone may
+         wrap, so the pool bar never makes the screen wider than the phone. */
+      [data-el='pool-cell-artifact'] .cell-n {
+        white-space: normal;
+      }
+
       .cell-n.zero {
         color: #a9a296;
         font-weight: 400;
@@ -526,6 +533,12 @@
       .slot.rule .die,
       .slot.choice .die {
         box-shadow: inset 0 1px 2px rgb(0 0 0 / 10%);
+      }
+
+      /* A face count over six prints its value, because pips read to six. */
+      .die.num {
+        font-size: calc(var(--die) / 2.2);
+        font-weight: 600;
       }
 
       .pips {
@@ -1093,130 +1106,150 @@
 
       <!-- ============================ pane: roll ============================ -->
       <section class="pane" data-pane="roll">
-        <h2 class="pane-h">Roll flow — after one push, no pool chip</h2>
+        <h2 class="pane-h">Roll flow — the largest first roll, no pool chip</h2>
         <div class="frame-scroll">
           <div class="frame w360 notch" data-w="360">
             <div class="screen">
               <header class="shell-h" data-el="shell-header">
                 <div class="statusline" data-el="status-line">
-                  <span class="st-item"><i class="mark s"></i>6</span>
+                  <span class="st-item"><i class="mark s"></i>10</span>
                   <span class="st-item"><i class="mark b"></i>4</span>
                   <i class="st-rule"></i>
-                  <span class="st-item st-dim">25 dice</span>
+                  <span class="st-item st-dim">30 dice</span>
                   <span class="st-item st-dim"><span class="st-warn">stress 10</span></span>
-                  <span class="st-item st-dim">push 1</span>
+                  <span class="st-item st-dim">push 0</span>
                 </div>
               </header>
 
               <main class="shell-m" data-el="shell-mid">
                 <div class="zones">
                   <div class="shelf" data-el="kept-shelf">
-                    <p class="band-h">Kept <span>13 dice — these stay on the table</span></p>
+                    <p class="band-h">Kept <span>9 dice — these stay on the table</span></p>
                     <div class="tray" data-el="dice-tray">
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>At1</b><em>kept</em></span>
-                      </div>
-                      <div class="slot rule">
-                        <div class="die pips f1"><span class="badge b">bane</span></div>
-                        <span class="cap"><b>At3</b><em>kept</em></span>
-                      </div>
-                      <button class="slot choice" data-el="die-at4">
+                      <button class="slot choice" data-el="die-at2">
                         <span class="die pips f5"></span>
-                        <span class="cap"><b>At4</b><em>yours</em></span>
+                        <span class="cap"><b>At2</b><em>yours</em></span>
                       </button>
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
+                      <div class="slot rule" data-el="die-sk1">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
                         <span class="cap"><b>Sk1</b><em>kept</em></span>
                       </div>
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>Sk3</b><em>kept</em></span>
-                      </div>
-                      <div class="slot rule">
-                        <div class="die pips f1"><span class="badge b">bane</span></div>
-                        <span class="cap"><b>Sk4</b><em>kept</em></span>
+                      <div class="slot rule" data-el="die-sk2">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
+                        <span class="cap"><b>Sk2</b><em>kept</em></span>
                       </div>
                       <button class="slot choice" data-el="die-ge1">
                         <span class="die pips f5"></span>
                         <span class="cap"><b>Ge1</b><em>yours</em></span>
                       </button>
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>Ge2</b><em>kept</em></span>
+                      <div class="slot rule" data-el="die-ar2">
+                        <span class="die num">12<span class="badge s">4</span></span>
+                        <span class="cap"><b>Ar2</b><em>kept</em></span>
                       </div>
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>Bo2</b><em>kept</em></span>
-                      </div>
-                      <div class="slot rule stress">
-                        <div class="die pips f1"><span class="badge b">bane</span></div>
-                        <span class="cap"><b>St1</b><em>kept</em></span>
-                      </div>
-                      <div class="slot rule stress">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>St3</b><em>kept</em></span>
-                      </div>
-                      <button class="slot choice stress" data-el="die-st5">
-                        <span class="die pips f5"></span>
-                        <span class="cap"><b>St5</b><em>yours</em></span>
-                      </button>
-                      <div class="slot rule stress">
-                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                      <div class="slot rule stress" data-el="die-st7">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
                         <span class="cap"><b>St7</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule stress" data-el="die-st8">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
+                        <span class="cap"><b>St8</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule stress" data-el="die-st10">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
+                        <span class="cap"><b>St10</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule" data-el="die-bo5">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
+                        <span class="cap"><b>Bo5</b><em>kept</em></span>
                       </div>
                     </div>
                   </div>
                   <div class="throwzone" data-el="throw-zone">
-                    <p class="band-h">In the cup <span>12 dice — the push throws these</span></p>
+                    <p class="band-h">In the cup <span>21 dice — the push throws these</span></p>
                     <div class="tray">
-                      <button class="slot loose" data-el="die-at2">
-                        <span class="die pips f3"></span>
-                        <span class="cap"><b>At2</b><em>back</em></span>
+                      <button class="slot loose" data-el="die-at1">
+                        <span class="die pips f1"><span class="badge b">bane</span></span>
+                        <span class="cap"><b>At1</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-at3">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>At3</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-at4">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>At4</b><em>back</em></span>
                       </button>
                       <button class="slot loose" data-el="die-at5">
-                        <span class="die pips f4"></span>
+                        <span class="die pips f1"><span class="badge b">bane</span></span>
                         <span class="cap"><b>At5</b><em>back</em></span>
                       </button>
-                      <button class="slot loose" data-el="die-sk2">
-                        <span class="die pips f2"></span>
-                        <span class="cap"><b>Sk2</b><em>back</em></span>
+                      <button class="slot loose" data-el="die-sk3">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>Sk3</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-sk4">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>Sk4</b><em>back</em></span>
                       </button>
                       <button class="slot loose" data-el="die-sk5">
-                        <span class="die pips f3"></span>
+                        <span class="die pips f1"><span class="badge b">bane</span></span>
                         <span class="cap"><b>Sk5</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-ge2">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>Ge2</b><em>back</em></span>
                       </button>
                       <button class="slot loose" data-el="die-ge3">
                         <span class="die pips f4"></span>
                         <span class="cap"><b>Ge3</b><em>back</em></span>
                       </button>
+                      <button class="slot loose" data-el="die-ar1">
+                        <span class="die num">3</span>
+                        <span class="cap"><b>Ar1</b><em>back</em></span>
+                      </button>
                       <button class="slot loose" data-el="die-bo1">
-                        <span class="die pips f2"></span>
+                        <span class="die pips f4"></span>
                         <span class="cap"><b>Bo1</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-bo2">
+                        <span class="die pips f1"><span class="badge b">bane</span></span>
+                        <span class="cap"><b>Bo2</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st1">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>St1</b><em>back</em></span>
                       </button>
                       <button class="slot loose stress" data-el="die-st2">
                         <span class="die pips f4"></span>
                         <span class="cap"><b>St2</b><em>back</em></span>
                       </button>
+                      <button class="slot loose stress" data-el="die-st3">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>St3</b><em>back</em></span>
+                      </button>
                       <button class="slot loose stress" data-el="die-st4">
                         <span class="die pips f3"></span>
                         <span class="cap"><b>St4</b><em>back</em></span>
                       </button>
+                      <button class="slot loose stress" data-el="die-st5">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>St5</b><em>back</em></span>
+                      </button>
                       <button class="slot loose stress" data-el="die-st6">
-                        <span class="die pips f2"></span>
+                        <span class="die pips f4"></span>
                         <span class="cap"><b>St6</b><em>back</em></span>
                       </button>
-                      <button class="slot loose stress" data-el="die-st8">
-                        <span class="die pips f4"></span>
-                        <span class="cap"><b>St8</b><em>back</em></span>
-                      </button>
                       <button class="slot loose stress" data-el="die-st9">
-                        <span class="die pips f3"></span>
+                        <span class="die pips f2"></span>
                         <span class="cap"><b>St9</b><em>back</em></span>
                       </button>
-                      <button class="slot loose stress" data-el="die-st10">
+                      <button class="slot loose" data-el="die-bo3">
                         <span class="die pips f2"></span>
-                        <span class="cap"><b>St10</b><em>back</em></span>
+                        <span class="cap"><b>Bo3</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-bo4">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>Bo4</b><em>back</em></span>
                       </button>
                     </div>
                   </div>
@@ -1225,18 +1258,16 @@
 
               <div class="shell-f" data-el="shell-footer">
                 <div class="costrow" data-el="cost-row">
-                  <p class="cost-t">
-                    Push again — throw <b>12</b> dice. A complication check is due.
-                  </p>
+                  <p class="cost-t">Push again — throw <b>22</b> dice.</p>
                   <button class="icon-btn" data-el="edit-pool-button">Edit pool</button>
                 </div>
                 <div class="bar">
                   <button class="btn ghost" data-el="disclosure-toggle">More</button>
                   <button class="btn" data-el="roll-button">
-                    Roll again<small>25 dice, difficulty 0</small>
+                    Roll again<small>30 dice, difficulty +3</small>
                   </button>
                   <button class="btn go focused" data-el="push-button">
-                    Push<small>12 dice, stress 10</small>
+                    Push<small>22 dice, stress 10</small>
                   </button>
                 </div>
               </div>
@@ -1274,12 +1305,12 @@
             <div class="screen">
               <header class="shell-h" data-el="shell-header">
                 <div class="statusline" data-el="status-line">
-                  <span class="st-item"><i class="mark s"></i>6</span>
+                  <span class="st-item"><i class="mark s"></i>10</span>
                   <span class="st-item"><i class="mark b"></i>4</span>
                   <i class="st-rule"></i>
-                  <span class="st-item st-dim">25 dice</span>
+                  <span class="st-item st-dim">30 dice</span>
                   <span class="st-item st-dim"><span class="st-warn">stress 10</span></span>
-                  <span class="st-item st-dim">push 1</span>
+                  <span class="st-item st-dim">push 0</span>
                 </div>
               </header>
 
@@ -1308,10 +1339,10 @@
                       <span class="cell-n">3</span>
                       <button class="cell-p" aria-label="one gear die more">+</button>
                     </div>
-                    <div class="cell" data-el="pool-cell-artifact">
+                    <div class="cell on cap-hit" data-el="pool-cell-artifact">
                       <button class="cell-m" aria-label="one artifact die fewer">−</button>
                       <span class="cell-t">artifact</span>
-                      <span class="cell-n zero">none</span>
+                      <span class="cell-n">d12 + d12</span>
                       <button class="cell-p" aria-label="one artifact die more">+</button>
                     </div>
                     <div class="cell on" data-el="pool-cell-bonus">
@@ -1332,7 +1363,7 @@
                       <span class="diff-l">Difficulty</span>
                       <span class="diff-step">
                         <button class="icon-btn diff-b" aria-label="one step easier">−</button>
-                        <span class="diff-v">0</span>
+                        <span class="diff-v">+3</span>
                         <button class="icon-btn diff-b" aria-label="one step harder">+</button>
                       </span>
                     </div>
@@ -1340,123 +1371,143 @@
                       <button class="tk-n" aria-label="minus three"></button>
                       <button class="tk-n" aria-label="minus two"></button>
                       <button class="tk-n" aria-label="minus one"></button>
-                      <button class="tk-n on centre" aria-label="zero"></button>
+                      <button class="tk-n centre" aria-label="zero"></button>
                       <button class="tk-n" aria-label="plus one"></button>
                       <button class="tk-n" aria-label="plus two"></button>
-                      <button class="tk-n" aria-label="plus three"></button>
+                      <button class="tk-n on" aria-label="plus three"></button>
                     </div>
-                    <p class="diff-p">The next roll takes no dice away and adds none.</p>
+                    <p class="diff-p">The next roll adds 3 bonus dice.</p>
                   </div>
                 </section>
 
                 <div class="zones">
                   <div class="shelf" data-el="kept-shelf">
-                    <p class="band-h">Kept <span>13 dice — these stay on the table</span></p>
+                    <p class="band-h">Kept <span>9 dice — these stay on the table</span></p>
                     <div class="tray" data-el="dice-tray">
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>At1</b><em>kept</em></span>
-                      </div>
-                      <div class="slot rule">
-                        <div class="die pips f1"><span class="badge b">bane</span></div>
-                        <span class="cap"><b>At3</b><em>kept</em></span>
-                      </div>
-                      <button class="slot choice" data-el="die-at4">
+                      <button class="slot choice" data-el="die-at2">
                         <span class="die pips f5"></span>
-                        <span class="cap"><b>At4</b><em>yours</em></span>
+                        <span class="cap"><b>At2</b><em>yours</em></span>
                       </button>
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
+                      <div class="slot rule" data-el="die-sk1">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
                         <span class="cap"><b>Sk1</b><em>kept</em></span>
                       </div>
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>Sk3</b><em>kept</em></span>
-                      </div>
-                      <div class="slot rule">
-                        <div class="die pips f1"><span class="badge b">bane</span></div>
-                        <span class="cap"><b>Sk4</b><em>kept</em></span>
+                      <div class="slot rule" data-el="die-sk2">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
+                        <span class="cap"><b>Sk2</b><em>kept</em></span>
                       </div>
                       <button class="slot choice" data-el="die-ge1">
                         <span class="die pips f5"></span>
                         <span class="cap"><b>Ge1</b><em>yours</em></span>
                       </button>
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>Ge2</b><em>kept</em></span>
+                      <div class="slot rule" data-el="die-ar2">
+                        <span class="die num">12<span class="badge s">4</span></span>
+                        <span class="cap"><b>Ar2</b><em>kept</em></span>
                       </div>
-                      <div class="slot rule">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>Bo2</b><em>kept</em></span>
-                      </div>
-                      <div class="slot rule stress">
-                        <div class="die pips f1"><span class="badge b">bane</span></div>
-                        <span class="cap"><b>St1</b><em>kept</em></span>
-                      </div>
-                      <div class="slot rule stress">
-                        <div class="die pips f6"><span class="badge s">1</span></div>
-                        <span class="cap"><b>St3</b><em>kept</em></span>
-                      </div>
-                      <button class="slot choice stress" data-el="die-st5">
-                        <span class="die pips f5"></span>
-                        <span class="cap"><b>St5</b><em>yours</em></span>
-                      </button>
-                      <div class="slot rule stress">
-                        <div class="die pips f1"><span class="badge b">bane</span></div>
+                      <div class="slot rule stress" data-el="die-st7">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
                         <span class="cap"><b>St7</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule stress" data-el="die-st8">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
+                        <span class="cap"><b>St8</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule stress" data-el="die-st10">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
+                        <span class="cap"><b>St10</b><em>kept</em></span>
+                      </div>
+                      <div class="slot rule" data-el="die-bo5">
+                        <span class="die pips f6"><span class="badge s">1</span></span>
+                        <span class="cap"><b>Bo5</b><em>kept</em></span>
                       </div>
                     </div>
                   </div>
                   <div class="throwzone" data-el="throw-zone">
-                    <p class="band-h">In the cup <span>12 dice — the push throws these</span></p>
+                    <p class="band-h">In the cup <span>21 dice — the push throws these</span></p>
                     <div class="tray">
-                      <button class="slot loose" data-el="die-at2">
-                        <span class="die pips f3"></span>
-                        <span class="cap"><b>At2</b><em>back</em></span>
+                      <button class="slot loose" data-el="die-at1">
+                        <span class="die pips f1"><span class="badge b">bane</span></span>
+                        <span class="cap"><b>At1</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-at3">
+                        <span class="die pips f2"></span>
+                        <span class="cap"><b>At3</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-at4">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>At4</b><em>back</em></span>
                       </button>
                       <button class="slot loose" data-el="die-at5">
-                        <span class="die pips f4"></span>
+                        <span class="die pips f1"><span class="badge b">bane</span></span>
                         <span class="cap"><b>At5</b><em>back</em></span>
                       </button>
-                      <button class="slot loose" data-el="die-sk2">
-                        <span class="die pips f2"></span>
-                        <span class="cap"><b>Sk2</b><em>back</em></span>
+                      <button class="slot loose" data-el="die-sk3">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>Sk3</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-sk4">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>Sk4</b><em>back</em></span>
                       </button>
                       <button class="slot loose" data-el="die-sk5">
-                        <span class="die pips f3"></span>
+                        <span class="die pips f1"><span class="badge b">bane</span></span>
                         <span class="cap"><b>Sk5</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-ge2">
+                        <span class="die pips f4"></span>
+                        <span class="cap"><b>Ge2</b><em>back</em></span>
                       </button>
                       <button class="slot loose" data-el="die-ge3">
                         <span class="die pips f4"></span>
                         <span class="cap"><b>Ge3</b><em>back</em></span>
                       </button>
+                      <button class="slot loose" data-el="die-ar1">
+                        <span class="die num">3</span>
+                        <span class="cap"><b>Ar1</b><em>back</em></span>
+                      </button>
                       <button class="slot loose" data-el="die-bo1">
-                        <span class="die pips f2"></span>
+                        <span class="die pips f4"></span>
                         <span class="cap"><b>Bo1</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-bo2">
+                        <span class="die pips f1"><span class="badge b">bane</span></span>
+                        <span class="cap"><b>Bo2</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose stress" data-el="die-st1">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>St1</b><em>back</em></span>
                       </button>
                       <button class="slot loose stress" data-el="die-st2">
                         <span class="die pips f4"></span>
                         <span class="cap"><b>St2</b><em>back</em></span>
                       </button>
+                      <button class="slot loose stress" data-el="die-st3">
+                        <span class="die pips f5"></span>
+                        <span class="cap"><b>St3</b><em>back</em></span>
+                      </button>
                       <button class="slot loose stress" data-el="die-st4">
                         <span class="die pips f3"></span>
                         <span class="cap"><b>St4</b><em>back</em></span>
                       </button>
+                      <button class="slot loose stress" data-el="die-st5">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>St5</b><em>back</em></span>
+                      </button>
                       <button class="slot loose stress" data-el="die-st6">
-                        <span class="die pips f2"></span>
+                        <span class="die pips f4"></span>
                         <span class="cap"><b>St6</b><em>back</em></span>
                       </button>
-                      <button class="slot loose stress" data-el="die-st8">
-                        <span class="die pips f4"></span>
-                        <span class="cap"><b>St8</b><em>back</em></span>
-                      </button>
                       <button class="slot loose stress" data-el="die-st9">
-                        <span class="die pips f3"></span>
+                        <span class="die pips f2"></span>
                         <span class="cap"><b>St9</b><em>back</em></span>
                       </button>
-                      <button class="slot loose stress" data-el="die-st10">
+                      <button class="slot loose" data-el="die-bo3">
                         <span class="die pips f2"></span>
-                        <span class="cap"><b>St10</b><em>back</em></span>
+                        <span class="cap"><b>Bo3</b><em>back</em></span>
+                      </button>
+                      <button class="slot loose" data-el="die-bo4">
+                        <span class="die pips f3"></span>
+                        <span class="cap"><b>Bo4</b><em>back</em></span>
                       </button>
                     </div>
                   </div>
@@ -1465,18 +1516,16 @@
 
               <div class="shell-f" data-el="shell-footer">
                 <div class="costrow" data-el="cost-row">
-                  <p class="cost-t">
-                    Push again — throw <b>12</b> dice. A complication check is due.
-                  </p>
+                  <p class="cost-t">Push again — throw <b>22</b> dice.</p>
                   <button class="icon-btn" data-el="edit-pool-button">Edit pool</button>
                 </div>
                 <div class="bar">
                   <button class="btn ghost" data-el="disclosure-toggle">More</button>
                   <button class="btn" data-el="roll-button">
-                    Roll again<small>25 dice, difficulty 0</small>
+                    Roll again<small>30 dice, difficulty +3</small>
                   </button>
                   <button class="btn go focused" data-el="push-button">
-                    Push<small>12 dice, stress 10</small>
+                    Push<small>22 dice, stress 10</small>
                   </button>
                 </div>
               </div>
@@ -1610,7 +1659,7 @@
       // detail pane. Nothing here is a rule, it is drawn data only.
       // ---------------------------------------------------------------
       const LOG = [
-        { when: 'Today 21:41', dice: 25, s: 6, b: 4, push: 1, open: false },
+        { when: 'Today 21:41', dice: 30, s: 10, b: 4, push: 0, open: false },
         { when: 'Today 21:22', dice: 12, s: 3, b: 1, push: 0, open: false },
         { when: 'Today 20:58', dice: 8, s: 1, b: 2, push: 2, open: false },
         { when: 'Today 20:14', dice: 16, s: 4, b: 0, push: 1, open: false },

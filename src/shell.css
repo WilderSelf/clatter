@@ -244,6 +244,14 @@ body {
   white-space: nowrap;
 }
 
+/* The artifact tile is the one tile whose value is a pair of die sizes, and
+   `d12 + d12` is wider than a phone tile holds at 21 px. This tile alone may
+   wrap, so the pool bar never makes the screen wider than the phone. Measured
+   at 360 px: the pair needs 98 px of a tile that gives 84 px. */
+[data-el='pool-cell-artifact'] .cell-n {
+  white-space: normal;
+}
+
 .cell-n.zero {
   color: #a9a296;
   font-weight: 400;
