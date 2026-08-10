@@ -1,26 +1,30 @@
 // @vitest-environment jsdom
 //
-// The history destination — Unit 4.4.
+// The history destination — Units 4.4, 4.5 and 4.6.
 //
-// Four claims live here and each one needs a document: the summary holds
-// exactly the two controls the design names, the list is a composite the arrow
-// keys walk, the seven-day note reaches the player, and the player's own note is
-// text and never markup.
+// Each claim here needs a document: the summary and the record hold exactly the
+// controls the design names, the list is a composite the arrow keys walk, the
+// transposed matrix is a real table with the cell count and the blank count row
+// 2.2d of `LEDGER.md` fixes, the export writes the bytes the chunked writer
+// builds, the import refuses a file on its own size, and the player's own note
+// is text and never markup.
 //
 // **The control list is READ from `docs/design/0002-screen-design.md`**, from
 // the subsection "The history is a separate destination", and never restated
 // here. A design that renamed a control turns this file red rather than passing
 // against a copy of the old name.
 //
-// What is NOT here: whether the entries reached IndexedDB. A rendered list can
-// agree with the state that fed it, so the store is read back in a real browser
-// by `node scripts/browser.mjs --history`.
+// What is NOT here: whether the entries reached IndexedDB, and whether the file
+// the browser saved is the file the writer built. A rendered list can agree with
+// the state that fed it, so the store is read back and the download is
+// intercepted in a real browser by `node scripts/browser.mjs --history`.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { csvParts, exportCsvInChunks, MAX_IMPORT_BYTES } from '../log/csv';
 import type { LogEntry } from '../log/entry';
 import { PUSH_PROFILES } from '../rules/push-profile';
 import {
@@ -28,6 +32,7 @@ import {
   History,
   historyRows,
   logCountLine,
+  recordMatrix,
   rollWhen,
   rulesetName,
   SEVEN_DAY_NOTE,
@@ -84,18 +89,122 @@ function entry(at: number, over: Partial<LogEntry> = {}): LogEntry {
   };
 }
 
+/**
+ * A pushed roll, of the shape `createLogEntry` writes.
+ *
+ * Every case the matrix has to draw is in it and each one is named:
+ *
+ * - `At1` locks at the first throw, so the two later cells are its carry.
+ * - `Sk1` locks at the second, so the third cell is its carry.
+ * - `Ge1` never locks, so all three cells are throws.
+ * - `St1` joins at the second generation, so its first cell is absent.
+ *
+ * A locked die repeats its own value, which `specs/0001-rules-model.md`
+ * requires and which the check below asserts over the fixture rather than
+ * trusting.
+ */
+function pushedEntry(over: Partial<LogEntry> = {}): LogEntry {
+  return entry(7, {
+    dice: [
+      {
+        type: 'attribute',
+        faces: 6,
+        cells: [
+          { value: 6, successes: 1, locked: true },
+          { value: 6, successes: 1, locked: true },
+          { value: 6, successes: 1, locked: true },
+        ],
+      },
+      {
+        type: 'skill',
+        faces: 6,
+        cells: [
+          { value: 3, successes: 0, locked: false },
+          { value: 6, successes: 1, locked: true },
+          { value: 6, successes: 1, locked: true },
+        ],
+      },
+      {
+        type: 'gear',
+        faces: 6,
+        cells: [
+          { value: 2, successes: 0, locked: false },
+          { value: 4, successes: 0, locked: false },
+          { value: 1, successes: 0, locked: false },
+        ],
+      },
+      {
+        type: 'stress',
+        faces: 6,
+        cells: [
+          null,
+          { value: 2, successes: 0, locked: false },
+          { value: 1, successes: 0, locked: false },
+        ],
+      },
+    ],
+    successes: 2,
+    banes: 2,
+    pushCount: 2,
+    ...over,
+  });
+}
+
+/**
+ * The blank cells of one entry, counted straight off the stored cells.
+ *
+ * This is the SECOND count row 2.2d asks for. It never reads the matrix and
+ * never reads the document: it walks the entry with its own loop, so a matrix
+ * that agreed with itself still fails against it.
+ */
+function blanksIn(held: LogEntry): { cells: number; kept: number; absent: number } {
+  const generations = held.dice.reduce((longest, die) => Math.max(longest, die.cells.length), 0);
+  let kept = 0;
+  let absent = 0;
+  for (const die of held.dice) {
+    for (let generation = 0; generation < generations; generation += 1) {
+      const cell = die.cells[generation] ?? null;
+      if (cell === null) {
+        absent += 1;
+        continue;
+      }
+      const before = generation === 0 ? null : (die.cells[generation - 1] ?? null);
+      if (before !== null && before.locked) kept += 1;
+    }
+  }
+  return { cells: held.dice.length * generations, kept, absent };
+}
+
 let root: HTMLElement | null = null;
+let imported: (readonly LogEntry[])[] = [];
+let importAnswer: string | null = null;
 
 function mount(entries: readonly LogEntry[], failure: string | null = null): HTMLElement {
   root = document.createElement('div');
   document.body.appendChild(root);
   act(() =>
     render(
-      <History entries={entries} failure={failure} onBack={() => undefined} />,
+      <History
+        entries={entries}
+        failure={failure}
+        onBack={() => undefined}
+        onImport={(held) => {
+          imported.push(held);
+          return Promise.resolve(importAnswer);
+        }}
+      />,
       root as HTMLElement,
     ),
   );
   return root;
+}
+
+/** Open the record of the newest roll, the way a player does. */
+function openRecord(): HTMLElement {
+  const row = element('history-row-0');
+  row.focus();
+  press(row, 'Enter');
+  return element('history-record');
 }
 
 afterEach(() => {
@@ -104,6 +213,9 @@ afterEach(() => {
     root.remove();
     root = null;
   }
+  imported = [];
+  importAnswer = null;
+  vi.restoreAllMocks();
 });
 
 function element(name: string): HTMLElement {
@@ -210,7 +322,12 @@ describe('the history summary', () => {
     expect(document.querySelector('[data-el="history-list"]')).toBeNull();
     // The focus never lands on nothing: the record takes it on its back button.
     expect((document.activeElement as HTMLElement).dataset.el).toBe('back-button');
-    expect(tabStops(document.body).map((each) => each.dataset.el)).toEqual(['back-button']);
+    // The record holds its own two controls, read out of the design.
+    expect(
+      tabStops(document.body)
+        .map((each) => each.dataset.el)
+        .sort(),
+    ).toEqual(designControls('Record').names.slice().sort());
   });
 
   it('says what a phone does to the log, and prompts an export', () => {
@@ -247,7 +364,18 @@ describe('the history summary', () => {
     mount([]);
     expect(document.querySelector('[data-el="history-list"]'), 'no dead tab stop').toBeNull();
     expect(element('history-empty').textContent).toContain('No roll is in the log');
-    expect(tabStops(document.body).map((each) => each.dataset.el)).toEqual(['back-button']);
+    // Every summary control except the list, which an empty log does not draw.
+    // The import stays, because an empty log is the state a player imports from.
+    expect(
+      tabStops(document.body)
+        .map((each) => each.dataset.el)
+        .sort(),
+    ).toEqual(
+      designControls('Summary')
+        .names.filter((name) => name !== 'history-list')
+        .slice()
+        .sort(),
+    );
   });
 
   it('says why the log did not open, in a live region', () => {
@@ -258,14 +386,11 @@ describe('the history summary', () => {
   });
 });
 
-describe('the record shell', () => {
+describe('the record', () => {
   it('reads the stored values of the roll and derives none of them', () => {
     const one = entry(2, { successes: 9, banes: 6, pushCount: 2, stressBefore: 3, stressAfter: 5 });
     mount([one]);
-    const row = element('history-row-0');
-    row.focus();
-    press(row, 'Enter');
-    const record = element('history-record');
+    const record = openRecord();
     const readings = new Map(
       [...record.querySelectorAll<HTMLElement>('[data-reading]')].map((pair) => [
         pair.dataset.reading ?? '',
@@ -287,9 +412,307 @@ describe('the record shell', () => {
     expect(readings.get('Cost')).toBe(costReading(one.costAmount, one.costType));
     expect(readings.get('Cost')).not.toContain('complicationCheck');
     expect(readings.get('Thrown')).toBe(rollWhen(one.timestampIso));
-    // Unit 4.5 owns the transposed matrix and the export control. Neither is
-    // here, and the ledger row says so.
-    expect(document.querySelector('[data-el="export-button"]')).toBeNull();
+  });
+
+  it('holds exactly the controls the design names for it, and no third', () => {
+    const wanted = designControls('Record');
+    mount([pushedEntry()]);
+    openRecord();
+    const stops = tabStops(document.body);
+    expect(
+      stops.map(compositeOf).slice().sort(),
+      'the record holds the design’s two controls, and no third',
+    ).toEqual(wanted.names.slice().sort());
+    expect(stops.length).toBe(wanted.count);
+    // Every control carries a role, an accessible name and a state. A button is
+    // its own role, so the three readings are the tag, the text and `disabled`.
+    for (const stop of stops) {
+      expect(stop.tagName, `${stop.dataset.el ?? ''} carries a role`).toBe('BUTTON');
+      expect((stop.textContent ?? '').trim().length, 'an accessible name').toBeGreaterThan(0);
+      expect(stop.getAttribute('aria-disabled'), 'a state a reader can announce').toBe('false');
+    }
+    // The list is gone with the summary, so the record is not the summary with
+    // a second view drawn beside it.
+    expect(document.querySelector('[data-el="history-list"]')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The transposed matrix — Unit 4.5, carrying the two acceptances of row 2.2d
+//
+// Both counts are taken twice and the second count never reads the matrix. One
+// walks the entry for the product, the other walks the entry for the blanks,
+// and both are compared against what the DOM drew.
+// ---------------------------------------------------------------------------
+
+describe('the transposed matrix', () => {
+  it('holds exactly dice by generations cells, with the product taken off the entry', () => {
+    const held = pushedEntry();
+    mount([held]);
+    openRecord();
+    const table = element('history-matrix');
+    const cells = table.querySelectorAll('tbody td');
+    const rows = table.querySelectorAll('tbody tr');
+    const columns = table.querySelectorAll('thead th[scope="col"]');
+
+    // The product is computed off the STORED entry, never off the matrix.
+    const generations = held.dice.reduce((longest, die) => Math.max(longest, die.cells.length), 0);
+    expect(generations, 'the fixture is a pushed roll').toBeGreaterThan(1);
+    expect(held.dice.length, 'the fixture holds dice').toBeGreaterThan(0);
+    expect(cells.length, 'one cell per die per generation').toBe(held.dice.length * generations);
+    expect(rows.length, 'one row per die — the matrix is transposed').toBe(held.dice.length);
+    // The corner header is a column header too, so the count is one over.
+    expect(columns.length, 'one column per generation, plus the die column').toBe(generations + 1);
+  });
+
+  it('draws exactly the locked-or-absent pairs blank, counted a second way', () => {
+    const held = pushedEntry();
+    mount([held]);
+    openRecord();
+    const table = element('history-matrix');
+    const drawn = {
+      blank: table.querySelectorAll('tbody td[data-blank]').length,
+      kept: table.querySelectorAll('tbody td[data-cell="kept"]').length,
+      absent: table.querySelectorAll('tbody td[data-cell="absent"]').length,
+      thrown: table.querySelectorAll('tbody td[data-cell="thrown"]').length,
+    };
+    const wanted = blanksIn(held);
+    expect(wanted.kept, 'the fixture holds a die that locked early').toBeGreaterThan(0);
+    expect(wanted.absent, 'the fixture holds a die that joined mid-roll').toBeGreaterThan(0);
+    expect(drawn.kept, 'a cell that repeats a locked die').toBe(wanted.kept);
+    expect(drawn.absent, 'a cell of a die that did not exist yet').toBe(wanted.absent);
+    expect(drawn.blank, 'the blank count is the locked-or-absent count').toBe(
+      wanted.kept + wanted.absent,
+    );
+    // The two kinds partition the cells, so a cell counted twice or missed
+    // fails here as well.
+    expect(drawn.blank + drawn.thrown).toBe(wanted.cells);
+
+    // A cell drawn as a carry must really be a carry: the model repeats the
+    // value of a locked die, so the two values agree.
+    const matrix = recordMatrix(held);
+    let carries = 0;
+    for (const [index, row] of matrix.rows.entries()) {
+      for (const [generation, cell] of row.cells.entries()) {
+        if (cell.kind !== 'kept') continue;
+        carries += 1;
+        expect(cell.value, `${row.tag} at generation ${generation} repeats its own value`).toBe(
+          held.dice[index]?.cells[generation - 1]?.value,
+        );
+      }
+    }
+    expect(carries).toBe(wanted.kept);
+  });
+
+  it('is a real table, so a screen reader reaches a cell by its row and its column', () => {
+    const held = pushedEntry();
+    mount([held]);
+    openRecord();
+    const table = element('history-matrix');
+    expect(table.tagName).toBe('TABLE');
+    expect(table.getAttribute('role')).toBe('table');
+    expect(
+      (table.querySelector('caption')?.textContent ?? '').length,
+      'the table is named',
+    ).toBeGreaterThan(0);
+
+    const columnIds = new Set(
+      [...table.querySelectorAll('thead th[scope="col"]')].map((each) => each.id),
+    );
+    const rowIds = new Set([...table.querySelectorAll('tbody th[scope="row"]')].map((h) => h.id));
+    expect(columnIds.size, 'every column header carries its own identifier').toBe(
+      table.querySelectorAll('thead th[scope="col"]').length,
+    );
+    expect(rowIds.size).toBe(held.dice.length);
+    for (const head of table.querySelectorAll('thead th[scope="col"]')) {
+      expect(head.getAttribute('role')).toBe('columnheader');
+    }
+    for (const head of table.querySelectorAll('tbody th[scope="row"]')) {
+      expect(head.getAttribute('role')).toBe('rowheader');
+    }
+
+    // Every cell names one row header and one column header, and both exist.
+    const cells = [...table.querySelectorAll<HTMLElement>('tbody td')];
+    let reachable = 0;
+    for (const cell of cells) {
+      expect(cell.getAttribute('role')).toBe('cell');
+      const named = (cell.getAttribute('headers') ?? '').split(' ').filter(Boolean);
+      expect(named.length, 'a cell names two headers').toBe(2);
+      if (rowIds.has(named[0] ?? '') && columnIds.has(named[1] ?? '')) reachable += 1;
+      expect(
+        (cell.getAttribute('aria-label') ?? '').length,
+        'a cell says what it is',
+      ).toBeGreaterThan(0);
+    }
+    // The denominator is the cell count, and it is not zero.
+    expect(cells.length).toBeGreaterThan(0);
+    expect(reachable, 'every cell is reachable by its row and its column').toBe(cells.length);
+
+    // Section 3 lists the matrix under the read-only parts, so nothing inside
+    // it holds a tab stop.
+    expect(tabStops(table).length, 'the matrix is read-only').toBe(0);
+  });
+
+  it('names each generation, and the first one is the throw', () => {
+    const matrix = recordMatrix(pushedEntry());
+    expect(matrix.columns.map((column) => column.head)).toEqual(['Throw', 'Push 1', 'Push 2']);
+    // A logged die carries no identifier, so the tag is counted inside its type
+    // over the order the roll holds.
+    expect(matrix.rows.map((row) => row.tag)).toEqual(['At1', 'Sk1', 'Ge1', 'St1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The export — Unit 4.5
+// ---------------------------------------------------------------------------
+
+describe('the export control', () => {
+  it('writes the whole log, byte for byte what the chunked writer builds', async () => {
+    const log = [entry(0), pushedEntry(), entry(2, { note: '=1+1' })];
+    // jsdom has no object-URL support, so the two calls are counted here and
+    // the blob the page handed over is kept.
+    const offered: Blob[] = [];
+    const names: string[] = [];
+    const url = globalThis.URL as unknown as {
+      createObjectURL?: (blob: Blob) => string;
+      revokeObjectURL?: (url: string) => void;
+    };
+    url.createObjectURL = (blob: Blob): string => {
+      offered.push(blob);
+      return 'blob:test';
+    };
+    url.revokeObjectURL = (): void => undefined;
+    const clicked = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      names.push(this.download);
+    });
+
+    mount(log);
+    openRecord();
+    const button = element('export-button');
+    expect(button.textContent).toContain('3 rolls');
+    await act(async () => {
+      button.click();
+      await new Promise((done) => setTimeout(done, 20));
+    });
+
+    expect(clicked, 'the browser was asked to save a file').toHaveBeenCalledTimes(1);
+    expect(offered.length).toBe(1);
+    expect(names[0]).toMatch(/^clatter-log-\d{4}-\d{2}-\d{2}-\d{4}\.csv$/);
+    const written = await (offered[0] as Blob).text();
+    // The oracle is the writer itself, over the same log, and the comparison is
+    // byte for byte and not length alone.
+    const wanted = await (await exportCsvInChunks(log)).blob.text();
+    expect(written.length, 'the file is not empty').toBeGreaterThan(0);
+    expect(written.length).toBe(wanted.length);
+    expect(written).toBe(wanted);
+    // And it is the whole log, not the roll on the screen.
+    expect(written).toBe(csvParts(log).join(''));
+    for (const held of log) {
+      expect(written, `${held.rollId} is in the file`).toContain(held.rollId);
+    }
+    expect(element('history-message').textContent).toContain('3 rolls');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The import — Unit 4.6
+// ---------------------------------------------------------------------------
+
+describe('the import control', () => {
+  /** Hand the picker a file, the way a file picker does. */
+  async function pick(file: { name: string; size: number; text: () => Promise<string> }) {
+    const input = element('import-file') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 20));
+    });
+  }
+
+  it('opens the picker from the button, and the picker is no tab stop of its own', () => {
+    mount([entry(0)]);
+    const input = element('import-file') as HTMLInputElement;
+    const opened = vi.spyOn(input, 'click').mockImplementation(() => undefined);
+    expect(input.tabIndex, 'the picker is not in the tab order').toBeLessThan(0);
+    expect(input.getAttribute('type')).toBe('file');
+    expect(input.getAttribute('accept')).toContain('csv');
+    element('import-button').click();
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands a read log to the application, and says how many rolls arrived', async () => {
+    const log = [entry(0), pushedEntry()];
+    const text = csvParts(log).join('');
+    mount([entry(9)]);
+    await pick({
+      name: 'campaign.csv',
+      size: new TextEncoder().encode(text).length,
+      text: () => Promise.resolve(text),
+    });
+    expect(imported.length, 'the application was handed the rolls once').toBe(1);
+    expect(imported[0]).toEqual(log);
+    expect(element('history-message').textContent).toContain('2 rolls');
+    expect(element('history-message').textContent).toContain('campaign.csv');
+  });
+
+  it('refuses an oversized file on its own size, and never reads it', async () => {
+    let reads = 0;
+    mount([entry(0)]);
+    await pick({
+      name: 'huge.csv',
+      size: MAX_IMPORT_BYTES + 1,
+      text: () => {
+        reads += 1;
+        return Promise.resolve('');
+      },
+    });
+    expect(reads, 'a refused file is never read').toBe(0);
+    expect(imported.length, 'nothing reached the store').toBe(0);
+    const said = element('history-message').textContent ?? '';
+    expect(said, 'the refusal names its cause').toContain('too large');
+    expect(said).toContain('32.0 MB (33554433 bytes)');
+    expect(said).toContain('The limit is 32.0 MB (33554432 bytes)');
+  });
+
+  it('says why a file that is not a log did not import', async () => {
+    mount([entry(0)]);
+    await pick({
+      name: 'shopping.csv',
+      size: 20,
+      text: () => Promise.resolve('name,age\r\nada,36\r\n'),
+    });
+    expect(imported.length).toBe(0);
+    expect(element('history-message').textContent).toContain('not a log this application wrote');
+  });
+
+  it('says why the store refused a log that read cleanly', async () => {
+    const text = csvParts([entry(0)]).join('');
+    importAnswer = 'The storage is full. The log was not replaced.';
+    mount([entry(9)]);
+    await pick({
+      name: 'campaign.csv',
+      size: new TextEncoder().encode(text).length,
+      text: () => Promise.resolve(text),
+    });
+    expect(imported.length).toBe(1);
+    expect(element('history-message').textContent).toBe(importAnswer);
+  });
+
+  it('draws the message as text, whatever the file called its columns', async () => {
+    // Constraint 8. A refusal quotes the file, and a file is user-supplied.
+    const risky = '<img src=x onerror=1>';
+    mount([entry(0)]);
+    await pick({
+      name: 'x.csv',
+      size: 40,
+      text: () => Promise.resolve(`${risky},age\r\n`),
+    });
+    const said = element('history-message');
+    expect(said.textContent).toContain(risky);
+    expect(said.querySelectorAll('*').length, 'the markup made no element').toBe(0);
+    expect(document.querySelectorAll('[data-el="history"] img').length).toBe(0);
   });
 });
 

@@ -1099,6 +1099,27 @@ export function App({
     });
   };
 
+  /**
+   * Put an imported log in place of the stored one — Unit 4.6.
+   *
+   * The store belongs to the application, so the destination hands the rolls
+   * over rather than opening a second connection. The list is read back OUT OF
+   * THE STORE afterwards and never out of the rolls that went in, so what the
+   * player sees is the log the database holds.
+   */
+  const importLog = async (imported: readonly LogEntry[]): Promise<string | null> => {
+    const held = await rollLog.current;
+    if (held === null) return LOG_FAILURE_TEXT.error;
+    const written = await held.replace(imported);
+    if (written.kind !== 'written') {
+      return written.kind === 'full'
+        ? 'The storage is full. The log was not replaced. Clear some space and import again.'
+        : LOG_FAILURE_TEXT.error;
+    }
+    setRolls(await held.rolls());
+    return null;
+  };
+
   // The focus on the way back from the history.
   //
   // It is an effect and not a line inside the handler, because the roll flow is
@@ -1155,6 +1176,7 @@ export function App({
         // control that led here. The effect above moves it, because the roll
         // flow is not in the document yet at this point.
         onBack={() => setHistoryOpen(false)}
+        onImport={importLog}
       />
     );
   }

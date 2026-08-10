@@ -62,6 +62,243 @@ Status table for each unit. Every unit appends one row after it lands.
 | 3.5 | Locked-dice affordance — the screen half. **Closes Unit 3.5, and puts the 3D tray to work in the application.** | Done | #11 | The 3D tray now draws the result inside the application. Three blockers Unit 3.7 named are closed. **1. The push defect.** `pushPool` in `src/tray/throw.ts` spawns the die a profile adds before the re-throw, through `box.add`, on the value the core decided, and it never throws that die twice. The library appends, so the added die takes the index after every die on the tray and the returned order says so. Two answers to "which die is new" — the set the tray does not hold, and `PushedRoll.stressAdded` — must agree, so a stale order fails by name. **2. The screen half.** Decision 9 of `docs/design/0012-settled-decisions.md`: the die cells are real DOM in both renderers, and over the 3D table they lie on the die each one names, draw no die of their own, and take no pointer. `dice-tray` is still ONE control with a roving tab index, and section 6 still reads 11 visits before the throw and 35 after it in BOTH instruments, with the 3D table running. **3. The click route.** A press with the pointer falls through to the raycast of Unit 3.5, which refuses a rule lock. **A defect the render found and no green suite could:** the library draws one last frame when a throw ends and none at all for a click, so a lock mark added after that frame kept the matrix of the frame before and the player saw the marks of the previous throw standing where the previous dice stood, up to 682 world units away. `drawMarkers` now draws the frame that shows them. `node scripts/browser.mjs --table` is the new mode and it exits 0 at `checks=9 failures=0 skipped=0` on the graphics card: `compared=30 of a pool of 30` up-faces read off the body quaternions against the faces the screen printed, `placed=30 of 30` cells inside 1 px of a centroid the harness projects itself, 23 dice answered a real Enter and 7 refused it, `reached=30 unreachable=0` under a real pointer click, and the push took the table from 30 dice to 31 with `die-st11` spawned and every kept die inside 1 px of where it lay. Nine injections were proved red and every file was restored by editing the injection back. Initial JavaScript 16,355 to 18,944 gzip bytes; the lazy 3D chunk unchanged at 151,876; the three render counters unchanged at 841, 842 and 77. See the notes under this table. |
 | 4.3 | Saved pool presets — the list on the screen. **Unit 4.3 is now complete.** | Done | #13 | `sheet-presets` names a pool, recalls one, reorders the list and deletes a row, behind the one disclosure. **Decision 11 of `docs/design/0012-settled-decisions.md` settles where it lives**, and three reasons put it there: a recall writes over every tile of the built pool, which is the hazard `sheet-mode` already sits behind; a control in the builder would rewrite the drawn screen the owner approved at Unit 2.0 and both keyboard walks of section 6; and saving is rare where building is constant. **Section 3 is untouched at five controls at each rest state against a ceiling of eight**, and that is measured rather than claimed: the inventory check still counts the eight named controls, and a second check reads both rest states and finds no part of the panel there. Section 6 still reads eleven visits before the throw and thirty-five after it, in both instruments. **The rules core is the oracle for the recall.** The recalled pool is thrown and every face is compared against `firstRoll` over the pool the store holds, 13 dice compared face for face, and no record is compared to a record. **The reorder is asserted over three presets in both instruments**, because a move of one of two is not observable, and the browser half moves a row with a real Enter press. **The name is user text and no parser ever sees it.** A name of 54 code points holding markup, both kinds of quote, an ampersand and an emoji draws as 54 code points of text, in a name element holding one node and no element, in a panel holding no element the markup could have made. Constraint 8. **Each of the four refusals reaches the player as a sentence that names its cause**, against a denominator read off the `PresetRefusal` union in the source of the store, so a fifth refusal fails the check until it has words and a route. Nothing is disabled to prevent a refusal, so both caps are reachable by hand: 60 emoji save and 61 are refused, and the twenty-first preset is refused while a replacement is still let through. The fourth refusal has a real route — a player who presses Delete twice before the list is drawn again — and the operations read the record out of a ref rather than out of the render that drew the row. **A stored pool the six tiles cannot hold is refused and says why**, rather than clamped: a count over a tile cap or an artifact list off the ladder is unwritable through the interface and reaches the store only by hand. **Step mode draws one sentence and no control**, because a saved pool holds counts. Every control carries a role, an accessible name that holds the name of the pool it acts on, and a state, and the list is walked with real Tab presses against a list derived from the panel itself. Vitest moves from 272 to 279 tests over 28 files. `node scripts/browser.mjs --sheet` moves from 7 checks to 11 and exits 0 at `checks=11 failures=0 skipped=0`. Initial JavaScript moves from 21,152 to 22,532 gzip bytes; the lazy 3D chunk is unchanged at 151,876. Branding gate `files_scanned=124`, `hits=0`, exit 0. Thirteen injections were proved red and every one was restored by editing the injection back. See the notes under this table. |
 | 4.4 | Roll log — the screen half: a roll writes an entry, and the history destination reads it | Done. The record view is a shell for Unit 4.5. | #14 | Every roll and every push now reaches IndexedDB through `LogWriter`, and `sheet-history` opens the history destination. **The log's shape decides the write, and the decision is stated: ONE entry per roll, rewritten by every push.** `createLogEntry` takes a whole `RollResult` whose dice carry one value per generation, it derives `pushCount` from the number of generations, and `src/log/csv.ts` rejects a file where one `roll_id` appears twice, so a second entry per push would export a file the application refuses to read back. `src/shell/roll-log.ts` opens the entry on a roll and rewrites it in place on a push, at the key the store acknowledged the insert with. `replaceRoll` in `src/log/store.ts` does that in ONE transaction and checks the key still exists inside it, so a `put` at a trimmed key cannot put a dropped roll back below the oldest. No second store was built. **`profileHash` no longer needs node.** The store half recorded `node:crypto` as unavailable in a browser and named this unit as the one that would settle it. `src/log/sha256.ts` is one synchronous implementation that names no platform API, so the test runner and the browser produce the same digest, and `src/log/sha256.test.ts` holds it against `node:crypto` over every length to 200 bytes and against the published FIPS 180-4 vectors. The pinned digest in `src/log/entry.test.ts` did not move, and the browser wrote `0b489af6...` for the second preset, which is the digest the pure half recorded. **The write is read back out of the database, never out of the queue.** `node scripts/browser.mjs --history` opens its own connection to `clatter-log` and counts: 4 presses on Roll and 6 on Push put 4 entries under 4 distinct roll ids, whose stored push counts sum to 6 and whose stored generations sum to 6. Three counts, one denominator. **The list is counted twice, so the two can disagree.** The summary length is read off the screen and off a second connection to the store at each of three rounds: 1/1/1, 2/2/2, 3/3/3. **The rules core is the oracle for the entry.** `src/shell/roll-log.test.ts` throws a roll and two pushes, then compares every cell of every die and every generation against `score` and `isLocked` under the profile in force, 48 cells against a count taken a second way off the live result, plus the roll-level values against `successCount`, `baneCount`, `generations` and `pushCost`. **The hash is the profile the roll ran under.** The preset changes between two rolls, Decision 10 takes the table from 3 dice to 0, and the two entries carry two distinct digests and name two rule sets. **The destination is a route and not an overlay.** Decision 12 of `docs/design/0012-settled-decisions.md` records it: the roll flow leaves the document, so section 6 still reads eleven visits before the throw and thirty-five after it, in BOTH instruments, with both lists read out of the design. The summary holds exactly `back-button` and `history-list`, read out of section 3 of the design and never restated, and `history-list` is one composite with a roving tab index, 1 of 3 options carrying it, every option holding a role, an accessible name and a state, and no option under the 24 px floor. A real Enter opens the record and the focus lands on `back-button`. **The seven-day note reaches the player**, at `history-storage-note` with `role="note"`, drawing 752x54 px, and it names the seven days, the home screen and the export the plan asks for. **The storage estimate reaches the settings sheet** at `sheet-storage-estimate`, a live region with no tab stop, reading 0.7 MB against the 0.7 MB `navigator.storage.estimate()` answered that run. **A log note is user text and no parser sees it**, drawn through `textContent` in an element holding one node and no element. Constraint 8. Vitest moves from 279 to 302 tests over 31 files. `node scripts/browser.mjs --history` is the new mode at `checks=8 failures=0 skipped=0`, and `--log-store` moves from 13 checks to 13 with one instrument made stronger. Initial JavaScript moves from 22,532 to 28,155 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Eleven injections were proved red and every one was restored by editing the injection back. The captures are `docs/design/0016-history-360.png`, `0016-history-1440.png`, `0016-history-record-360.png` and `0016-history-record-1440.png`. **Open, and owed by Unit 4.4:** nothing. **Left for Unit 4.5:** the transposed matrix and `export-button` inside `history-record`, with the two acceptances row 2.2d carries. See the notes under this table. |
+| 4.5 | CSV export — the record view, the transposed matrix and the export control. **Unit 4.5 is now complete, with one owner decision open.** | Done. `BLOCKED:budget` on the import cap. | #15 | `history-record` now holds the transposed matrix of Decision 3 and `export-button`, which closes the open half of Unit 4.5 and carries the two acceptances row 2.2d holds. **The matrix is one row per die and one column per generation**, a real `<table>` with a caption, `scope="col"` and `scope="row"` headers, and a `headers` attribute on every cell naming one row header and one column header, so a screen reader reaches a cell by its row and its column and not by its text. It holds no tab stop, because section 3 lists it under the read-only parts. **Both 2.2d acceptances are counted twice and neither count reads the matrix.** The cell count is the product taken off the stored entry — 18 cells against 9 dice by 2 generations, read back through the harness's own connection to IndexedDB — and the blank count is a second loop over the same stored cells: a die locked at the generation before carries its value forward, and a die that did not exist yet is absent. Both blank kinds are guaranteed by the fixture and not left to the faces: the run keeps one die by hand before the push, and the third rule set adds a stress die BEFORE the re-roll. Every carry is checked to be a carry, 5 of 5 repeating the value of the cell before it. **The export writes the WHOLE log**, and that is forced rather than chosen: Unit 4.6 settled that an import replaces the log, so a file of one roll would delete a campaign when it was read back. Decision 13 of `docs/design/0012-settled-decisions.md` records it, and the button prints the roll count it will write. **The file is compared byte for byte.** The harness intercepts `URL.createObjectURL`, which is the browser's own call, and compares the blob the button handed over against what `exportCsvInChunks` builds IN NODE from the rolls a separate connection read out of the store: 5,200 bytes against 5,200, 5,200 bytes compared, no difference, and 2 of 2 roll identifiers in the file. A log of one roll could not tell a whole-log export from a one-roll one, so the fixture throws two. **The record capture found a layout defect the green suite did not.** Drawn under the eight readings, the matrix sat below the fold of a 360 px screen, which is the width Decision 3 transposed it for. The matrix now comes first and the readings are compact. Captures `docs/design/0017-history-record-360.png` and `0017-history-record-1440.png`. **A manual keep made after the final generation and never pushed is not in the entry, and the matrix is not wrong for such a roll.** The matrix reads `locked` only at the generation BEFORE a cell, to decide whether that cell is a carry, so the newest generation's `locked` is never drawn. The stored field can still miss such a keep, and the export carries the entry unchanged; that is a limit of the entry and it belongs to Unit 4.4, which reported it. Vitest moves from 302 to 321 tests over 32 files. `--history` moves from 8 checks to 15 at `failures=0 skipped=0`, and `--log-csv` from 10 to 11. Initial JavaScript moves from 28,155 to 31,527 gzip bytes against the 61,440 in `budgets.json`; the lazy 3D chunk is unchanged at 151,876. Nine injections were proved red and every one was restored by editing the injection back. **Open, and it is the owner's:** `BLOCKED:budget` — a full-buffer export leaves 4.026 characters a row under the import cap. The arithmetic and the three priced options are in the notes under this table. |
+| 4.6 | CSV import — the file picker, the size guard and the message. **Unit 4.6 is now complete, less the error surface Unit 4.10 owns.** | Done. `BLOCKED:budget` on the import cap. | #15 | `import-button` sits in the footer of the history summary and opens a hidden file picker. Decision 13 records why it is there and not in the record: an import replaces the whole log, so it belongs beside the list of the whole log and not beside one roll, and the record then keeps the two controls section 3 names. The picker carries `tabindex="-1"` and `aria-hidden`, so the summary counts three controls and not four. **The size is judged on the FILE, before one byte of it is read.** `src/log/import-file.ts` refuses a file over `MAX_IMPORT_BYTES` from `File.size` and never calls `text()` on it. The proof is a call counter on the file's own `text`: a real `File` of 33,554,433 bytes went into the real picker, the patch is proved to have landed, and the control read the file 0 times. A guard that read `text.length` would have read it once, which is the injection that turns the check red. **The byte cap is not a second budget.** It is `MAX_IMPORT_CHARS`, and one number serves both because UTF-8 never spends fewer bytes than the string spends UTF-16 code units, so a file inside the byte cap is always inside the character cap. The inequality is asserted over a corpus covering all four UTF-8 lengths, not described. **The round trip runs through the real controls.** The file the export button wrote goes back in as a real `File` in a real `FileList` through `DataTransfer`: 136 leaf fields against 136 counted a second way, 0 differences, and the log back at 2 rolls. One extra roll is thrown between the export and the import, so an import that wrote nothing cannot pass — the marker roll must be gone. `RollLog.replace` writes it in ONE transaction through `appendRolls`, and it forgets the open roll, so a push after an import cannot `put` at a key an imported roll now holds. **The message is the smallest honest one, and Unit 4.10 still owes the rest.** `history-message` is a live region in both views and names the cause of every refusal: too large, empty, not a log this application wrote, a header with no roll, unreadable, and a store that refused the write. It quotes the file, so it is drawn as text and no parser sees it. Constraint 8. **What 4.10 owes:** a designed error surface rather than one sentence, a recovery route from a failed import, and the same treatment for the other three failures the plan names — a 3D chunk that will not load, an IndexedDB that will not open, and storage that is full. **Open, and it is the owner's:** `BLOCKED:budget`, the same one Unit 4.5 carries. See the notes under this table. |
+
+## Units 4.5 and 4.6 — the record, the matrix, the export and the import
+
+Unit 4.4 left `history-record` as a shell and named what it owed: the transposed matrix and
+`export-button`. Unit 4.6 was open at the import control. Both open halves land here, and row 2.2d
+travels with the matrix unchanged.
+
+### BLOCKED:budget — a full export nearly fills the import cap, and the owner decides
+
+Measured on 2026-08-10 through `node scripts/browser.mjs --log-csv`, on the graphics card with the
+sandbox off. **The plan's own figures are corrected by this run and the correction is small but it
+changes the answer.**
+
+| Reading | Value | Where it comes from |
+|---|---|---|
+| A full 5,000-roll buffer of twelve dice over three generations | 160,000 rows | the run counts the rows a second way, over the rolls |
+| The file it writes | 32,910,207 bytes, and the same number of characters | the notes are ASCII, so bytes equal characters |
+| The cap an import reads | 33,554,432 | `MAX_IMPORT_CHARS` and `MAX_IMPORT_BYTES`, one constant |
+| The room | 644,225 characters | the run subtracts, it is not retyped |
+| The room per row | 4.026 characters | 644,225 over 160,000 |
+| The note of the fixture roll | 21 characters | `a representative note` |
+| The note length that fills the cap | 26 characters | 21 plus 4.026, rounded up |
+
+**The plan says twenty-two characters and four more. The note is twenty-one and it takes five more,
+not four.** Four more characters is 640,000 and still fits with 4,225 to spare. Five more is 800,000
+and overflows by 155,775. `--note-chars 26` proves it: the file measures 33,710,207 bytes and both
+cap checks go red naming the deficit.
+
+Every row of the export repeats the roll's note, so the room is a note length and nothing else. Two
+further facts sharpen it:
+
+- **A note outside ASCII costs more than one byte a character.** The byte guard is the gate a real
+  import meets first, and an accented note reaches it sooner than the character cap.
+- **Nothing bounds the note.** `LogEntry.note` has no length limit anywhere, and no unit of the plan
+  has asked for one. The export size is therefore unbounded in a field the player writes, while the
+  cap is fixed.
+
+**The three options, priced. This is the owner's call and no agent may take it.**
+
+1. **Raise the cap.** One constant in `src/log/csv.ts`. It costs nothing to write. The cap exists so
+   an import refuses a file that would hold the parser for minutes, and `importCsv` is one pass over
+   the text, so the real cost is memory: the text, the parsed rows and the entries all live at once.
+   A cap of 64 MB would carry a note of about 220 characters at a full buffer. Nobody has measured
+   the parse of a 64 MB file on a phone, and this unit did not measure it either.
+2. **Cap the note.** A limit on `LogEntry.note` makes the export size a function of the row count
+   alone. At 160,000 rows the whole note budget is 4 characters a row, so any useful note needs the
+   cap raised as well. A note cap alone does not close the defect. It also needs an interface: no
+   note editor exists yet, which Unit 4.4 reported.
+3. **Split the export.** One file per N rolls, and an import that reads a set of files. It is the
+   only option that scales with the buffer rather than against it, and it is the most work: the
+   picker takes several files, the importer joins them, and the duplicate-`roll_id` rule has to hold
+   across the set.
+
+**Nothing was widened.** `budgets.json` is untouched, `MAX_IMPORT_CHARS` is untouched, and the gate
+that finds this is measured on every run rather than left to rot: two checks now read the real file,
+one against the character cap and one against the byte guard the import control applies.
+
+### The two acceptances of row 2.2d, and how each one can fail
+
+Row 2.2d carries them from Unit 2.2 unchanged. Decision 3 transposed the matrix, so they land here.
+
+**The cell count.** The product is computed off the stored entry, which the harness reads back
+through its own connection to IndexedDB, and compared against the cells the document drew: 18 cells
+against 9 dice by 2 generations. The fixture is a PUSHED roll, so a matrix of one column cannot
+pass. The two cell kinds are also summed against the whole, so a cell counted twice fails as well.
+
+**The blank count.** A cell is blank when the die did not exist yet, or when the die was locked at
+the generation before and this value is the carry of that one. The expectation is a second loop, in
+the harness and in `src/shell/history.test.tsx`, walking the stored cells. Neither loop reads the
+matrix. **Both blank kinds are guaranteed by the fixture rather than left to the dice:**
+
+- The run keeps one loose die by hand before it pushes, so a carry exists whatever the faces did.
+  Waiting for a six is 1 in 6 a die, and a run of eight dice would have found none about one time in
+  four.
+- The third rule set raises stress BEFORE the re-roll, so a stress die joins at the second
+  generation and its first cell is absent.
+
+**A carry is checked to BE a carry.** The rules model says a locked die repeats its previous value,
+so every cell the matrix draws as a dot is compared against the value of the cell before it: 5 of 5.
+A matrix that drew dots by some other rule would pass the count and fail this.
+
+### Where the import control went, and why the record still holds two controls
+
+Section 3 gives the record exactly `back-button` and `export-button`. It gave the summary two. An
+import had no home in either list, and Decision 13 records the two rejected options and the taken
+one. The summary now names three controls in its own table, and both instruments read that table
+rather than a copy of it, so the count moved in one place.
+
+The picker itself is not a control. It is an `input type="file"` with `tabindex="-1"` and
+`aria-hidden`, clipped off the screen rather than `display: none`, because a browser may refuse a
+scripted click on a control it does not render.
+
+### The export writes the log, and that is forced
+
+Decision 3 says where the control lives. It does not say what the file holds. Two things settle it
+and neither is a preference: Unit 4.6 settled that an import REPLACES the log, so a file of one roll
+would delete a campaign when it was read back; and the plan's verification step 6 asks for an
+export, a spreadsheet pivot, a re-import and an unchanged log, which only a whole-log file gives.
+
+The check can fail on it: the fixture holds two rolls and the file must carry both identifiers. With
+one roll in the log the claim is unobservable, and the first draft of the check had exactly that
+hole — `entries.slice(0, 1)` passed until the fixture threw a second roll.
+
+### The oracle for the export runs in node, and why
+
+`--history` drives the BUILT bundle, which exports nothing, so the page cannot build the file a
+second way. The harness intercepts `URL.createObjectURL` — the browser's own call, not ours — keeps
+the blob, reads the rolls out of IndexedDB through its own connection, and runs `exportCsvInChunks`
+in node over them. The comparison is then a file one engine produced against a file another engine
+produced from the store, byte for byte, with the compared byte count as its own denominator. Node
+imports the `.ts` module directly, which it has done since type stripping was unflagged.
+
+`src/log/import-file.ts` cannot be imported in node, because it names a value from `./csv` and node
+does not resolve an extensionless specifier. So `MAX_IMPORT_BYTES` moved to `src/log/csv.ts`, beside
+the character cap it is derived from, and `import-file.ts` re-exports it. One home for the cap.
+
+### The size guard is an ORDER, and an order is only provable by counting
+
+"The size is judged before the file is read" is a claim about two calls, not about a value. Both
+instruments count the second call. `src/log/import-file.test.ts` hands over a file whose `text()`
+increments a counter and whose stated size is one over the cap while its text is a short, legal log:
+a guard that read first would parse it happily and pass. The browser half patches `text` on a real
+33 MB `File` and reports `patched=true` before it presses, so a run where the counter never attached
+fails rather than reporting a zero it could not have moved.
+
+### An instrument this unit repaired, and the reason it had been passing
+
+`--history` walked the summary after `document.activeElement?.blur()`. That does not move the
+sequential focus navigation starting point, and Firefox hands the focus to its own chrome after the
+last control rather than wrapping. The walk had been correct only because `back-button` happened to
+be the last control in the document. With `import-button` after it, the same walk reported one stop
+of three. It now uses the idiom `--shell` already had: focus the header with a temporary
+`tabindex="-1"`. **The failure was read before it was blamed** — the walk reported
+`tab_stops=[import-button]`, which is the stop AFTER the old focus, not a missing control.
+
+### A layout defect only the capture found
+
+The record drew the eight readings first and the matrix under them. At 360 px that put the matrix
+below the fold, on the width Decision 3 transposed it for, and one row of it was visible above the
+footer. Nothing in the suite could see it: every count was right and every role was right.
+
+The matrix now comes first, and the reading grid is compact — three columns at phone width instead
+of two, at 14 px instead of 17. The summary row the player pressed already carries the time, the
+successes, the banes, the dice count and the push count, so the dice are the only thing the record
+adds that the list cannot show. Captures `docs/design/0017-history-record-360.png` and
+`0017-history-record-1440.png`, both read after they were written.
+
+### The item Unit 4.4 handed on, judged
+
+**"A manual keep made after the final generation and never pushed is not in the entry."** It does
+not make the matrix wrong, and the reason is structural rather than lucky: the matrix reads `locked`
+only at the generation BEFORE a cell, to decide whether that cell is the carry of a locked die. The
+newest generation's `locked` is never drawn, so nothing on the screen can be wrong about it.
+
+The stored field can still miss such a keep, and the CSV `locked` column carries the entry unchanged,
+so the export inherits the same gap. That is a limit of the ENTRY and it belongs to Unit 4.4, which
+reported it. Closing it needs a write on a keep, which is a fourth trigger for the log and a decision
+about what a log entry means. No unit of the plan asks for it yet.
+
+### The red proofs
+
+Nine injections. Each file was copied outside the repository first and restored by editing the
+injection back, and `sha256sum -c` matched every file afterwards. No checkout and no stash touched
+any file. The last two are flags rather than edits, so nothing needed restoring.
+
+| # | The injection | The gate that went red |
+|---|---|---|
+| 1 | the matrix drops its last generation column | `one cell per die per generation: expected 8 to be 12`, and in the browser `drew 9 cells ... 9 dice by 2 generations is 18 cells` |
+| 2 | a locked die never draws its carry | `a cell that repeats a locked die: expected +0 to be 3`, and in the browser `1 cells were drawn blank against 3 counted a second way` |
+| 3 | a cell names its row header alone | `a cell names two headers: expected 1 to be 2`, and in the browser `0 of its 18 cells name one row header and one column header` |
+| 4 | a third control in the record footer | `the record holds the design’s two controls, and no third`, and in the browser `reached [back-button print-button export-button] against the [back-button export-button]` |
+| 5 | the export writes the roll on the screen | `expected 576 to be 2974`, and in the browser `1807 bytes against the 5201 ... 1 of 2 roll identifiers are in it` |
+| 6 | the application takes the rolls and never writes them | `the log holds 3 against the 2 that went out` |
+| 7 | the guard reads the file, then judges the text length | `a refused file is never read: expected 1 to be +0`, and in the browser `The control read the file 1 times` |
+| 8 | the controls lose `aria-disabled` | `a state a reader can announce: expected null to be 'false'`, and in the browser `2 without an aria-disabled` |
+| 9 | `import-button` renamed, and separately hidden | `expected [ 'back-button', …(1) ] to deeply equal [ 'back-button', 'import-button' ]`, and with `hidden` the browser `reached [history-list back-button] against the [back-button history-list import-button]` |
+| 10 | `--note-chars 26` | both cap checks: `33710207 characters against the 33554432 an import reads, so -155775 characters of room` |
+
+**Injection 9 found a real limit of the jsdom instrument and it is left standing.** A `hidden`
+button keeps `tabIndex` 0 under jsdom, so the pure test cannot see it while the browser half, which
+presses a real Tab, can. That is the split working: the pure half asserts the markup and the browser
+half asserts the keyboard. The pure check was proved red by renaming the control instead.
+
+### Measurements
+
+| Command | Exit |
+|---|---|
+| `npm run lint` | 0 |
+| `npm run typecheck` | 0 |
+| `npm test` | 0, over 321 vitest tests in 32 files plus 20 node tests |
+| `npm run build` | 0 |
+| `npm run perf` | 0, 203 steps against the 224 in `budgets.json`, scene digest unchanged |
+
+Harness modes, all outside the sandbox on the graphics card, every one exit 0:
+
+    --history        checks=15 failures=0 skipped=0
+    --log-csv        checks=11 failures=0 skipped=0
+    --shell          checks=8  failures=0 skipped=0
+    --sheet          checks=11 failures=0 skipped=0
+    --table          checks=9  failures=0 skipped=0
+    --blocked-chunk  checks=11 failures=0 skipped=0
+    --offline        checks=8  failures=0 skipped=0
+    --log-store      checks=13 failures=0 skipped=0
+    --settings-store checks=6  failures=0 skipped=0
+    --tray           checks=7  failures=0 skipped=0
+    --pool           checks=7  failures=0 skipped=0
+    --push           checks=7  failures=0 skipped=0
+    --affordance     checks=9  failures=0 skipped=0
+    --probe          checks=5  failures=0 skipped=0
+    --context-loss   checks=5  failures=0 skipped=0
+    --reduced-motion checks=5  failures=0 skipped=0
+    --sound          checks=10 failures=0 skipped=0
+
+Section 6 reads eleven visits before the throw and thirty-five after it, in both instruments and in
+both renderers: `--shell` with the 3D table running, `--blocked-chunk` with the chunk refused, and
+`src/app.test.tsx` under jsdom. Both lists are read out of the design.
+
+The two bundle figures are read from `dist/` by `scripts/check-bundle-size.mjs` against
+`budgets.json`: initial JavaScript 31,527 gzip bytes and the lazy 3D chunk 151,876, both inside
+their budgets. The initial figure rose because the history destination now imports `src/log/csv.ts`,
+which the roll flow did not. It was not made a lazy chunk: `--blocked-chunk` proves the application
+whole with the one lazy chunk refused, and a second one would need the same treatment.
+
+### Reported, not fixed
+
+- **The export control sits in the record and writes the whole log.** Decision 3 puts it there. A
+  player who opens one roll and presses Export gets every roll. The button says so, and the design
+  document says so, but the placement is the design's and this unit did not move it.
+- **The seven-day note is drawn in the record as well as in the summary.** It is Unit 4.4's
+  placement and it costs the record about a fifth of a phone screen. Moving it is an interface
+  change that no unit has asked for.
+- **The matrix stretches its columns at 1440 px.** A roll of two generations gives two very wide
+  columns. It is cosmetic and no check reads it.
+- **`--history` now takes about two minutes.** It throws, pushes, exports, imports and refuses a
+  33 MB file. Nothing in it waits on a fixed clock.
 
 ## Unit 4.4 — the screen half: the roll log reaches the screen
 

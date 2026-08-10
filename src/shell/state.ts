@@ -759,8 +759,15 @@ export function zonesOf(state: AppState): {
   };
 }
 
-/** The short name a die carries on the table, as `At1` or `St10`. */
-const TYPE_TAG: Readonly<Record<DieType, string>> = {
+/**
+ * The short name a die carries on the table, as `At1` or `St10`.
+ *
+ * The history matrix of Unit 4.5 reads the same record. A logged die carries no
+ * identifier — the export schema names a die by its position — so the record
+ * builds the tag from the type and the ordinal inside that type. One name per
+ * thing, so the tray and the matrix never call one die two things.
+ */
+export const DIE_TYPE_TAG: Readonly<Record<DieType, string>> = {
   attribute: 'At',
   skill: 'Sk',
   gear: 'Ge',
@@ -770,7 +777,7 @@ const TYPE_TAG: Readonly<Record<DieType, string>> = {
 };
 
 export function dieTag(die: Die): string {
-  return `${TYPE_TAG[die.type]}${die.id.slice(die.type.length + 1)}`;
+  return `${DIE_TYPE_TAG[die.type]}${die.id.slice(die.type.length + 1)}`;
 }
 
 /** The `data-el` name of one die, as section 6 fixes it: `die-at1`. */

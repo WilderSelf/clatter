@@ -32,6 +32,23 @@
 //   npm run build && node scripts/browser.mjs --sheet \
 //     --url http://localhost:4173/clatter/ --capture-shell docs/design
 //
+// `--history` needs `--url` over a preview server, because it drives the BUILT
+// bundle. It is the browser half of Units 4.4, 4.5 and 4.6: it writes rolls and
+// reads them back out of IndexedDB through its own connection, walks the summary
+// and the record with real key presses, judges the transposed matrix against the
+// stored entry, intercepts the file the export button hands the browser and
+// compares it byte for byte against `exportCsvInChunks` run in node, drives that
+// file back in through a real file picker, and refuses an oversized file while
+// counting the reads of it. `--capture-shell <dir>` writes four frames.
+// Build first, then run it alone:
+//   npm run build && node scripts/browser.mjs --history \
+//     --url http://localhost:4173/clatter/ --capture-shell docs/design
+//
+// `--note-chars <n>` pads the note of every fill roll in `--log-csv`. Every row
+// of the export repeats the note, so the note length is the field that moves the
+// file size by the row count. It is how the two import-cap checks are shown to
+// fail: the room a full export leaves is a few characters a row.
+//
 // `--shell` starts and stops its own preview server, for the same reason
 // `--offline` does. Build first, then run it alone:
 //   npm run build && node scripts/browser.mjs --shell \
@@ -43,7 +60,7 @@
 //     --url http://localhost:4173/clatter/
 //                            [--context-loss] [--reduced-motion] [--sound]
 //                            [--log-store] [--log-csv] [--settings-store]
-//                            [--long-task-ms <n>] [--quota-kb <n>]
+//                            [--long-task-ms <n>] [--quota-kb <n>] [--note-chars <n>]
 //                            [--capture-before <path>]
 //                            [--offset-kept <n>] [--viewport <w>x<h>[@<dpr>]]
 //                            [--price-ratios <a,b,c>] [--resize-to <w>x<h>]
@@ -3420,11 +3437,19 @@ async function countPersistCalls(page) {
   await page.reload({ waitUntil: 'load' });
 }
 
-async function bootLogStore(page, pageUrl) {
+async function bootLogStore(page, pageUrl, noteChars = 0) {
   const moduleUrl = new URL(LOG_STORE_MODULE, pageUrl).href;
   return page.evaluate(
-    async ({ moduleUrl, fillBatch }) => {
+    async ({ moduleUrl, fillBatch, noteChars }) => {
       const store = await import(moduleUrl);
+
+      // Every row of the export repeats the roll's note, so the note length is
+      // the one field that moves the file size by the row count. `--note-chars`
+      // pads it, which is how the two import-cap checks are shown to fail: the
+      // room a full export leaves is a few characters a row and no more.
+      const FIXTURE_NOTE = 'a representative note';
+      const note =
+        noteChars > FIXTURE_NOTE.length ? FIXTURE_NOTE.padEnd(noteChars, 'x') : FIXTURE_NOTE;
 
       /** A roll of the shape the log really holds: twelve dice, three generations. */
       const makeEntry = (writer, ordinal) => {
@@ -3458,7 +3483,7 @@ async function bootLogStore(page, pageUrl) {
           costAmount: 1,
           stressBefore: 0,
           stressAfter: 1,
-          note: 'a representative note',
+          note,
         };
       };
 
@@ -3498,7 +3523,15 @@ async function bootLogStore(page, pageUrl) {
         return held;
       };
 
-      window.__logStore = { store, makeEntry, startWatch, fillBatch, connections: {}, written: [] };
+      window.__logStore = {
+        store,
+        makeEntry,
+        startWatch,
+        fillBatch,
+        noteChars: note.length,
+        connections: {},
+        written: [],
+      };
 
       await new Promise((resolve) => {
         const request = indexedDB.deleteDatabase(store.DB_NAME);
@@ -3511,9 +3544,10 @@ async function bootLogStore(page, pageUrl) {
         dbName: store.DB_NAME,
         storeName: store.STORE_NAME,
         version: store.DB_VERSION,
+        noteChars: note.length,
       };
     },
-    { moduleUrl, fillBatch: LOG_FILL_BATCH },
+    { moduleUrl, fillBatch: LOG_FILL_BATCH, noteChars },
   );
 }
 
@@ -4425,6 +4459,8 @@ async function measureFullBufferExport(page, pageUrl, longTaskMs) {
         oneTaskBytes: oneTask.size,
         chars: text.length,
         maxImportChars: csv.MAX_IMPORT_CHARS,
+        maxImportBytes: csv.MAX_IMPORT_BYTES,
+        noteChars: held.noteChars,
         readMs,
         exportMs,
         elapsed,
@@ -4522,6 +4558,11 @@ function judgeFullBufferExport(measured, checks) {
   });
 
   const spare = measured.maxImportChars - measured.chars;
+  // Every row of the export repeats the roll's note, so one more character in
+  // the note costs one character a row. The room is therefore a note length,
+  // and it is derived from this run's own measurement rather than restated.
+  const perRow = measured.rows > 0 ? spare / measured.rows : 0;
+  const breaksAt = measured.noteChars + Math.floor(perRow) + 1;
   checks.push({
     name: 'log-csv.a-full-buffer-export-fits-under-the-import-cap',
     ok: measured.chars <= measured.maxImportChars && measured.chars > 0,
@@ -4529,7 +4570,31 @@ function judgeFullBufferExport(measured, checks) {
       `the file holds ${measured.chars} characters against the ${measured.maxImportChars} an ` +
       `import reads, so ${spare} characters of room. A log the application cannot read back is ` +
       `an export that only looks like one, and the cap and the row shape are set in two ` +
-      `different places.`,
+      `different places. **The room is a note length, and it is small.** It is ${spare} ` +
+      `characters over ${measured.rows} rows, which is ${perRow.toFixed(3)} characters a row, ` +
+      `and every row repeats the note. This run's note is ${measured.noteChars} characters, so a ` +
+      `note of ${breaksAt} characters fills the cap and the application would write a file it ` +
+      `then refuses to read. Raising the cap, capping the note and splitting the export are all ` +
+      `owner calls. \`--note-chars ${breaksAt}\` turns this check red, which is how it is shown ` +
+      `to fail rather than left to rot.`,
+  });
+
+  // The IMPORT CONTROL judges a file by its bytes, not by its characters, and
+  // it does so before it reads one of them. That is a second surface over the
+  // same file: `src/log/import-file.ts` refuses on `File.size`, where
+  // `importCsv` refuses on `text.length`.
+  const spareBytes = measured.maxImportBytes - measured.bytes;
+  checks.push({
+    name: 'log-csv.a-full-buffer-export-passes-the-import-control-size-guard',
+    ok: measured.bytes <= measured.maxImportBytes && measured.bytes > 0,
+    detail:
+      `the file measures ${measured.bytes} bytes against the ${measured.maxImportBytes} the ` +
+      `import control accepts from File.size, so ${spareBytes} bytes of room. The guard reads ` +
+      `the size of the FILE before it reads the file, so this is the gate a real import meets ` +
+      `first and it is the stricter of the two: UTF-8 never spends fewer bytes than the string ` +
+      `spends code units. This file is ${measured.bytes - measured.chars} bytes over its ` +
+      `${measured.chars} characters, so today the notes are ASCII and the two gates read one ` +
+      `number. A note outside ASCII parts them and this one goes red first.`,
   });
 }
 
@@ -4880,12 +4945,13 @@ function judgeRoundTrip(trip, checks) {
 }
 
 async function runLogCsv(page, options, checks) {
-  const booted = await bootLogStore(page, options.url);
+  const booted = await bootLogStore(page, options.url, options.noteChars);
   console.log(
     `browser: log-csv db=${booted.dbName} store=${booted.storeName} ` +
       `capacity=${booted.capacity} fill_batch=${LOG_FILL_BATCH} ` +
-      `round_trip_rolls=${ROUND_TRIP_ROLLS}` +
-      (options.longTaskMs > 0 ? ` LONG TASK HOOK ${options.longTaskMs} ms` : ''),
+      `round_trip_rolls=${ROUND_TRIP_ROLLS} note_chars=${booted.noteChars}` +
+      (options.longTaskMs > 0 ? ` LONG TASK HOOK ${options.longTaskMs} ms` : '') +
+      (options.noteChars > 0 ? ` NOTE HOOK ${options.noteChars} chars` : ''),
   );
 
   const fill = await fillLogBuffer(page, 0);
@@ -7990,6 +8056,616 @@ async function logHolds(page, wanted, waitMs = 8000) {
   return held;
 }
 
+// ---------------------------------------------------------------------------
+// The record, the transposed matrix, the export and the import
+// — Units 4.5 and 4.6, and the two acceptances row 2.2d of `LEDGER.md` carries
+//
+// **Neither matrix count reads the matrix.** The cell count and the blank count
+// are both taken off the STORED entry, read back through this file's own
+// connection to IndexedDB, and compared against what the document drew. A
+// matrix that agreed with itself would still fail.
+//
+// **The export is compared byte for byte.** The file the button handed to the
+// browser is intercepted at `URL.createObjectURL`, which is the browser's own
+// call and not ours, and it is compared against what `exportCsvInChunks` builds
+// from the rolls the store holds.
+//
+// **The import is driven through the real picker.** A real `File` goes into a
+// real `FileList` through `DataTransfer`, and the size guard is proved by
+// counting the reads of a file it must refuse: a file that was never read
+// cannot have been parsed.
+// ---------------------------------------------------------------------------
+
+/** The rule set the record fixture runs under: a stress die joins before the re-roll. */
+const RECORD_PROFILE = 'pool-stress-and-complications';
+
+/** Pick one rule set by its identifier, through the sheet, the way a player does. */
+async function chooseRuleset(page, wanted) {
+  await openSheet(page);
+  const chosen = await page.evaluate((id) => {
+    const inputs = [...document.querySelectorAll('[data-el="sheet-ruleset"] input')];
+    const found = inputs.find((input) => input.value === id);
+    if (found === undefined) return null;
+    if (!found.checked) found.click();
+    return id;
+  }, wanted);
+  await closeSheet(page);
+  await settleScreen(page);
+  return chosen;
+}
+
+/**
+ * Put the sequential focus navigation starting point back at the top.
+ *
+ * A walk that begins where the last press left the focus starts in the middle
+ * of the order, and Firefox hands the focus to its own chrome after the last
+ * control rather than wrapping, so such a walk stops early and reports a short
+ * list. `blur()` alone does not move the starting point. Measured on this host
+ * on 2026-08-10: with `import-button` added after `back-button`, a blurred walk
+ * of the history summary reported one stop of the three.
+ */
+async function startWalkAt(page, element) {
+  await page.evaluate((name) => {
+    const head = document.querySelector(`[data-el="${name}"]`);
+    if (head === null) return;
+    head.setAttribute('tabindex', '-1');
+    head.focus();
+    head.removeAttribute('tabindex');
+  }, element);
+}
+
+/** Open the history destination from the sheet. */
+async function openHistory(page) {
+  await openSheet(page);
+  await page.click('[data-el="sheet-history"]');
+  await page.waitForSelector('[data-el="history"]', { timeout: 15000 });
+  await settleScreen(page);
+}
+
+/** Open the record of the newest roll, which the list draws first. */
+async function openNewestRecord(page) {
+  await page.evaluate(() => {
+    document.querySelector('[data-el="history-list"] [role="option"]')?.click();
+  });
+  await page.waitForSelector('[data-el="history-record"]', { timeout: 15000 });
+  await settleScreen(page);
+}
+
+/**
+ * The matrix one stored entry must draw, counted here and never in the page.
+ *
+ * This is the second count of both acceptances. A cell is BLANK when the die
+ * did not exist yet, or when the die was locked at the generation before and
+ * this value is therefore the carry of that one.
+ */
+function matrixOf(entry) {
+  const generations = entry.dice.reduce((longest, die) => Math.max(longest, die.cells.length), 0);
+  let kept = 0;
+  let absent = 0;
+  let carriesValue = 0;
+  for (const die of entry.dice) {
+    for (let generation = 0; generation < generations; generation += 1) {
+      const cell = die.cells[generation] ?? null;
+      if (cell === null) {
+        absent += 1;
+        continue;
+      }
+      const before = generation === 0 ? null : (die.cells[generation - 1] ?? null);
+      if (before !== null && before.locked) {
+        kept += 1;
+        if (before.value === cell.value) carriesValue += 1;
+      }
+    }
+  }
+  return {
+    dice: entry.dice.length,
+    generations,
+    cells: entry.dice.length * generations,
+    kept,
+    absent,
+    blank: kept + absent,
+    carriesValue,
+  };
+}
+
+/** Every leaf field of two logs, compared, with the leaves counted both ways. */
+function compareLogs(before, after) {
+  const differences = [];
+  let leaves = 0;
+  const walk = (left, right, path) => {
+    if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') {
+      leaves += 1;
+      if (left !== right && differences.length < 5) {
+        differences.push(`${path}: ${JSON.stringify(left)} against ${JSON.stringify(right)}`);
+      }
+      return;
+    }
+    for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+      walk(left[key], right[key], `${path}.${key}`);
+    }
+  };
+  for (const [index, entry] of before.entries()) walk(entry, after[index], entry.rollId);
+  // A second enumeration, walked over the log that went out rather than over
+  // the comparison, so a comparison that skipped a field fails the count.
+  let expected = 0;
+  for (const entry of before) {
+    expected += Object.keys(entry).length - 1;
+    for (const die of entry.dice) {
+      expected += 2;
+      for (const cell of die.cells) expected += cell === null ? 1 : 3;
+    }
+  }
+  return { leaves, expected, differences };
+}
+
+async function runRecordAndExport(page, options, checks, design) {
+  // ---- The roll the record draws ----
+  //
+  // The third rule set adds a stress die BEFORE the re-roll, so that die is
+  // absent at the first generation and its first cell is blank whatever the
+  // faces did. One loose die is kept by hand before the push, so at least one
+  // cell is the carry of a locked die whatever the faces did either. Neither
+  // blank kind is left to chance.
+  await clearLog(page);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 30000 });
+  const ruleset = await chooseRuleset(page, RECORD_PROFILE);
+  await pressTile(page, 'attribute', 'p', 4);
+  await pressTile(page, 'skill', 'p', 4);
+  // TWO rolls, and only the second is pushed. The export writes the whole log,
+  // so a log of one roll cannot tell a whole-log export from a one-roll one and
+  // the check on that claim could not fail.
+  await page.click('[data-el="roll-button"]');
+  await settleScreen(page);
+  await logHolds(page, 1);
+  await page.click('[data-el="roll-button"]');
+  await settleScreen(page);
+  const keptByHand = await page.evaluate(() => {
+    const loose = document.querySelector('[data-el^="die-"][aria-pressed="false"]');
+    if (loose === null) return null;
+    loose.click();
+    return loose.dataset.el;
+  });
+  await settleScreen(page);
+  await page.click('[data-el="push-button"]');
+  await settleScreen(page);
+  const written = await logHolds(page, 2);
+
+  await openHistory(page);
+  await openNewestRecord(page);
+
+  // ---- 7. The matrix holds dice by generations cells. ----
+  const drawn = await page.evaluate(() => {
+    const record = document.querySelector('[data-el="history-record"]');
+    const table = document.querySelector('[data-el="history-matrix"]');
+    if (table === null) return { missing: true };
+    const cells = [...table.querySelectorAll('tbody td')];
+    const rowHeads = [...table.querySelectorAll('tbody th[scope="row"]')];
+    const colHeads = [...table.querySelectorAll('thead th[scope="col"]')];
+    const rowIds = new Set(rowHeads.map((head) => head.id));
+    const colIds = new Set(colHeads.map((head) => head.id));
+    let reachable = 0;
+    let named = 0;
+    for (const cell of cells) {
+      const points = (cell.getAttribute('headers') ?? '').split(' ').filter(Boolean);
+      if (points.length === 2 && rowIds.has(points[0]) && colIds.has(points[1])) reachable += 1;
+      if ((cell.getAttribute('aria-label') ?? '') !== '') named += 1;
+    }
+    return {
+      missing: false,
+      rollId: record?.dataset.rollId ?? null,
+      role: table.getAttribute('role'),
+      tag: table.tagName,
+      caption: (table.querySelector('caption')?.textContent ?? '').trim().length,
+      cells: cells.length,
+      rows: table.querySelectorAll('tbody tr').length,
+      colHeads: colHeads.length,
+      rowHeads: rowHeads.length,
+      colHeadRoles: colHeads.filter((h) => h.getAttribute('role') === 'columnheader').length,
+      rowHeadRoles: rowHeads.filter((h) => h.getAttribute('role') === 'rowheader').length,
+      firstColumn: colHeads[1]?.textContent ?? '',
+      kept: table.querySelectorAll('tbody td[data-cell="kept"]').length,
+      absent: table.querySelectorAll('tbody td[data-cell="absent"]').length,
+      thrown: table.querySelectorAll('tbody td[data-cell="thrown"]').length,
+      blank: table.querySelectorAll('tbody td[data-blank]').length,
+      reachable,
+      named,
+      tabStops: [...table.querySelectorAll('*')].filter((each) => each.tabIndex >= 0).length,
+    };
+  });
+  if (drawn.missing) {
+    checks.push({
+      name: 'history.the-record-draws-the-transposed-matrix',
+      ok: false,
+      detail: 'the record holds no history-matrix at all.',
+    });
+    return;
+  }
+  const stored = (await readLogRolls(page)).rolls;
+  const entry = stored.find((each) => each.rollId === drawn.rollId) ?? null;
+  const wanted = entry === null ? null : matrixOf(entry);
+  console.log(
+    `browser: history matrix ruleset=${ruleset} kept_by_hand=${keptByHand} ` +
+      `entries=${written.rolls.length} roll_id=${drawn.rollId} ` +
+      `drawn cells=${drawn.cells} rows=${drawn.rows} columns=${drawn.colHeads - 1} ` +
+      `blank=${drawn.blank} kept=${drawn.kept} absent=${drawn.absent} thrown=${drawn.thrown} | ` +
+      `stored dice=${wanted?.dice} generations=${wanted?.generations} cells=${wanted?.cells} ` +
+      `blank=${wanted?.blank} kept=${wanted?.kept} absent=${wanted?.absent}`,
+  );
+  checks.push({
+    name: 'history.the-matrix-holds-one-cell-per-die-per-generation',
+    ok:
+      wanted !== null &&
+      wanted.generations > 1 &&
+      wanted.dice > 0 &&
+      drawn.cells === wanted.cells &&
+      drawn.rows === wanted.dice &&
+      drawn.colHeads === wanted.generations + 1 &&
+      drawn.rowHeads === wanted.dice &&
+      drawn.blank + drawn.thrown === wanted.cells,
+    detail:
+      `the record of roll ${drawn.rollId} drew ${drawn.cells} cells in ${drawn.rows} rows and ` +
+      `${drawn.colHeads - 1} generation columns. The product is taken off the STORED entry, ` +
+      `read back through this file's own connection to IndexedDB and never off the matrix: ` +
+      `${wanted?.dice} dice by ${wanted?.generations} generations is ${wanted?.cells} cells. ` +
+      `The generations are over one, so this is a pushed roll and a matrix of one column ` +
+      `cannot pass. The matrix is TRANSPOSED, so the row count is the die count and the column ` +
+      `count is the generation count. Decision 3. The two cell kinds add up to the whole: ` +
+      `${drawn.blank} blank plus ${drawn.thrown} thrown is ${drawn.blank + drawn.thrown}.`,
+  });
+
+  // ---- 8. The blank cells are the locked-or-absent pairs. ----
+  checks.push({
+    name: 'history.the-blank-cells-are-the-locked-or-absent-pairs',
+    ok:
+      wanted !== null &&
+      wanted.kept > 0 &&
+      wanted.absent > 0 &&
+      drawn.kept === wanted.kept &&
+      drawn.absent === wanted.absent &&
+      drawn.blank === wanted.blank &&
+      wanted.carriesValue === wanted.kept,
+    detail:
+      `${drawn.blank} cells were drawn blank against ${wanted?.blank} counted a second way over ` +
+      `the stored cells, by a loop in this file that never reads the document: a die locked at ` +
+      `the generation before carries its value forward (${wanted?.kept}) and a die that did not ` +
+      `exist yet is absent (${wanted?.absent}). Both kinds are guaranteed by the fixture rather ` +
+      `than left to the faces: the run kept ${keptByHand} by hand before the push, and the ` +
+      `third rule set adds a stress die BEFORE the re-roll, so that die has no first ` +
+      `generation. Every carry really is a carry: ${wanted?.carriesValue} of ${wanted?.kept} ` +
+      `repeat the value of the cell before them, which is what the rules model requires of a ` +
+      `locked die.`,
+  });
+
+  // ---- 9. The matrix is a table a screen reader can walk. ----
+  checks.push({
+    name: 'history.the-matrix-is-a-table-reachable-by-row-and-by-column',
+    ok:
+      drawn.tag === 'TABLE' &&
+      drawn.role === 'table' &&
+      drawn.caption > 0 &&
+      drawn.cells > 0 &&
+      drawn.reachable === drawn.cells &&
+      drawn.named === drawn.cells &&
+      drawn.colHeadRoles === drawn.colHeads &&
+      drawn.rowHeadRoles === drawn.rowHeads &&
+      drawn.tabStops === 0,
+    detail:
+      `the matrix is a <${drawn.tag}> with role=${drawn.role} and a caption of ${drawn.caption} ` +
+      `characters, so it is named. ${drawn.reachable} of its ${drawn.cells} cells name one row ` +
+      `header and one column header through \`headers\`, and both identifiers exist, so a ` +
+      `screen reader reaches a cell by its row and its column rather than by its text. ` +
+      `${drawn.named} of ${drawn.cells} carry an accessible name of their own. Every header ` +
+      `carries its role: ${drawn.colHeadRoles} of ${drawn.colHeads} column headers and ` +
+      `${drawn.rowHeadRoles} of ${drawn.rowHeads} row headers. The first generation column ` +
+      `reads "${drawn.firstColumn}". Section 3 lists the matrix under the read-only parts, so ` +
+      `it holds ${drawn.tabStops} tab stops.`,
+  });
+
+  // ---- 10. The record holds the two controls of the design, by keyboard. ----
+  await startWalkAt(page, 'history-header');
+  const recordWalk = await walkShell(page, 8);
+  const recordStops = recordWalk
+    .filter((visit) => !visit.implicit && visit.by === 'tab')
+    .map((visit) => visit.name);
+  const recordControls = design
+    .slice(
+      design.indexOf('### The history is a separate destination'),
+      design.indexOf('###', design.indexOf('### The history is a separate destination') + 1),
+    )
+    .split('\n')
+    .find((line) => line.trim().startsWith('| Record'));
+  const recordWanted = [...(recordControls ?? '').matchAll(/`([a-z-]+)`/g)]
+    .map((match) => match[1])
+    .sort();
+  const recordNamed = await page.evaluate(() => {
+    const controls = [...document.querySelectorAll('[data-el="history-footer"] button')];
+    return {
+      controls: controls.length,
+      unnamed: controls.filter((each) => (each.textContent ?? '').trim() === '').length,
+      stateless: controls.filter((each) => each.getAttribute('aria-disabled') === null).length,
+      wrongRole: controls.filter((each) => each.tagName !== 'BUTTON').length,
+      short: controls.filter((each) => each.getBoundingClientRect().height < 24).length,
+      names: controls.map((each) => each.dataset.el),
+      listGone: document.querySelector('[data-el="history-list"]') === null,
+    };
+  });
+  console.log(
+    `browser: history record tab_stops=[${recordStops.join(' ')}] ` +
+      `design=[${recordWanted.join(' ')}] buttons=${recordNamed.controls} ` +
+      `unnamed=${recordNamed.unnamed} stateless=${recordNamed.stateless} ` +
+      `wrong_role=${recordNamed.wrongRole} short=${recordNamed.short} ` +
+      `list_gone=${recordNamed.listGone}`,
+  );
+  checks.push({
+    name: 'history.the-record-holds-the-two-controls-the-design-names',
+    ok:
+      recordWanted.length === 2 &&
+      recordStops.slice().sort().join(' ') === recordWanted.join(' ') &&
+      recordNamed.controls === recordWanted.length &&
+      recordNamed.unnamed === 0 &&
+      recordNamed.stateless === 0 &&
+      recordNamed.wrongRole === 0 &&
+      recordNamed.short === 0 &&
+      recordNamed.listGone,
+    detail:
+      `real Tab presses reached [${recordStops.join(' ')}] against the ` +
+      `[${recordWanted.join(' ')}] section 3 of the design names for the record view, read out ` +
+      `of the document and never restated. The footer holds ${recordNamed.controls} controls ` +
+      `and no third. Each one carries a role (${recordNamed.wrongRole} wrong), an accessible ` +
+      `name (${recordNamed.unnamed} without one) and a state a reader can announce ` +
+      `(${recordNamed.stateless} without an aria-disabled), and none is under the 24 px floor ` +
+      `of WCAG 2.2 SC 2.5.8 (${recordNamed.short}). The summary list left the document ` +
+      `(${recordNamed.listGone}), so the record is a view and not an overlay.`,
+  });
+
+  // ---- 11. The export button writes what the chunked writer builds. ----
+  //
+  // The interception is on the BROWSER's own calls, not on ours: the object URL
+  // the anchor is given, and the click itself. The click is not passed through,
+  // because a real one starts a file transfer this run has no way to collect.
+  await page.evaluate(() => {
+    window.__download = { blobs: [], names: [], hrefs: [], types: [] };
+    const real = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (blob) => {
+      window.__download.blobs.push(blob);
+      window.__download.types.push(blob.type);
+      return real(blob);
+    };
+    HTMLAnchorElement.prototype.click = function click() {
+      window.__download.names.push(this.download);
+      window.__download.hrefs.push(this.href);
+    };
+  });
+  await page.click('[data-el="export-button"]');
+  await page.waitForFunction(() => window.__download.blobs.length > 0, { timeout: 30000 });
+  const offered = await page.evaluate(async () => {
+    const blob = window.__download.blobs[0];
+    return {
+      bytes: blob.size,
+      type: blob.type,
+      text: await blob.text(),
+      name: window.__download.names[0] ?? null,
+      href: (window.__download.hrefs[0] ?? '').slice(0, 5),
+      offers: window.__download.blobs.length,
+    };
+  });
+  // The oracle runs HERE, in node, over the rolls this file reads out of
+  // IndexedDB through its own connection. So the file the button produced is
+  // compared against a file the chunked writer produces from the store, in
+  // another engine, and never against a copy of itself. The page cannot build
+  // the oracle: this mode drives the BUILT bundle, which exports nothing.
+  const csv = await import('../src/log/csv.ts');
+  const rollsNow = (await readLogRolls(page)).rolls;
+  const oracle = await (await csv.exportCsvInChunks(rollsNow)).blob.text();
+  const got = Buffer.from(offered.text, 'utf8');
+  const want = Buffer.from(oracle, 'utf8');
+  let compared = 0;
+  let firstDifference = -1;
+  if (got.length === want.length) {
+    for (let at = 0; at < got.length; at += 1) {
+      compared += 1;
+      if (got[at] !== want[at] && firstDifference < 0) firstDifference = at;
+    }
+  }
+  const exported = {
+    rolls: rollsNow.length,
+    rollIdsInFile: rollsNow.filter((roll) => offered.text.includes(roll.rollId)).length,
+    gotBytes: got.length,
+    blobBytes: offered.bytes,
+    wantBytes: want.length,
+    compared,
+    firstDifference,
+    name: offered.name,
+    href: offered.href,
+    type: offered.type,
+    offers: offered.offers,
+    text: offered.text,
+  };
+  const said = await page.evaluate(
+    () => document.querySelector('[data-el="history-message"]')?.textContent ?? '',
+  );
+  console.log(
+    `browser: history export rolls=${exported.rolls} bytes=${exported.gotBytes} ` +
+      `wanted=${exported.wantBytes} compared=${exported.compared} ` +
+      `first_difference=${exported.firstDifference} name=${exported.name} ` +
+      `href=${exported.href} type=${exported.type} offers=${exported.offers} ` +
+      `ids_in_file=${exported.rollIdsInFile} message="${said.slice(0, 60)}"`,
+  );
+  checks.push({
+    name: 'history.the-export-button-writes-the-file-the-chunked-writer-builds',
+    ok:
+      exported.offers === 1 &&
+      exported.gotBytes > 0 &&
+      exported.gotBytes === exported.blobBytes &&
+      exported.gotBytes === exported.wantBytes &&
+      exported.compared === exported.gotBytes &&
+      exported.firstDifference === -1 &&
+      exported.rolls > 0 &&
+      exported.rollIdsInFile === exported.rolls &&
+      /^clatter-log-\d{4}-\d{2}-\d{2}-\d{4}\.csv$/.test(String(exported.name)) &&
+      exported.href === 'blob:' &&
+      String(exported.type).startsWith('text/csv'),
+    detail:
+      `one press on export-button handed the browser ${exported.offers} object URL, on an ` +
+      `anchor named "${exported.name}" whose href is a ${exported.href} URL and whose blob is ` +
+      `${exported.type}. The file measures ${exported.gotBytes} bytes against the ` +
+      `${exported.wantBytes} exportCsvInChunks builds IN NODE from the ${exported.rolls} rolls ` +
+      `this file read out of IndexedDB through its own connection, and against the ` +
+      `${exported.blobBytes} bytes the browser itself reports for the blob. The comparison is ` +
+      `BYTE FOR BYTE and ` +
+      `not by length: ${exported.compared} bytes compared, first difference at ` +
+      `${exported.firstDifference}, where -1 is none. The denominator is the file itself, and a ` +
+      `file of no bytes fails. It holds the WHOLE log and not the roll on the screen: ` +
+      `${exported.rollIdsInFile} of ${exported.rolls} roll identifiers are in it.`,
+  });
+
+  // ---- 12. The export round trips through the import control. ----
+  //
+  // One more roll is thrown between the export and the import, so an import
+  // that wrote nothing at all cannot pass: the log it must produce is not the
+  // log it starts from.
+  const beforeImport = stored;
+  await page.click('[data-el="back-button"]');
+  await page.waitForSelector('[data-el="history-list"]', { timeout: 15000 });
+  await page.click('[data-el="back-button"]');
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 15000 });
+  await page.click('[data-el="roll-button"]');
+  await settleScreen(page);
+  const withExtra = await logHolds(page, beforeImport.length + 1);
+  const extraIds = withExtra.rolls
+    .map((roll) => roll.rollId)
+    .filter((id) => !beforeImport.some((roll) => roll.rollId === id));
+  await openHistory(page);
+  const picked = await page.evaluate((text) => {
+    const input = document.querySelector('[data-el="import-file"]');
+    if (input === null) return { failed: 'the summary holds no import-file' };
+    const file = new File([text], 'round-trip.csv', { type: 'text/csv' });
+    const carrier = new DataTransfer();
+    carrier.items.add(file);
+    input.files = carrier.files;
+    // Read before the dispatch: the control clears `value` as it reads the
+    // file, so the FileList is empty again by the time the handler returns.
+    const real = input.files.length === 1 && input.files[0].size > 0;
+    const size = input.files[0]?.size ?? 0;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return { failed: null, real, size };
+  }, exported.text);
+  await page.waitForFunction(
+    () => {
+      const shown = document.querySelector('[data-el="history-message"]')?.textContent ?? '';
+      return shown.length > 0 && !shown.startsWith('The import is running');
+    },
+    { timeout: 30000 },
+  );
+  const afterImport = (await readLogRolls(page)).rolls;
+  const importSaid = await page.evaluate(
+    () => document.querySelector('[data-el="history-message"]')?.textContent ?? '',
+  );
+  const drawnRows = await page.evaluate(
+    () => document.querySelectorAll('[data-el="history-list"] [role="option"]').length,
+  );
+  const trip = compareLogs(beforeImport, afterImport);
+  console.log(
+    `browser: history round trip before=${beforeImport.length} ` +
+      `with_extra=${withExtra.rolls.length} extra=[${extraIds.join(' ')}] ` +
+      `after=${afterImport.length} drawn=${drawnRows} fields=${trip.leaves} of ${trip.expected} ` +
+      `differences=${trip.differences.length} real_file=${picked.real} bytes=${picked.size} ` +
+      `message="${importSaid.slice(0, 70)}"`,
+  );
+  checks.push({
+    name: 'history.the-export-round-trips-through-the-import-control',
+    ok:
+      picked.failed === null &&
+      picked.real === true &&
+      beforeImport.length > 0 &&
+      extraIds.length === 1 &&
+      withExtra.rolls.length === beforeImport.length + 1 &&
+      afterImport.length === beforeImport.length &&
+      drawnRows === beforeImport.length &&
+      afterImport.every((roll) => roll.rollId !== extraIds[0]) &&
+      trip.leaves === trip.expected &&
+      trip.leaves > 0 &&
+      trip.differences.length === 0,
+    detail:
+      `the file the export button wrote went back in through the picker as a real File in a ` +
+      `real FileList (${picked.real}, ${picked.size} bytes). One extra roll was thrown between ` +
+      `the two, so the log stood at ${withExtra.rolls.length} when the import ran and an import ` +
+      `that wrote nothing could not pass. The marker roll ${extraIds.join(' ')} survives=` +
+      `${afterImport.some((roll) => roll.rollId === extraIds[0])}, and it must not. The ` +
+      `log holds ${afterImport.length} against the ${beforeImport.length} that went out. The ` +
+      `list on the screen drew ${drawnRows} rows, read off the document rather than off the ` +
+      `store. Every field is compared, not the rolls as wholes: ${trip.leaves} leaf fields ` +
+      `against ${trip.expected} counted a second way over the log that went out, with ` +
+      `${trip.differences.length} differences. The message reads "${importSaid}".` +
+      (trip.differences.length ? ` [${trip.differences.join('; ')}]` : ''),
+  });
+
+  // ---- 13. The import refuses an oversized file BEFORE it reads it. ----
+  //
+  // The proof is a call counter on the file's own `text`. A file that was never
+  // read cannot have been parsed, and no clock is needed to say so.
+  //
+  // The cap is read from the shipped module IN NODE and handed to the page, for
+  // the same reason the export oracle runs there: this mode drives the built
+  // bundle, which exports nothing. It is the guard's own constant, from the one
+  // place that holds it.
+  const refused = await page.evaluate(async (cap) => {
+    const input = document.querySelector('[data-el="import-file"]');
+    const reads = { count: 0 };
+    const over = cap + 1;
+    const file = new File([new Uint8Array(over)], 'huge.csv', { type: 'text/csv' });
+    const real = file.text.bind(file);
+    // The counter goes on the instance the control is handed, so a run where
+    // the patch did not land reports `patched=false` and the check fails rather
+    // than passing on an instrument that measured nothing.
+    Object.defineProperty(file, 'text', {
+      value: () => {
+        reads.count += 1;
+        return real();
+      },
+      configurable: true,
+    });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    const patched = input.files[0].text !== File.prototype.text;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((done) => setTimeout(done, 500));
+    return {
+      patched,
+      cap,
+      size: file.size,
+      reads: reads.count,
+      message: document.querySelector('[data-el="history-message"]')?.textContent ?? '',
+    };
+  }, csv.MAX_IMPORT_BYTES);
+  const afterRefusal = (await readLogRolls(page)).rolls;
+  console.log(
+    `browser: history oversized patched=${refused.patched} size=${refused.size} ` +
+      `cap=${refused.cap} reads=${refused.reads} log_before=${afterImport.length} ` +
+      `log_after=${afterRefusal.length} message="${refused.message.slice(0, 80)}"`,
+  );
+  checks.push({
+    name: 'history.the-import-refuses-an-oversized-file-before-it-reads-it',
+    ok:
+      refused.patched === true &&
+      refused.size === refused.cap + 1 &&
+      refused.reads === 0 &&
+      /too large/.test(refused.message) &&
+      /No part of the file was read/.test(refused.message) &&
+      afterRefusal.length === afterImport.length &&
+      afterRefusal.length > 0,
+    detail:
+      `a real File of ${refused.size} bytes, one over the ${refused.cap} the import control ` +
+      `accepts, went into the picker. Its own \`text\` was counted first and the patch is ` +
+      `proved to have landed (patched=${refused.patched}), so a run where the counter never ` +
+      `attached fails here rather than reporting a zero it could not have moved. The control ` +
+      `read the file ${refused.reads} times, which is how this check knows nothing was parsed: ` +
+      `the judgement is on File.size and not on text.length. The refusal names its cause: ` +
+      `"${refused.message}". The log is untouched at ${afterRefusal.length} rolls against the ` +
+      `${afterImport.length} it held before.`,
+  });
+}
+
 async function runHistory(page, options, checks) {
   const design = readFileSync(join(here, '..', 'docs', 'design', '0002-screen-design.md'), 'utf8');
   await page.evaluate(() => {
@@ -8177,7 +8853,7 @@ async function runHistory(page, options, checks) {
   await page.click('[data-el="sheet-history"]');
   await page.waitForSelector('[data-el="history-list"]', { timeout: 15000 });
   await settleScreen(page);
-  await page.evaluate(() => document.activeElement?.blur());
+  await startWalkAt(page, 'history-header');
   const walked = await walkShell(page, 12);
   const authored = walked.filter((visit) => !visit.implicit);
   const tabStops = authored.filter((visit) => visit.by === 'tab').map((visit) => visit.name);
@@ -8227,6 +8903,9 @@ async function runHistory(page, options, checks) {
   const wantedControls = [...(summaryControls ?? '').matchAll(/`([a-z-]+)`/g)]
     .map((match) => match[1])
     .sort();
+  // The row states its own count as well, so the table cannot disagree with
+  // itself and this check never carries a number of its own.
+  const statedControls = Number((summaryControls ?? '').split('|').map((cell) => cell.trim())[3]);
   console.log(
     `browser: history keyboard tab_stops=[${tabStops.join(' ')}] ` +
       `arrow_visits=${arrowVisits.length} options=${named.options} in_store=${inStore} ` +
@@ -8237,7 +8916,8 @@ async function runHistory(page, options, checks) {
   checks.push({
     name: 'history.the-destination-is-operable-by-keyboard-alone',
     ok:
-      wantedControls.length === 2 &&
+      wantedControls.length === statedControls &&
+      statedControls > 0 &&
       tabStops.slice().sort().join(' ') === wantedControls.join(' ') &&
       named.listRole === 'listbox' &&
       (named.listName ?? '').length > 0 &&
@@ -8252,7 +8932,8 @@ async function runHistory(page, options, checks) {
     detail:
       `real Tab presses reached [${tabStops.join(' ')}] against the ` +
       `[${wantedControls.join(' ')}] section 3 of the design names for the summary view, read ` +
-      `out of the document and never restated. The list is one tab stop with ${named.roving} ` +
+      `out of the document and never restated, against the ${statedControls} that row states in ` +
+      `its own count column. The list is one tab stop with ${named.roving} ` +
       `roving index and the arrows reached ${arrowVisits.length} rows against the ${inStore} ` +
       `rolls a second connection read out of IndexedDB. Every option carries a role, a name ` +
       `and a state: ${named.unnamed} without a name, ${named.stateless} without a state, and ` +
@@ -8336,11 +9017,56 @@ async function runHistory(page, options, checks) {
       `${real.quota} bytes. The plan asks this unit to show estimate() in settings.`,
   });
 
-  // ---- 7. The captures the owner looks at. ----
+  // ---- 7 to 11: the record, the matrix, the export and the import. ----
+  await closeSheet(page);
+  await runRecordAndExport(page, options, checks, design);
+
+  // ---- 12. The captures the owner looks at. ----
+  //
+  // The record capture is thrown large on purpose. Decision 3 transposed the
+  // matrix because one column per die does not fit a phone, so the case worth
+  // looking at is a wide pool over several generations, on a phone.
   if (options.captureShell !== null) {
-    await closeSheet(page);
+    await page.evaluate(() => {
+      if (document.querySelector('[data-el="history"]') === null) return;
+      document.querySelector('[data-el="back-button"]')?.click();
+    });
+    await page.waitForSelector('[data-el="roll-button"]', { timeout: 15000 });
+    // The first rule set, and a stress counter back at zero. The third rule set
+    // blocks a push as soon as a stress die shows a bane, and the stress this
+    // run built up made that the usual outcome, so the record drew one column
+    // and showed nothing of what Decision 3 is about.
+    await chooseRuleset(page, 'pool-banes-damage-ratings');
     await openSheet(page);
-    await page.click('[data-el="sheet-history"]');
+    await page.click('[data-el="sheet-stress-reset"]');
+    await closeSheet(page);
+    // A throw collapses the builder, so the tiles come back through `Edit pool`.
+    if ((await page.$('[data-el="edit-pool-button"]')) !== null) {
+      await page.click('[data-el="edit-pool-button"]');
+      await settleScreen(page);
+    }
+    await pressTile(page, 'attribute', 'p', 5);
+    await pressTile(page, 'skill', 'p', 5);
+    await pressTile(page, 'gear', 'p', 3);
+    await pressTile(page, 'bonus', 'p', 2);
+    await page.click('[data-el="roll-button"]');
+    await settleScreen(page);
+    // One die kept by hand, so the capture shows a dot as well as a throw.
+    await page.evaluate(() => {
+      document.querySelector('[data-el^="die-"][aria-pressed="false"]')?.click();
+    });
+    await settleScreen(page);
+    for (let push = 0; push < 2; push += 1) {
+      const live = await page.evaluate(() => {
+        const button = document.querySelector('[data-el="push-button"]');
+        return button !== null && !button.disabled;
+      });
+      if (!live) break;
+      await page.click('[data-el="push-button"]');
+      await settleScreen(page);
+    }
+    await logHolds(page, 2);
+    await openHistory(page);
     await page.waitForSelector('[data-el="history-list"]', { timeout: 15000 });
     for (const width of [360, 1440]) {
       await page.setViewport({ width, height: width === 360 ? 760 : 900, deviceScaleFactor: 1 });
@@ -8350,7 +9076,9 @@ async function runHistory(page, options, checks) {
         join(options.captureShell, `0016-history-${width}.png`),
         await page.screenshot({ type: 'png' }),
       );
-      // The record shell as well, because it is what Unit 4.5 builds on.
+      // The record, with the transposed matrix Unit 4.5 put in it. It carries
+      // its own number, so the shell captures of Unit 4.4 stay as that unit's
+      // own evidence.
       await page.evaluate(() => {
         document.querySelector('[data-el="history-list"] [role="option"]')?.click();
       });
@@ -8358,7 +9086,7 @@ async function runHistory(page, options, checks) {
       await settleScreen(page);
       await new Promise((done) => setTimeout(done, 200));
       writeFileSync(
-        join(options.captureShell, `0016-history-record-${width}.png`),
+        join(options.captureShell, `0017-history-record-${width}.png`),
         await page.screenshot({ type: 'png' }),
       );
       await page.click('[data-el="back-button"]');
@@ -8413,6 +9141,7 @@ function parseArgs(argv) {
     captureShell: null,
     captureLater: false,
     longTaskMs: 0,
+    noteChars: 0,
     quotaKb: null,
     captureBefore: null,
     offsetKept: null,
@@ -8458,6 +9187,7 @@ function parseArgs(argv) {
     else if (arg === '--capture-shell') options.captureShell = next();
     else if (arg === '--capture-later') options.captureLater = true;
     else if (arg === '--long-task-ms') options.longTaskMs = Number(next());
+    else if (arg === '--note-chars') options.noteChars = Number(next());
     else if (arg === '--quota-kb') options.quotaKb = Number(next());
     else if (arg === '--capture-before') options.captureBefore = next();
     else if (arg === '--offset-kept') options.offsetKept = Number(next());
@@ -8484,6 +9214,9 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.minFrames) || options.minFrames < 1) {
     throw new Error('--min-frames needs a whole number of 1 or more');
+  }
+  if (!Number.isInteger(options.noteChars) || options.noteChars < 0) {
+    throw new Error('--note-chars needs a whole number of 0 or more');
   }
   if (!Number.isInteger(options.priceFrames) || options.priceFrames < 1) {
     throw new Error('--price-frames needs a whole number of 1 or more');
