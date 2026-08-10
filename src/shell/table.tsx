@@ -27,9 +27,11 @@ import { prefersReducedMotion } from '../tray/capability';
 import type { MountTrayOptions } from '../tray/scene';
 import type { DieSpot } from '../tray/spots';
 import { dieSpots } from '../tray/spots';
+import { watchFirstMotion } from '../tray/motion';
 import { paintPool, pushPool, throwPool } from '../tray/throw';
 import type { DiceTheme } from '../theme/themes';
-import type { DiceBox } from '../tray/vendor/dice-tray.js';
+import type { DiceBox, TrayImpact } from '../tray/vendor/dice-tray.js';
+import type { MotionEvidence } from './perf';
 import type { AppState } from './state';
 import { profileOf } from './state';
 
@@ -127,6 +129,25 @@ export interface TableProps {
   readonly onToggle: (id: string) => void;
   /** The dice axis in force — Unit 4.8. A change of it repaints the pool. */
   readonly colours: DiceTheme;
+  /**
+   * Every collision the physics world reports — Unit 3.6.
+   *
+   * The sound engine is the caller. The tray plays nothing and holds no
+   * choice: a mount that names no hook reports no collision at all, so a
+   * player who never turned sound on pays for nothing.
+   */
+  readonly onImpact?: (impact: TrayImpact) => void;
+  /**
+   * The first frame of a throw that drew a die somewhere else — Unit 3.8.
+   *
+   * The overlay measures throw-to-first-motion, and this is the far end of it.
+   * The near end is the press, which the screen holds. The watch starts when
+   * the throw is queued and BEFORE the library is asked to act it out, so the
+   * synchronous simulation lies inside the measurement rather than before it.
+   */
+  readonly onMotion?: (at: number, evidence: MotionEvidence) => void;
+  /** The table came to rest. It closes the overlay's measurement window. */
+  readonly onSettled?: (at: number) => void;
 }
 
 /**
@@ -152,6 +173,9 @@ export function Table({
   onBox,
   onToggle,
   colours,
+  onImpact,
+  onMotion,
+  onSettled,
 }: TableProps): preact.JSX.Element {
   const container = useRef<HTMLDivElement>(null);
   const box = useRef<DiceBox | null>(null);
@@ -167,10 +191,21 @@ export function Table({
   const boxed = useRef(onBox);
   const seam = useRef<TableSeam>({ box: null, ordered: [], throws: 0, busy: false });
   const painted = useRef(colours);
+  // The three callbacks below arrive from a render and are called from a mount
+  // callback or a frame callback, so each is held in a ref rather than
+  // captured. A stale sound hook would go on playing at an old volume, and a
+  // stale motion hook would report into an instrument that has been replaced.
+  const impacted = useRef(onImpact);
+  const moved = useRef(onMotion);
+  const settled = useRef(onSettled);
+  const stopWatch = useRef<(() => void) | null>(null);
   painted.current = colours;
   toggle.current = onToggle;
   spotted.current = onSpots;
   boxed.current = onBox;
+  impacted.current = onImpact;
+  moved.current = onMotion;
+  settled.current = onSettled;
 
   const publish = (): void => {
     seam.current.box = box.current;
@@ -205,6 +240,27 @@ export function Table({
     publish();
   };
 
+  /**
+   * Watch the tray for the first movement of the throw now waiting — Unit 3.8.
+   *
+   * The reading it compares against is taken HERE, before anything asks the
+   * library to act the throw out: `drain` calls `box.roll` in the same task, so
+   * a reading taken after it would already hold the thrown dice and the whole
+   * synchronous simulation would fall outside the measurement.
+   *
+   * The first throw of a session arrives before the table has mounted, because
+   * the builder is open until the player presses Roll and a hidden container
+   * measures nothing. The mount calls this as well, so that throw is measured
+   * from the same press and is not reported as no throw at all.
+   */
+  const watchForMotion = (): void => {
+    const held = box.current;
+    const report = moved.current;
+    if (held === null || report === undefined || pending.current === null) return;
+    stopWatch.current?.();
+    stopWatch.current = watchFirstMotion(held, (at, evidence) => report(at, evidence));
+  };
+
   const drain = async (): Promise<void> => {
     const held = box.current;
     if (held === null || running.current) return;
@@ -225,6 +281,10 @@ export function Table({
     } finally {
       running.current = false;
       publish();
+      // Every die is asleep by here, because `throwPool` and `pushPool` both
+      // resolve at rest. The overlay's measurement window closes on this, so
+      // the idle frames after a throw are not samples of it.
+      settled.current?.(performance.now());
     }
   };
 
@@ -234,7 +294,13 @@ export function Table({
     const element = container.current;
     if (!shown || !wanted || element === null || box.current !== null) return;
     let live = true;
-    void mount(element, { onFallToFlat: () => onFall() })
+    void mount(element, {
+      onFallToFlat: () => onFall(),
+      // Unit 3.6. The hook is stable and reads the ref, so the sound engine
+      // the application holds answers every collision under the choice in
+      // force rather than the one that stood at the mount.
+      config: { onImpact: (impact) => impacted.current?.(impact) },
+    })
       .then(async (held) => {
         if (!live) return;
         box.current = held as DiceBox;
@@ -246,6 +312,7 @@ export function Table({
         );
         publish();
         boxed.current?.(box.current);
+        watchForMotion();
         void drain();
       })
       .catch(() => {
@@ -318,8 +385,18 @@ export function Table({
       stressAdded: state.stressAdded,
     };
     publish();
+    watchForMotion();
     void drain();
   }, [state.throwOrdinal, wanted]);
+
+  // The watch goes with the table, so no frame callback outlives the canvas.
+  useEffect(
+    () => () => {
+      stopWatch.current?.();
+      stopWatch.current = null;
+    },
+    [],
+  );
 
   // A press keeps a die or releases it, and the marks on the dice say so. The
   // pool comes from the screen, so the tray's own copy cannot drift from it.

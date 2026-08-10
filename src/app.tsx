@@ -70,6 +70,9 @@ import {
 } from './shell/share-panel';
 import type { OpenRollLogResult, RollLog, RollLogOptions } from './shell/roll-log';
 import { openRollLog } from './shell/roll-log';
+import type { PerfRecorder } from './shell/perf';
+import { createPerfRecorder } from './shell/perf';
+import { PerfOverlay } from './shell/overlay';
 import type { RendererState } from './shell/renderer';
 import {
   askForTray,
@@ -122,9 +125,26 @@ import { ThemePanel } from './shell/theme-panel';
 import type { TrayDecision } from './tray/capability';
 import { decideTray, probeCapability } from './tray/capability';
 import { mountTray } from './tray/scene';
+import type { SoundEngine } from './tray/sound';
+import { createSoundEngine } from './tray/sound';
 import type { DiceBox } from './tray/vendor/dice-tray.js';
 
 export type { TrayMount, TraySpots } from './shell/table';
+
+declare global {
+  interface Window {
+    /**
+     * The sound engine, once the screen has built one — Unit 3.6.
+     *
+     * The tray makes its noise from collisions the physics world reports, and
+     * nothing outside a real browser can raise one. This is the seam
+     * `node scripts/browser.mjs --sound-controls` reads the output gain and
+     * the voice counts through. Nothing in the application reads it, and no
+     * check may write one. It follows the same rule as `__clatterTable`.
+     */
+    __clatterSound?: SoundEngine;
+  }
+}
 
 /**
  * What each artifact curve pays, in the words a player reads.
@@ -731,6 +751,110 @@ interface PresetNote {
 
 const NO_PRESET_NOTE: PresetNote = { text: '', reason: null };
 
+/**
+ * How far one arrow press moves the volume.
+ *
+ * Twenty steps over the range, so the keyboard reaches a level in a few presses
+ * and every step is a level a player can tell from the one beside it.
+ */
+const SOUND_VOLUME_STEP = 0.05;
+
+/**
+ * The sound controls — Unit 3.6, the interface half.
+ *
+ * Two controls, both native. A checkbox carries a role, a name and a checked
+ * state without a line of script, and a range input carries a role, a name and
+ * a value the arrow keys change. Decision 17 records why they live on the sheet
+ * and not on the main screen.
+ *
+ * The volume stays reachable while sound is off, so a player can set the level
+ * before making any noise at all. It is marked `aria-disabled` rather than
+ * disabled, because a disabled control leaves the keyboard order and a reader
+ * then cannot find the thing the toggle above it is about to switch on.
+ */
+/** What the sheet says where the browser gives no audio at all. */
+export const NO_AUDIO_TEXT = 'This browser makes no sound. The dice are silent here.';
+
+/**
+ * Build the audio graph, and answer whether the browser gave one.
+ *
+ * `enable` constructs an `AudioContext`, which a browser without the Web Audio
+ * API does not have. The failure lands inside the press that asked for sound,
+ * so it is caught here and answered in words rather than left to break the
+ * sheet. Nothing else is caught: a browser that HAS audio and refuses a node is
+ * a fault this application would rather see.
+ */
+function startSound(engine: SoundEngine): boolean {
+  try {
+    engine.enable();
+    return engine.context !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** What it says the rest of the time. Sound is made, never fetched. */
+export const SOUND_NOTE_TEXT =
+  'Every sound is made in the browser. This application holds no sound file.';
+
+function SoundPanel({
+  enabled,
+  volume,
+  note,
+  onEnabled,
+  onVolume,
+}: {
+  enabled: boolean;
+  volume: number;
+  note: string;
+  onEnabled: (on: boolean) => void;
+  onVolume: (level: number) => void;
+}) {
+  const percent = Math.round(volume * 100);
+  return (
+    <fieldset class="field" data-el="sheet-sound">
+      <legend>Sound</legend>
+      <label class="choice" data-el="sheet-sound-toggle-row">
+        <input
+          type="checkbox"
+          data-el="sheet-sound-toggle"
+          checked={enabled}
+          onChange={(event) => onEnabled(event.currentTarget.checked)}
+        />
+        The dice make a sound
+      </label>
+      <label class="choice range" data-el="sheet-sound-volume-row">
+        <span>Volume</span>
+        {/* The name is written on the control rather than taken from the label
+            around it, because that label also holds the reading below and a
+            reader would then announce the level twice. The word on the screen
+            and the accessible name are the same word, which WCAG 2.2 SC 2.5.3
+            asks for. */}
+        <input
+          type="range"
+          data-el="sheet-sound-volume"
+          aria-label="Volume"
+          min={0}
+          max={1}
+          step={SOUND_VOLUME_STEP}
+          value={volume}
+          aria-valuetext={`${percent} per cent`}
+          aria-disabled={!enabled}
+          onInput={(event) => onVolume(Number(event.currentTarget.value))}
+        />
+        {/* The same state the control already carries in `aria-valuetext`, for
+            an eye rather than for a reader. */}
+        <output data-el="sheet-sound-level" aria-hidden="true">
+          {percent} per cent
+        </output>
+      </label>
+      <p class="sheet-note" data-el="sheet-sound-note">
+        {note}
+      </p>
+    </fieldset>
+  );
+}
+
 /** Everything `sheet-share` needs, gathered so the sheet takes one prop for it. */
 interface ShareControls {
   readonly made: MadeCard | null;
@@ -749,7 +873,10 @@ function Sheet({
   applied,
   presetNote,
   share,
+  sound,
+  overlayOn,
   storage,
+  onShowOverlay,
   onSavePreset,
   onRecallPreset,
   onMovePreset,
@@ -766,8 +893,19 @@ function Sheet({
   applied: AppliedTheme;
   presetNote: PresetNote;
   share: ShareControls;
+  /** The stored sound choice, and the two calls that change it — Unit 3.6. */
+  sound: {
+    enabled: boolean;
+    volume: number;
+    note: string;
+    onEnabled: (on: boolean) => void;
+    onVolume: (level: number) => void;
+  };
+  /** True while the performance overlay is on the screen — Unit 3.8. */
+  overlayOn: boolean;
   /** What the browser reports the origin uses, or null where it reports none. */
   storage: { usage: number | null; quota: number | null } | null;
+  onShowOverlay: (on: boolean) => void;
   onSavePreset: (name: string) => boolean;
   onRecallPreset: (preset: PoolPreset) => void;
   onMovePreset: (preset: PoolPreset, toIndex: number) => void;
@@ -932,6 +1070,21 @@ function Sheet({
         <p class="sheet-note" data-el="sheet-tray-note">
           {trayNote(renderer.choice)}
         </p>
+        {/* The sound — Unit 3.6.
+
+            It sits under the renderer toggle because the sound is made by the
+            collisions of the table, and the flat dice make none. Decision 17
+            of `docs/design/0012-settled-decisions.md` records the choice, and
+            section 4 of `docs/design/0002-screen-design.md` lists both
+            controls. The sheet is a second surface, so the control budget of
+            section 3 and both keyboard walks of section 6 are untouched. */}
+        <SoundPanel
+          enabled={sound.enabled}
+          volume={sound.volume}
+          note={sound.note}
+          onEnabled={sound.onEnabled}
+          onVolume={sound.onVolume}
+        />
         {/* The share card — Unit 4.9.
 
             Decision 16 of `docs/design/0012-settled-decisions.md` puts it here
@@ -964,6 +1117,26 @@ function Sheet({
         >
           Set stress to zero
         </button>
+        {/* The performance overlay — Unit 3.8, the overlay half.
+
+            It is the last row of the sheet because it is a reading and not a
+            choice: it changes nothing about the dice, the rules or the look.
+            Decision 18 of `docs/design/0012-settled-decisions.md` records why
+            the switch lives here, why the reading is not stored, and why the
+            overlay reports rather than gates. The panel it draws holds no tab
+            stop, so both keyboard walks of section 6 are unchanged. */}
+        <label class="choice" data-el="sheet-overlay">
+          <input
+            type="checkbox"
+            data-el="sheet-overlay-toggle"
+            checked={overlayOn}
+            onChange={(event) => onShowOverlay(event.currentTarget.checked)}
+          />
+          Show the performance readings
+        </label>
+        <p class="sheet-note" data-el="sheet-overlay-note">
+          The readings measure this device. They are reported and never judged.
+        </p>
         <button class="btn go" type="button" data-el="sheet-close" ref={close} onClick={onClose}>
           Close
         </button>
@@ -1007,6 +1180,7 @@ export function App({
   probe = probeTray,
   mount = mountTray,
   makeCard = makeShareCard,
+  sound: soundEngine,
   log: logOptions,
 }: {
   random?: RandomSource;
@@ -1023,6 +1197,16 @@ export function App({
    * test hands over a card of its own to drive the two ways out of the panel.
    */
   makeCard?: typeof makeShareCard;
+  /**
+   * The sound engine — Unit 3.6.
+   *
+   * It is injected for the same reason the mount and the probe are: the engine
+   * builds a real `AudioContext`, and jsdom has none. A test hands over an
+   * engine built on a context of its own and then reads the level off the gain
+   * node that engine really made. `node scripts/browser.mjs --sound-controls`
+   * drives the shipped one through the browser's own audio.
+   */
+  sound?: SoundEngine;
   /**
    * How the roll log is opened. A test hands over its own database name, its
    * own clock and its own roll names, so a run is repeatable and two runs do
@@ -1063,6 +1247,35 @@ export function App({
     null,
   );
   const [logFailure, setLogFailure] = useState<string | null>(null);
+  // ---- The sound — Unit 3.6, the interface half ----
+  //
+  // One engine for the life of the screen. It is built from the stored record
+  // and it builds NOTHING of its own until the player asks for sound:
+  // `createSoundEngine` constructs no `AudioContext` at all here, and `enable`
+  // is what builds one. The engine is a ref because the tray calls it from a
+  // collision callback and nothing on the screen is drawn from it.
+  const sound = useRef<SoundEngine | null>(null);
+  if (sound.current === null) {
+    sound.current =
+      soundEngine ??
+      createSoundEngine({
+        enabled: stored.soundEnabled,
+        volume: stored.soundVolume,
+      });
+  }
+  const [soundNote, setSoundNote] = useState(SOUND_NOTE_TEXT);
+  // ---- The performance overlay — Unit 3.8, the overlay half ----
+  //
+  // The instrument exists only while the overlay is on the screen, so a player
+  // who never opens it pays for no frame callback and no observer. A fresh
+  // recorder each time is also what makes the sample counts honest: the
+  // figures belong to this sitting, not to a session that has been idling.
+  const perf = useRef<PerfRecorder | null>(null);
+  const [overlayOn, setOverlayOn] = useState(false);
+  const showOverlay = (on: boolean): void => {
+    perf.current = on ? createPerfRecorder() : null;
+    setOverlayOn(on);
+  };
   const dice = throwDice(state);
   // ---- The theme — Unit 4.8 ----
   //
@@ -1132,6 +1345,80 @@ export function App({
   /** Put a built theme on the screen, or take it off. */
   const buildThemeNow = (built: BuiltTheme | null): void => {
     apply((previous) => ({ ...previous, settings: { ...previous.settings, builtTheme: built } }));
+  };
+
+  // ---- The sound — Unit 3.6 ----
+  //
+  // A record that already holds sound builds the context once, at the first
+  // render, so the first collision of the session does not have to build one
+  // inside the frame it is heard in. The context is born suspended either way.
+  // Nothing here resumes it: a gesture does, and `threw` below is that gesture.
+  useEffect(() => {
+    const engine = sound.current;
+    if (engine === null) return;
+    if (held.current.settings.soundEnabled && !startSound(engine)) {
+      setSoundNote(NO_AUDIO_TEXT);
+    }
+    // The one seam an outside instrument reads the sound through. A WebGL tray
+    // makes its noise from collisions no test can raise by hand, so
+    // `node scripts/browser.mjs --sound-controls` reads the gain off this
+    // engine's real `GainNode` and counts the voices through the browser's own
+    // `AudioContext`. Nothing in the application reads this field.
+    window.__clatterSound = engine;
+    return () => {
+      window.__clatterSound = undefined;
+    };
+  }, []);
+
+  /**
+   * Turn sound on, or off.
+   *
+   * The record is written through the one writer, so the choice lives beside
+   * the renderer choice and the theme. Turning it on RESUMES the context here:
+   * this call runs inside the press that turned it on, which is the user
+   * gesture a browser needs before it will start an audio clock.
+   */
+  const setSoundEnabled = (on: boolean): void => {
+    const engine = sound.current;
+    let started = on;
+    if (engine !== null) {
+      if (on) {
+        started = startSound(engine);
+        if (started) void engine.resume();
+      } else {
+        engine.disable();
+      }
+    }
+    setSoundNote(on && !started ? NO_AUDIO_TEXT : SOUND_NOTE_TEXT);
+    apply((previous) => ({
+      ...previous,
+      settings: { ...previous.settings, soundEnabled: started },
+    }));
+  };
+
+  /** Set the level. It reaches the output gain at once, and the record too. */
+  const setSoundVolume = (level: number): void => {
+    sound.current?.setVolume(level);
+    apply((previous) => ({
+      ...previous,
+      settings: { ...previous.settings, soundVolume: level },
+    }));
+  };
+
+  /**
+   * The press that threw, in both instruments that can make one.
+   *
+   * Two things ride on it. The overlay's measurement window opens at the press
+   * itself and not at the render that follows it, so the whole cost of a throw
+   * lies inside the reading — `event.timeStamp` is the instant the browser
+   * received the press, before any handler of this application ran. And a
+   * suspended audio clock starts here, because a press is a user gesture and
+   * `resume` needs one.
+   */
+  const threw = (at: number): void => {
+    perf.current?.pressed(at);
+    const engine = sound.current;
+    if (engine?.enabled === true) void engine.resume();
   };
 
   // ---- The saved pools — Unit 4.3 ----
@@ -1454,6 +1741,9 @@ export function App({
               }}
               colours={applied.diceColours}
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
+              onImpact={(impact) => sound.current?.impact(impact)}
+              onMotion={(at, evidence) => perf.current?.motion(at, evidence)}
+              onSettled={(at) => perf.current?.settled(at)}
             />
             {state.result === null ? null : (
               <DiceTray
@@ -1536,7 +1826,10 @@ export function App({
             class={state.result === null ? 'btn go' : 'btn'}
             type="button"
             data-el="roll-button"
-            onClick={() => setState((previous) => rollNow(previous, random))}
+            onClick={(event) => {
+              threw(event.timeStamp);
+              setState((previous) => rollNow(previous, random));
+            }}
           >
             {state.builderOpen ? 'Roll' : 'Roll again'}
             <small>
@@ -1549,7 +1842,10 @@ export function App({
               type="button"
               data-el="push-button"
               disabled={!canPush(state)}
-              onClick={() => setState((previous) => pushNow(previous, random))}
+              onClick={(event) => {
+                threw(event.timeStamp);
+                setState((previous) => pushNow(previous, random));
+              }}
             >
               Push
               <small>{pushNote(state)}</small>
@@ -1557,6 +1853,18 @@ export function App({
           )}
         </div>
       </div>
+
+      {/* The performance overlay — Unit 3.8.
+
+          It is drawn over the screen rather than inside the middle region,
+          because the middle scrolls and a reading the owner is photographing
+          must not scroll away from the dice it belongs to. It takes no pointer
+          events, so it can never swallow a tap on a control under it, and it
+          holds no tab stop, so both keyboard walks of section 6 are unchanged.
+          It is a named region, so a reader reaches it by landmark. */}
+      {overlayOn && perf.current !== null ? (
+        <PerfOverlay recorder={perf.current} onTheTable={onTheTable} />
+      ) : null}
 
       {state.sheetOpen ? (
         <Sheet
@@ -1576,6 +1884,15 @@ export function App({
             onDownload: runDownloadCard,
             onSend: runSendCard,
           }}
+          sound={{
+            enabled: renderer.settings.soundEnabled,
+            volume: renderer.settings.soundVolume,
+            note: soundNote,
+            onEnabled: setSoundEnabled,
+            onVolume: setSoundVolume,
+          }}
+          overlayOn={overlayOn}
+          onShowOverlay={showOverlay}
           storage={storage}
           onSavePreset={(name) =>
             runPreset(

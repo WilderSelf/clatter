@@ -863,6 +863,10 @@ body {
 .scrim {
   position: fixed;
   inset: 0;
+  /* Above the performance overlay of Unit 3.8, which is fixed as well. The
+     sheet holds the switch that turns that overlay off, so the sheet may never
+     be the thing underneath. */
+  z-index: 3;
   background: rgb(0 0 0 / 55%);
   display: grid;
   align-items: end;
@@ -913,6 +917,111 @@ body {
   margin: 0;
   font-size: 13px;
   color: var(--ink-dim);
+}
+
+/* The volume — Unit 3.6. The slider takes the row it is given and the reading
+   beside it prints the level in words, so the state is never the position of a
+   thumb alone. */
+.choice.range {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s2);
+}
+
+/* The slider is the hit target, and a range input draws itself about 20 px
+   tall. It is given the full row so a finger has 44 px of it, which is the
+   floor section 7 of the screen design sets and well over the 24 px of WCAG 2.2
+   SC 2.5.8. */
+.choice.range input {
+  min-width: 0;
+  height: 44px;
+  accent-color: var(--accent);
+}
+
+.choice.range output {
+  font-size: 13px;
+  color: var(--ink-dim);
+  min-width: 6.5em;
+  text-align: right;
+}
+
+/* ---------------- the performance overlay, Unit 3.8 ---------------- */
+
+/* It is drawn over the screen and never inside the middle, because the middle
+   scrolls and a reading being photographed must stay beside the dice it
+   belongs to. It takes no pointer events at all, so it cannot swallow a tap on
+   a control beneath it, and it holds no tab stop, so neither keyboard walk of
+   section 6 changes. The sheet sits above it. */
+.perf {
+  position: fixed;
+  top: var(--s2);
+  left: var(--s2);
+  z-index: 2;
+  max-width: calc(100vw - 2 * var(--s2));
+  pointer-events: none;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: var(--s2) var(--s3);
+  display: grid;
+  gap: var(--s1);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.perf-h {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.perf-l {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+
+/* One figure to a row: the name, then the reading with its unit and its sample
+   count. The two wrap under one another on a narrow phone rather than clipping
+   the number. */
+.perf-row {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--s1) var(--s2);
+}
+
+.perf-row dt {
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.perf-row dd {
+  margin: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A figure the browser cannot measure, and a figure with too few samples, both
+   read as quiet text. Neither one is a number. */
+.perf-row[data-reading='unavailable'] dd,
+.perf-row[data-reading='tooFew'] dd {
+  color: var(--ink-dim);
+  font-style: italic;
+}
+
+.perf-f {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+@media (max-width: 420px) {
+  .perf-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ---------------- the override panel, Unit 4.2 ---------------- */

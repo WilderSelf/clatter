@@ -777,3 +777,133 @@ of the plan's own trade: the share card is the first thing effort is traded from
 Any change of the dice — a throw, a push, or a die the player keeps or releases — clears the card and
 its preview. A card left standing would be saved under readings the table no longer holds, which is
 the hazard Decision 10 closes for the cost row and Unit 4.7 closes for the statistics.
+
+---
+
+## Decision 17 — the sound controls live behind the disclosure, and the volume stays reachable while sound is off, taken by me 2026-08-10
+
+**`sheet-sound` is a twelfth control behind the one disclosure. It holds two controls: a checkbox
+that turns the sound on, and a slider that sets the level.** Section 4 of
+`docs/design/0002-screen-design.md` lists both against Unit 3.6. I took this decision under the
+delegated interface authority of `CLAUDE.md`.
+
+### Where the controls live, and the home taken against
+
+**Rejected: a speaker button in the header.** The header carries status and never navigates, which
+is Decision 2. A mute button there is a control, so it would break that rule, take rest A from five
+controls to six, and add a twelfth visit to the before-throw walk of section 6.
+
+**Taken: the disclosure sheet, under the renderer toggle.** Three reasons.
+
+1. **The sound is made by the table.** Every voice comes from a collision the physics world
+   reported. The flat dice of Unit 3.7 report none, so a player who reads the note under
+   `sheet-tray-renderer` and switches the table on is one row above the switch that makes it heard.
+2. **A level is set once and a push is taken constantly.** That is the rule Decision 11 took for the
+   saved pools and Decision 16 took for the share card.
+3. **The sheet is a second surface.** It carries no share of the control budget of section 3 and
+   neither keyboard walk of section 6 names a `sheet-` control, so the screen still shows five
+   controls at each rest state and the walks stay at eleven visits and thirty-five.
+
+### The volume stays reachable while sound is off
+
+The slider is marked `aria-disabled` while sound is off, and it is **not** disabled. A disabled
+control leaves the keyboard order, and a reader would then be unable to find the thing the checkbox
+above it is about to switch on. The level a player sets while sound is off is stored and is the level
+the first voice plays at.
+
+### The accessible name is written on the slider, not taken from its label
+
+The row holds three things: the word "Volume", the slider, and the level in words. A slider that took
+its name from the label around it would be announced as "Volume 25 per cent", and the level would then
+be read twice, because `aria-valuetext` already carries it. So `aria-label` on the control says
+"Volume" and nothing else, which is the word on the screen as well, and WCAG 2.2 SC 2.5.3 asks for
+exactly that. The printed level is marked `aria-hidden`, because it is the same state for an eye.
+
+### The step is one twentieth, and the slider is the full row height
+
+An arrow press moves the level by 0.05. Twenty steps cross the range, which is a level a player can
+tell from the one beside it and a few presses from one end to the other. A range input draws itself
+about 20 px tall, so it is given the full 44 px row: that is the floor section 7 of the screen design
+sets, and it is well over the 24 px of WCAG 2.2 SC 2.5.8. The first draft failed the check that reads
+that height, at 20 px.
+
+### A browser with no Web Audio is answered in words
+
+`enable` constructs an `AudioContext`, and a browser without the Web Audio API has none. The failure
+lands inside the press that asked for sound, so it is caught and the note under the controls says
+"This browser makes no sound. The dice are silent here." **The record is not written in that case.**
+A record that promised sound the browser cannot make would greet the next session with a switch that
+reads on and a table that is silent.
+
+---
+
+## Decision 18 — the performance overlay is a session switch on the sheet, and it reports rather than gates, taken by me 2026-08-10
+
+**`sheet-overlay` is a thirteenth control behind the one disclosure. It shows a panel of four
+readings over the screen: p95 frame duration, p99 frame duration, the long-task total, and
+throw-to-first-motion.** Section 4 of `docs/design/0002-screen-design.md` lists it against Unit 3.8.
+I took this decision under the delegated interface authority of `CLAUDE.md`.
+
+### The overlay reports. It never gates.
+
+The End state of `CLAUDE.md` splits the performance claims in two. The deterministic gates are
+integers, they run in CI, and they read a bound out of `budgets.json`. The timing figures are
+**reported, on real hardware**, once per phase, and the owner pastes them into `LEDGER.md`. The
+overlay is the second kind. So it reads no budget, it compares no reading against one, it prints no
+verdict, and no command in `validate` and no step of CI runs it. A timing figure that gated would
+fail on the machine that ran it rather than on the code, which is the reason the split exists.
+
+The panel says so in its own words: "These are readings, not a pass or a fail."
+
+### Every number names its unit and its sample count
+
+The owner reads these figures off a photograph of a phone. A bare number there is ambiguous, so every
+line prints the unit and the number of observations behind it: "50.2 ms over 476 frames in a throw".
+
+### A percentile below its floor is refused
+
+A quantile q over n samples names a value that at most n(1-q) samples lie above. Below 1/(1-q)
+samples that count is under one, so the "p95" is simply the largest sample and the "p99" is the same
+number again. The floor is therefore **derived from the quantile** and is not a taste: 20 frames for
+p95 and 100 for p99. Below it the panel prints "too few samples: 4 of 20 frames in a throw" and no
+number at all.
+
+### A figure with no source says so by name, and never prints a zero
+
+`PerformanceObserver` with the `longtask` entry type is not offered by every browser, and Firefox is
+one that does not offer it. The panel reads "not measured here: this browser reports no long tasks".
+A zero would be a measurement and it would be a lie. The same rule covers throw-to-first-motion on
+the flat dice, where no table moves.
+
+### The frames are sampled inside a throw and nowhere else
+
+A probe that samples a resting table measures the browser idling. The cost of this application is the
+throw: the library simulates the whole tumble in one synchronous block before it draws anything. So a
+measurement window opens at the press that threw and closes when the tray reports the table at rest.
+A window nothing reports rest for shuts after four seconds, because the flat renderer acts no throw
+out and would otherwise fill the samples with idle frames.
+
+### Throw to first motion is bounded by a moved die
+
+The near end is the press itself: the `timeStamp` of the click event, which the browser wrote before
+any handler of this application ran. The far end is the first animation frame that draws a die
+somewhere **other than where the press left it**, read off the drawn positions of the dice.
+
+**The first frame is not the first motion.** The screen redraws as soon as the player presses — the
+builder collapses and the footer changes — and the browser paints that frame before any die moves. A
+probe that stopped there would report the redraw and miss the whole stall, which is the number the
+plan calls first-class.
+
+### The switch is a session switch and is not stored
+
+Nothing about the overlay reaches the settings record. A stored diagnostic panel would greet a player
+who forgot it with a permanent cost and a permanent panel over the dice. The reading belongs to the
+sitting it was taken in.
+
+### The panel holds no tab stop and takes no pointer event
+
+It is a named region, so a reader reaches it as a landmark, and it carries no control, so both
+keyboard walks of section 6 are the walks they were. It is drawn over the screen rather than inside
+the middle region, because the middle scrolls and a reading being photographed must stay beside the
+dice it belongs to. It takes no pointer events at all, so it can never swallow a tap on a control
+under it.
