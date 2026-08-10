@@ -17,25 +17,33 @@
 //      not a record — reads as the defaults. It never throws.
 
 import type { ArtifactFaces, Mode, PoolCounts } from '../rules/pool';
-import { PUSH_PROFILES } from '../rules/push-profile';
-import type { CurveId } from '../rules/success';
+import type { PushProfileOverride } from '../rules/push-profile';
+import { profileById, PUSH_PROFILES } from '../rules/push-profile';
+import type { ArtifactCurveId } from '../rules/success';
+import { ARTIFACT_CURVE_IDS } from '../rules/success';
 import type { ThemeId } from '../theme/themes';
 import { THEME_IDS } from '../theme/themes';
+import { NO_OVERRIDE, sanitiseOverride } from './profile-fields';
 
-/** The two curves an artifact die takes. The other curves belong to other types. */
-export type ArtifactCurveId = Extract<CurveId, 'artifactEscalating' | 'artifactFlat'>;
+/**
+ * The two curves an artifact die takes. The other curves belong to other types.
+ * The type is the core's own, kept under the name this module has used since
+ * Unit 4.1.
+ */
+export type { ArtifactCurveId };
 
 /**
  * The version of the record this build writes. Version 1 is the same record
  * without `artifactCurve`. Version 2 is the same record without
  * `flatFallback`. Version 3 is the same record without the two sound fields.
  * Version 4 is the same record without the three theme axes. Version 5 is the
- * same record without the saved pool presets.
+ * same record without the saved pool presets. Version 6 is the same record
+ * without the push-profile override.
  * No record below the current version ever reached a user, because nothing has
  * shipped — they exist so the migration chain has steps to run and steps to
  * prove.
  */
-export const SETTINGS_VERSION = 6;
+export const SETTINGS_VERSION = 7;
 
 /**
  * One saved pool, under a name the player wrote.
@@ -107,16 +115,27 @@ export interface Settings {
    * it is a list and not a map. The name is the identity of a preset.
    */
   readonly poolPresets: readonly PoolPreset[];
+  /**
+   * The change the player made on top of the chosen preset, or an empty record.
+   *
+   * It holds only the leaves that really differ, so an empty record means the
+   * preset is in force unchanged. It is applied by `mergeProfile` in the rules
+   * core, and it travels with the player rather than with a preset: a change of
+   * preset keeps it, because it is a change on top of whichever preset is
+   * chosen. Unit 4.2 draws it.
+   */
+  readonly profileOverride: PushProfileOverride;
 }
 
 const MODES: readonly Mode[] = ['pool', 'step'];
 
-const ARTIFACT_CURVES: readonly ArtifactCurveId[] = ['artifactEscalating', 'artifactFlat'];
-
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   version: SETTINGS_VERSION,
   mode: 'pool',
-  presetId: 'pool-banes-damage-ratings',
+  // The preset the screen opens under. It is the one the drawn screen of Unit
+  // 2.0 holds, and `src/shell/state.ts` reads this field rather than keeping a
+  // second answer of its own.
+  presetId: 'pool-stress-and-complications',
   artifactCurve: 'artifactEscalating',
   flatFallback: false,
   soundEnabled: false,
@@ -128,6 +147,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   traySurfaceId: 'ash',
   interfacePaletteId: 'ash',
   poolPresets: Object.freeze([]),
+  profileOverride: NO_OVERRIDE,
 });
 
 type StoredRecord = Readonly<Record<string, unknown>>;
@@ -268,6 +288,7 @@ const MIGRATIONS: Readonly<Record<number, (stored: StoredRecord) => StoredRecord
     interfacePaletteId: DEFAULT_SETTINGS.interfacePaletteId,
   }),
   5: (stored) => ({ ...stored, version: 6, poolPresets: [] }),
+  6: (stored) => ({ ...stored, version: 7, profileOverride: {} }),
 };
 
 /** Bounds the chain, so a step that forgets to raise the version cannot loop. */
@@ -288,11 +309,16 @@ export function migrate(stored: unknown): Settings {
   if (record['version'] !== SETTINGS_VERSION) {
     return DEFAULT_SETTINGS;
   }
+  const presetId = shippingPreset(record['presetId']);
   return {
     version: SETTINGS_VERSION,
     mode: oneOf(record['mode'], MODES, DEFAULT_SETTINGS.mode),
-    presetId: shippingPreset(record['presetId']),
-    artifactCurve: oneOf(record['artifactCurve'], ARTIFACT_CURVES, DEFAULT_SETTINGS.artifactCurve),
+    presetId,
+    artifactCurve: oneOf(
+      record['artifactCurve'],
+      ARTIFACT_CURVE_IDS,
+      DEFAULT_SETTINGS.artifactCurve,
+    ),
     flatFallback: record['flatFallback'] === true,
     soundEnabled: record['soundEnabled'] === true,
     soundVolume: volumeLevel(record['soundVolume']),
@@ -304,6 +330,10 @@ export function migrate(stored: unknown): Settings {
       DEFAULT_SETTINGS.interfacePaletteId,
     ),
     poolPresets: poolPresetList(record['poolPresets']),
+    // The override is read against the preset the same record names, because a
+    // leaf is allowed by the value the preset holds at that leaf. Every rule
+    // for it lives in `profile-fields.ts`, beside the panel that draws it.
+    profileOverride: sanitiseOverride(profileById(presetId), record['profileOverride']),
   };
 }
 
