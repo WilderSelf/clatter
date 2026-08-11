@@ -10587,15 +10587,42 @@ async function readGrain(page, selector) {
  */
 async function readGrounds(page, selectors) {
   return page.evaluate((list) => {
+    // True where the element already carries an image of its OWN that covers
+    // it. An axis that repeats covers all of that axis, and an axis that does
+    // not covers the fraction its size states. The bound is the whole element
+    // on both axes, so nothing is chosen and a small decoration cannot claim it.
+    const coveringImage = (element) => {
+      const style = getComputedStyle(element);
+      if (style.backgroundImage === 'none') return false;
+      if (style.backgroundImage.includes('image/svg+xml')) return false;
+      const box = element.getBoundingClientRect();
+      const repeat = style.backgroundRepeat.split(' ');
+      const sizes = style.backgroundSize.split(' ');
+      return [0, 1].every((axis) => {
+        const mode = (repeat[axis] ?? repeat[0] ?? 'repeat').trim();
+        if (mode !== 'no-repeat') return true;
+        const span = axis === 0 ? box.width : box.height;
+        const stated = (sizes[axis] ?? sizes[0] ?? 'auto').trim();
+        if (stated === 'cover' || stated === 'contain') return true;
+        if (stated.endsWith('%')) return Number.parseFloat(stated) >= 100;
+        if (stated.endsWith('px')) return Number.parseFloat(stated) >= span;
+        return false;
+      });
+    };
     const answer = {};
     for (const selector of list) {
-      let found;
+      let all;
       try {
-        found = document.querySelector(selector);
+        all = [...document.querySelectorAll(selector)];
       } catch {
         // A selector the browser refuses is a fault of this list, not a state.
-        found = null;
+        all = [];
       }
+      // **Every element the selector draws, and not the first one.** `.die`
+      // draws pips on a six-faced die and a numeral on every other, so the
+      // first match alone would answer for a rule that covers both, and which
+      // one came first would decide the reading.
+      const found = all[0] ?? null;
       if (found === null) continue;
       const box = found.getBoundingClientRect();
       const style = getComputedStyle(found);
@@ -10607,12 +10634,23 @@ async function readGrounds(page, selectors) {
       if (style.backgroundColor === 'transparent' || /,\s*0\)$/.test(style.backgroundColor)) {
         continue;
       }
+      // **A ground that already carries an image of its own is not flat.** The
+      // pips of a flat die are six background layers, and the grain rule comes
+      // after them, so graining that ground DELETES them. The arm is bounded so
+      // a 4 px decoration cannot claim it: the image has to cover the element.
+      // Coverage is derived per axis from the computed `background-repeat` and
+      // `background-size` — an axis that repeats covers all of it, and an axis
+      // that does not covers the fraction its size states. Nothing is chosen:
+      // the bound is the whole element on both axes.
+      const grained = style.backgroundImage.includes('image/svg+xml');
       answer[selector] = {
         width: box.width,
         height: box.height,
         // The renderer resolves the custom property, so this is the image the
         // element really carries and not the text of the rule.
-        grained: style.backgroundImage.includes('image/svg+xml'),
+        grained,
+        ownImage: all.every((each) => coveringImage(each)),
+        drawnCount: all.length,
       };
     }
     return answer;
@@ -10719,6 +10757,9 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
   await pressTile(page, 'attribute', 'p', 4);
   await pressTile(page, 'skill', 'p', 3);
   await pressTile(page, 'stress', 'p', 2);
+  // A die of more than six faces draws a numeral instead of pips, so `.die`
+  // shows both kinds and the fourth arm answers for the whole rule.
+  await pressTile(page, 'artifact', 'p', 2);
   await page.click('[data-el="roll-button"]');
   await settleScreen(page);
   await sweep('a roll on the table');
@@ -10846,12 +10887,15 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
       : [`${one.token} is not a token the palette pins fixed across every row`];
   });
 
-  const uncovered = measured.filter((member) => !member.grained && !member.small && !member.mark);
+  const uncovered = measured.filter(
+    (member) => !member.grained && !member.small && !member.mark && !member.ownImage,
+  );
   const covered = measured.length - uncovered.length;
   console.log(
     `browser: theme grounds population=${measured.length} grained=${measured.filter((one) => one.grained).length} ` +
       `too_small=${measured.filter((one) => !one.grained && one.small).length} ` +
       `meaning_marks=${measured.filter((one) => !one.grained && !one.small && one.mark).length} ` +
+      `own_image=${measured.filter((one) => !one.grained && !one.small && !one.mark && one.ownImage).length} ` +
       `uncovered=${uncovered.length} ` +
       `never_drawn=${measured.filter((one) => !one.drawn).length} ` +
       `probed_for_grain=${Object.keys(probed).length} ` +
@@ -11322,6 +11366,20 @@ async function runTheme(page, options, checks) {
   });
 
   // ---- 5. Keyboard alone reaches every control, and changes the screen. ----
+  //
+  // **The group floor is re-derived, not nudged.** Unit 4.8 set it at 5 for
+  // three axes plus the builder plus the mode set. The theme collapse re-derived
+  // it to 3 for three inner groups. Unit 4.11 then took the rows legend away, so
+  // the panel held one fewer and the constant read one too many and went red on
+  // `main` — a probe constant left uncalibrated by a change to what it counts.
+  //
+  // So it is a LIST of the grouped controls the panel holds, and not a count.
+  // `sheet-theme` is itself a fieldset and `querySelectorAll` does not answer
+  // with the element it was called on, so only the inner groups are named here:
+  // the colour builder and the page mode. The six rows are a radio set inside
+  // the panel's own legend and carry no fieldset of their own. A group that
+  // disappears is named in the failure rather than counted away.
+  const THEME_PANEL_GROUPS = ['theme-builder', 'theme-mode'];
   await chooseThemeRow(page, 'ash');
   const walk = await page.evaluate(() => {
     const panel = document.querySelector('[data-el="sheet-theme"]');
@@ -11348,8 +11406,15 @@ async function runTheme(page, options, checks) {
       unnamed: stops.filter((each) => each.name.length === 0).map((each) => each.role),
       stateless: stops.filter((each) => each.state === undefined || each.state === null).length,
       groups: panel.querySelectorAll('fieldset').length,
+      // The grouped controls the panel holds, by name, so the floor below is a
+      // list of things and not a bare number.
+      named: [...panel.querySelectorAll('fieldset')].map(
+        (each) => each.getAttribute('data-el') ?? 'unnamed',
+      ),
     };
   });
+
+  const missingGroups = THEME_PANEL_GROUPS.filter((one) => !(walk.named ?? []).includes(one));
 
   // A real key press on a real control, and the page has to answer it.
   const before = await paintOf(page, '.screen', 'backgroundColor');
@@ -11374,7 +11439,8 @@ async function runTheme(page, options, checks) {
   }, HIT_TARGET_FLOOR);
   console.log(
     `browser: theme keyboard stops=${walk.stops.length} unnamed=${walk.unnamed.length} ` +
-      `groups=${walk.groups} arrow=${from}->${to} page=${before}->${after} short=${short.length}`,
+      `groups=${walk.groups} [${(walk.named ?? []).join(', ')}] missing=${missingGroups.length} ` +
+      `arrow=${from}->${to} page=${before}->${after} short=${short.length}`,
   );
   checks.push({
     name: 'theme.keyboard-alone-reaches-and-operates-every-control',
@@ -11382,7 +11448,8 @@ async function runTheme(page, options, checks) {
       walk.stops.length > 0 &&
       walk.unnamed.length === 0 &&
       walk.stateless === 0 &&
-      walk.groups >= 3 &&
+      missingGroups.length === 0 &&
+      walk.groups >= THEME_PANEL_GROUPS.length &&
       from !== null &&
       to !== null &&
       to !== from &&
@@ -11390,7 +11457,7 @@ async function runTheme(page, options, checks) {
       short.length === 0,
     detail:
       `${walk.stops.length} controls, ${walk.unnamed.length} of them without an accessible name ` +
-      `[${walk.unnamed.join(', ')}], in ${walk.groups} groups, and ${walk.stateless} without a ` +
+      `[${walk.unnamed.join(', ')}], in ${walk.groups} groups [${(walk.named ?? []).join(', ')}] against the ${THEME_PANEL_GROUPS.length} the panel must hold [${THEME_PANEL_GROUPS.join(', ')}], ${missingGroups.length} of them missing [${missingGroups.join(', ')}], and ${walk.stateless} without a ` +
       `state. One arrow key on the theme group moved the choice from ${from} to ${to} and ` +
       `the page colour from ${before} to ${after}, so the keyboard alone changes the theme. ` +
       `${short.length} hit targets sit under the ${HIT_TARGET_FLOOR} px floor of WCAG 2.2 ` +
