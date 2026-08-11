@@ -123,6 +123,47 @@ describe('the six rows', () => {
       'a swatch is decoration, because a colour has no name to say',
     ).toBe(swatches.length);
   });
+
+  // The two checks below hold what a pair of renders found. Neither defect was
+  // visible to the suite: one was a word and the other was a colour, and both
+  // read as correct in the DOM until somebody looked at the picture.
+
+  it('names the group of rows something other than the panel around it', () => {
+    mount();
+    const outer = element('sheet-theme').querySelector('legend')?.textContent?.trim();
+    const inner = element(THEME_ROWS_ELEMENT).querySelector('legend')?.textContent?.trim();
+    expect(outer?.length, 'the panel carries a legend').toBeGreaterThan(0);
+    expect(inner?.length, 'the group carries a legend').toBeGreaterThan(0);
+    // The panel legend and the group legend both read "Theme" once. Two
+    // headings of one word, one inside the other, say nothing about either.
+    expect(inner, `the group inside "${outer}" repeats its name`).not.toBe(outer);
+  });
+
+  it('draws each swatch from the page of its row as well as the accent', () => {
+    mount();
+    // The document rewrites a hex colour as `rgb(r, g, b)`, so the wanted
+    // colour is put in the same form rather than the style read in another.
+    const asRgb = (hex: string): string =>
+      `rgb(${[1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
+    let read = 0;
+    for (const id of THEME_IDS) {
+      const swatch = element(THEME_ROWS_ELEMENT)
+        .querySelector(`input[value="${id}"]`)
+        ?.parentElement?.querySelector('.thm-sw');
+      const style = swatch?.getAttribute('style') ?? '';
+      // The accent alone told five rows apart and lied about the sixth: `bone`
+      // is the light theme and its accent is dark, so an accent-only swatch
+      // said the opposite of what the row does.
+      expect(style, `${id}: the swatch carries the accent`).toContain(
+        asRgb(INTERFACE_PALETTES[id].accent),
+      );
+      expect(style, `${id}: the swatch carries the page`).toContain(
+        asRgb(INTERFACE_PALETTES[id].background),
+      );
+      read += 1;
+    }
+    expect(read, 'every row was read').toBe(THEME_IDS.length);
+  });
 });
 
 describe('the colour builder', () => {

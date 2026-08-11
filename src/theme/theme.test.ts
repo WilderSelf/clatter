@@ -10,11 +10,15 @@
 //   6    text contrast inside the interface. A text pair never leaves the
 //        palette, and one id names the palette, so six palettes are six
 //        answers.
-//   36   a readout drawn over the tray. Only six palette and surface pairings
-//        are reachable through the picker now, but a theme a player BUILDS puts
-//        a derived palette over a shipped tray surface, so a readout still has
-//        to hold over every surface. The wider denominator stays for that
-//        reason, and `appliedTheme` is where the crossing happens.
+//   36   a readout drawn over the tray. Six of these pairings are reachable
+//        and thirty are not, because one id names the palette and the surface
+//        together. The wider denominator is kept because the six surfaces are
+//        interchangeable: every one is its own page seed at one lightness
+//        target, and the band they really sit in is MEASURED below rather than
+//        stated here. A readout that clears the darkest of them clears all six,
+//        so the thirty cost nothing and they catch a surface that leaves the
+//        band. They do NOT exercise a built palette: `appliedTheme` can put one
+//        over a shipped surface, and no check here builds one.
 //   15   the pairs of six dice types, inside each of the six dice themes. Unit
 //        3.3 proved the ladder for one theme. Six is a different claim.
 
@@ -106,9 +110,25 @@ describe('text contrast', () => {
 // ---------------------------------------------------------------------------
 
 describe('a readout drawn over the tray', () => {
-  // The picker reaches six of these 36 pairings. The other 30 stay measured
-  // because `appliedTheme` puts a BUILT palette over a shipped tray surface,
-  // and a built palette is derived from the same targets as these six rows.
+  it('holds the six tray surfaces inside one band of lightness', () => {
+    // The reason the 36 below is kept, measured rather than asserted in prose.
+    // Each surface is a page seed at one target, so the six differ in hue and
+    // hardly at all in lightness. A row that left this band would make the
+    // thirty unreachable pairings mean something again, and it would land
+    // here first.
+    const measured = NAMES.map((id) => lightness(TRAY_SURFACES[id]));
+    expect(measured.length, 'every surface was read').toBe(NAMES.length);
+    const band = Math.max(...measured) - Math.min(...measured);
+    expect(
+      band,
+      `the six surfaces span ${band.toFixed(2)} CIE L*, from ` +
+        `${Math.min(...measured).toFixed(2)} to ${Math.max(...measured).toFixed(2)}`,
+    ).toBeLessThan(1);
+  });
+
+  // Thirty of these 36 pairings are unreachable through the picker. They are
+  // measured because the band above makes the six surfaces interchangeable,
+  // so the thirty are nearly free and they fail the moment one surface moves.
   it('meets the text floor on all 36 palette and surface pairs', () => {
     let enumerated = 0;
     let lowest = Number.POSITIVE_INFINITY;
@@ -197,10 +217,12 @@ describe('the dice type colours', () => {
 
   it('keeps every die visible on every tray surface, all 216 of them', () => {
     // Unit 3.3 measured one dice theme against one surface. The picker pairs a
-    // dice row with its own surface, but a theme a player builds crosses a
-    // derived dice ladder with a shipped surface, so the wider denominator is
-    // the one that ships. An invariant proven for one instance does not
-    // compose, so it is measured again at that scale.
+    // dice row with its own surface, so 36 of these 216 are reachable. The rest
+    // are kept for the reason the band above states: the six surfaces sit
+    // inside one CIE L* and a die that clears the darkest clears all six. An
+    // invariant proven for one instance does not compose either, so the claim
+    // is measured over every row rather than over the one that ships by
+    // default.
     let measured = 0;
     for (const dice of NAMES) {
       for (const surface of NAMES) {

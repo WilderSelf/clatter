@@ -18,7 +18,7 @@
 // `builder.ts` from one seed pair — one colour for the dice ladder and one for
 // the page — so the six shipped rows and a theme a player builds answer to one
 // arithmetic and one set of lightness targets. The seeds are recorded beside
-// each record. Deriving again is how a row is retuned; nothing derives at run
+// each record. Deriving again is how a row is retuned. Nothing derives at run
 // time.
 //
 // What is measured, and where:

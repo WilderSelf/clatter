@@ -389,8 +389,9 @@ describe('the contrast the roles carry', () => {
     for (const palette of NAMES) {
       for (const surface of NAMES) {
         // The picker cannot cross a palette with a foreign surface, so the
-        // crossing is made here the way `appliedTheme` makes it: a palette
-        // built from the row's own page seed, over another row's table.
+        // crossing is made here by hand. It is not a built theme: it is a
+        // shipped palette over another row's table, kept because the six
+        // surfaces sit inside one CIE L*, which `theme.test.ts` measures.
         const written: Record<string, string> = {
           ...themeVariables(appliedTheme({ themeId: palette, builtTheme: null })),
           '--tray-surface': TRAY_SURFACES[surface],

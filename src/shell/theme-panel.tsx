@@ -1,8 +1,10 @@
 // The theme picker and the colour builder's controls — Unit 4.8.
 //
-// Section 4 of `docs/design/0002-screen-design.md` gives `sheet-theme` one line:
-// the theme, plus the colour builder. The theme is ONE choice — the dice, the
+// Section 4 of `docs/design/0002-screen-design.md` gave `sheet-theme` three
+// axes plus the colour builder. The theme is ONE choice now — the dice, the
 // table and the page all follow it — so the picker is one group of six rows.
+// That row of section 4, and the role bullet of section 7, both carry an
+// amendment dated 2026-08-11 that records the collapse.
 //
 // **One group, one control.** A group of radio buttons is one tab stop and its
 // arrow keys move inside it, which is section 2 of the screen design and the
@@ -76,7 +78,7 @@ export function refusalText(findings: readonly ContrastFinding[]): string {
  */
 function Rows({ chosen, onChoose }: { chosen: ThemeId; onChoose: (id: ThemeId) => void }) {
   return (
-    <fieldset class="ovr-set thm-axis" data-el={THEME_ROWS_ELEMENT}>
+    <fieldset class="ovr-set" data-el={THEME_ROWS_ELEMENT}>
       <legend>{THEME_ROWS_LEGEND}</legend>
       <div class="thm-rows">
         {THEME_IDS.map((id) => (
