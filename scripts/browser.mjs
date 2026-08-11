@@ -10349,6 +10349,28 @@ const GRAIN_TEXT_FLOOR = 4.5;
  * palette copies rather than derives. A mark added here that paints anything
  * else fails the count, so the list cannot be widened into an excuse.
  */
+/**
+ * The one ground that cannot take any arm, and the count that holds it to one.
+ *
+ * `.die` is a single rule over two kinds of element. A six-faced die draws its
+ * pips as background layers and every other die draws a numeral as text, so a
+ * grain layer added to that rule is overwritten by the pip rules, or sized as a
+ * pip by `.pips`, or lands on a face that has no image at all. The comment above
+ * `.die` in `src/shell.css` prices that in full and names the upgrade path.
+ * **Read it there.** It is not restated here, because a second copy of a reason
+ * is a second thing to keep true.
+ *
+ * The gate holds this list two ways. It asserts each entry is still NEEDED, so
+ * an excuse cannot outlive its reason, and it asserts the COUNT, so a second
+ * exception has to be a deliberate edit to this file.
+ */
+const GRAIN_EXCEPTIONS = [{ selector: '.die', why: 'see the comment above `.die` in shell.css' }];
+
+/** How many exceptions the gate carries. One. */
+const GRAIN_EXCEPTION_COUNT = 1;
+
+const excepted = (selector) => GRAIN_EXCEPTIONS.some((one) => one.selector === selector);
+
 const MEANING_MARKS = [
   { selector: '.mark.s', token: '--mark-success' },
   { selector: '.mark.b', token: '--mark-bane' },
@@ -10587,28 +10609,6 @@ async function readGrain(page, selector) {
  */
 async function readGrounds(page, selectors) {
   return page.evaluate((list) => {
-    // True where the element already carries an image of its OWN that covers
-    // it. An axis that repeats covers all of that axis, and an axis that does
-    // not covers the fraction its size states. The bound is the whole element
-    // on both axes, so nothing is chosen and a small decoration cannot claim it.
-    const coveringImage = (element) => {
-      const style = getComputedStyle(element);
-      if (style.backgroundImage === 'none') return false;
-      if (style.backgroundImage.includes('image/svg+xml')) return false;
-      const box = element.getBoundingClientRect();
-      const repeat = style.backgroundRepeat.split(' ');
-      const sizes = style.backgroundSize.split(' ');
-      return [0, 1].every((axis) => {
-        const mode = (repeat[axis] ?? repeat[0] ?? 'repeat').trim();
-        if (mode !== 'no-repeat') return true;
-        const span = axis === 0 ? box.width : box.height;
-        const stated = (sizes[axis] ?? sizes[0] ?? 'auto').trim();
-        if (stated === 'cover' || stated === 'contain') return true;
-        if (stated.endsWith('%')) return Number.parseFloat(stated) >= 100;
-        if (stated.endsWith('px')) return Number.parseFloat(stated) >= span;
-        return false;
-      });
-    };
     const answer = {};
     for (const selector of list) {
       let all;
@@ -10634,14 +10634,6 @@ async function readGrounds(page, selectors) {
       if (style.backgroundColor === 'transparent' || /,\s*0\)$/.test(style.backgroundColor)) {
         continue;
       }
-      // **A ground that already carries an image of its own is not flat.** The
-      // pips of a flat die are six background layers, and the grain rule comes
-      // after them, so graining that ground DELETES them. The arm is bounded so
-      // a 4 px decoration cannot claim it: the image has to cover the element.
-      // Coverage is derived per axis from the computed `background-repeat` and
-      // `background-size` — an axis that repeats covers all of it, and an axis
-      // that does not covers the fraction its size states. Nothing is chosen:
-      // the bound is the whole element on both axes.
       const grained = style.backgroundImage.includes('image/svg+xml');
       answer[selector] = {
         width: box.width,
@@ -10649,8 +10641,6 @@ async function readGrounds(page, selectors) {
         // The renderer resolves the custom property, so this is the image the
         // element really carries and not the text of the rule.
         grained,
-        ownImage: all.every((each) => coveringImage(each)),
-        drawnCount: all.length,
       };
     }
     return answer;
@@ -10888,17 +10878,34 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
   });
 
   const uncovered = measured.filter(
-    (member) => !member.grained && !member.small && !member.mark && !member.ownImage,
+    (member) => !member.grained && !member.small && !member.mark && !excepted(member.selector),
   );
+
+  // **An exception has to prove it is still needed.** A ground that takes one
+  // of the three real arms no longer needs an excuse, and an excuse that
+  // outlives its reason is how a gate rots into a list of things nobody reads.
+  // This is the direction that matters, so it is the direction that fires.
+  const staleExceptions = GRAIN_EXCEPTIONS.flatMap((one) => {
+    const member = measured.find((each) => each.selector === one.selector);
+    if (member === undefined) {
+      return [`${one.selector} is no longer a ground src/shell.css paints`];
+    }
+    if (member.grained) return [`${one.selector} is grained, so the exception is stale`];
+    if (member.small) {
+      return [`${one.selector} is under its feature at last, so the exception is stale`];
+    }
+    if (member.mark) return [`${one.selector} is a meaning mark, so the exception is stale`];
+    return [];
+  });
   const covered = measured.length - uncovered.length;
   console.log(
     `browser: theme grounds population=${measured.length} grained=${measured.filter((one) => one.grained).length} ` +
       `too_small=${measured.filter((one) => !one.grained && one.small).length} ` +
       `meaning_marks=${measured.filter((one) => !one.grained && !one.small && one.mark).length} ` +
-      `own_image=${measured.filter((one) => !one.grained && !one.small && !one.mark && one.ownImage).length} ` +
       `uncovered=${uncovered.length} ` +
       `never_drawn=${measured.filter((one) => !one.drawn).length} ` +
       `probed_for_grain=${Object.keys(probed).length} ` +
+      `exceptions=${GRAIN_EXCEPTIONS.length} of ${GRAIN_EXCEPTION_COUNT} stale=${staleExceptions.length} ` +
       `fixed_tokens=${fixedRoles.size} mark_faults=${markFaults.length}`,
   );
   console.log(
@@ -10923,7 +10930,12 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
   }
   checks.push({
     name: 'theme.every-ground-the-stylesheet-paints-carries-the-grain-or-says-why',
-    ok: uncovered.length === 0 && markFaults.length === 0 && covered === measured.length,
+    ok:
+      uncovered.length === 0 &&
+      markFaults.length === 0 &&
+      staleExceptions.length === 0 &&
+      GRAIN_EXCEPTIONS.length === GRAIN_EXCEPTION_COUNT &&
+      covered === measured.length,
     detail:
       `${covered} of the ${measured.length} grounds src/shell.css paints are covered, over ` +
       `${states.length} states of the screen. The population is every rule that paints a ` +
@@ -10938,6 +10950,10 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
       `A ground no state drew is read for its GRAIN off a probe the cascade resolves, and it is ` +
       `never read for its box, because a box of nothing would excuse every one of them: ` +
       `${measured.filter((one) => !one.drawn).length} of the population were probed that way. ` +
+      `The gate carries ${GRAIN_EXCEPTIONS.length} declared exception against a count of ` +
+      `${GRAIN_EXCEPTION_COUNT} [${GRAIN_EXCEPTIONS.map((one) => `${one.selector}: ${one.why}`).join('; ')}], ` +
+      `and each is asserted STILL NEEDED: a ground that takes one of the three arms no ` +
+      `longer needs an excuse. stale=${staleExceptions.length} [${staleExceptions.join('; ')}] ` +
       `uncovered=${uncovered.length} [${uncovered.map((one) => `${one.selector} at ${one.drawn ? `${one.width.toFixed(1)}x${one.height.toFixed(1)} px` : 'no box'}`).join('; ')}] ` +
       `mark_faults=${markFaults.length} [${markFaults.join('; ')}]`,
   });
