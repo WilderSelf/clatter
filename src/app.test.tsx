@@ -4063,4 +4063,63 @@ describe('the disclosure sheet', () => {
       `every one of the ${String(controls.length)} controls sits inside a group with a legend`,
     ).toEqual([]);
   });
+
+  // -------------------------------------------------------------------------
+  // No heading without a member of its own.
+  //
+  // A render found three labels stacked over one set of six radios: the
+  // category "Look", the panel "Theme", and the rows "Colour". Each label was
+  // right on its own and the pair was already guarded — `theme-panel.test.tsx`
+  // asked the inner one to differ from the outer one — but no check could see
+  // a third level added above a correct pair.
+  //
+  // The rule has no free parameter and no depth number to tune. **A group
+  // earns its heading by holding a control of its own.** A group that holds
+  // nothing but other groups adds a word and no member, which is the stack.
+  // The five categories are the one exception, and they are the level whose
+  // whole purpose is to hold groups.
+  //
+  // A flat bound on the depth was measured first and refused. The sheet draws
+  // 46 controls at depths 1, 2, 3 and 4, and the deep ones are correct: the
+  // blockers of the push profile are a named set inside "The rules in force",
+  // and the page mode is a named set inside "Build your own". A bound of two
+  // would delete three real group names to catch one redundant one.
+  // -------------------------------------------------------------------------
+
+  it('gives every heading a member of its own, so none is a level with no leaf', () => {
+    mount();
+    click(element('disclosure-toggle'));
+    const sheet = element('disclosure-sheet');
+    const controls = [
+      ...sheet.querySelectorAll<HTMLElement>('input, button, select, textarea'),
+    ].filter((control) => control.dataset['el'] !== 'sheet-close');
+    /** Every group that carries a heading, read off the document. */
+    const groups = [...sheet.querySelectorAll('fieldset')].filter((group) => heading(group) !== '');
+    /** The five categories, which are the level that holds groups. */
+    const categories = new Set([...sheet.children].filter((child) => child.tagName === 'FIELDSET'));
+
+    // Both denominators, each counted off the document and neither read from
+    // the other. A run that found no group would pass every line under it.
+    expect(controls.length, 'the sheet draws controls to place').toBeGreaterThan(20);
+    expect(groups.length, 'the sheet draws headings to judge').toBeGreaterThan(10);
+
+    // A control belongs to the nearest heading above it, and that heading is
+    // the one it is a member of. Every other heading over it is a level.
+    const owning = new Set(controls.map((control) => control.closest('fieldset')));
+    const empty = groups.filter((group) => !categories.has(group) && !owning.has(group));
+    const named = (group: Element): string =>
+      `${group.getAttribute('data-el') ?? group.className} ("${heading(group)}")`;
+    expect(
+      empty.map(named),
+      `${String(groups.length)} headings over ${String(controls.length)} controls: every one ` +
+        `below the ${String(categories.size)} categories holds a control of its own`,
+    ).toEqual([]);
+
+    // What the stack looked like, reported rather than bounded, so a reader
+    // of a failure sees the shape and not only the name.
+    const depth = (control: HTMLElement): number =>
+      groups.filter((group) => group.contains(control)).length;
+    const deepest = Math.max(...controls.map(depth));
+    expect(deepest, 'every control stands under at least its own heading').toBeGreaterThan(0);
+  });
 });

@@ -84,7 +84,12 @@ describe('the six rows', () => {
   it('draws six rows in one group, and each row carries a name and a state', () => {
     mount();
     const group = element(THEME_ROWS_ELEMENT);
-    expect(group.tagName, 'the rows are a group').toBe('FIELDSET');
+    // The rows are named by the panel around them and carry no heading of
+    // their own, so they are a plain container. The group a reader meets is
+    // the fieldset above, and the radios share one name.
+    expect(group.closest('fieldset')?.getAttribute('data-el'), 'the panel is the group').toBe(
+      'sheet-theme',
+    );
     const inputs = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
     // The six names come out of the theme module, so a seventh row appears
     // here without an edit and a row that is dropped fails this line.
@@ -128,15 +133,23 @@ describe('the six rows', () => {
   // visible to the suite: one was a word and the other was a colour, and both
   // read as correct in the DOM until somebody looked at the picture.
 
-  it('names the group of rows something other than the panel around it', () => {
+  it('names the rows once, from the panel around them', () => {
     mount();
     const outer = element('sheet-theme').querySelector('legend')?.textContent?.trim();
-    const inner = element(THEME_ROWS_ELEMENT).querySelector('legend')?.textContent?.trim();
     expect(outer?.length, 'the panel carries a legend').toBeGreaterThan(0);
-    expect(inner?.length, 'the group carries a legend').toBeGreaterThan(0);
-    // The panel legend and the group legend both read "Theme" once. Two
-    // headings of one word, one inside the other, say nothing about either.
-    expect(inner, `the group inside "${outer}" repeats its name`).not.toBe(outer);
+    // The rows carried a heading of their own until 2026-08-10. It read
+    // "Theme" inside "Theme" first, and "Colour" inside "Theme" after that.
+    // Once the sheet gained its categories the pair stood under "Look" as
+    // three labels over one set of six radios. One name, and the panel holds
+    // it. `src/app.test.tsx` measures the same stack over every control.
+    expect(
+      element(THEME_ROWS_ELEMENT).querySelector('legend'),
+      `the rows inside "${String(outer)}" carry a second heading`,
+    ).toBeNull();
+    expect(
+      element('sheet-theme').querySelectorAll(':scope > legend').length,
+      'the panel is named once',
+    ).toBe(1);
   });
 
   it('draws each swatch from the page of its row as well as the accent', () => {
