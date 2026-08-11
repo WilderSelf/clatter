@@ -14,9 +14,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TrayMount, TrayProbe } from './app';
-import { App, NO_AUDIO_TEXT, SOUND_NOTE_TEXT } from './app';
+import { App, NO_AUDIO_TEXT, REST_BOUND_MS, ROLLING_TEXT, SOUND_NOTE_TEXT } from './app';
 import type { Die } from './rules/die';
 import { appendValue, latestValue } from './rules/die';
 import { applyDifficulty, buildPool, firstRoll, poolBuilder } from './rules/pool';
@@ -67,6 +67,7 @@ import {
   readout,
   rollNow,
   signedDifficulty,
+  stillTumbling,
   throwDice,
   tilesFor,
   worstCaseState,
@@ -1604,6 +1605,398 @@ describe('the 3D tray inside the application', () => {
       expect(pressedCount + refusedCount).toBe(dice.length);
       expect(pressedCount).toBeGreaterThan(0);
       expect(refusedCount).toBeGreaterThan(0);
+    },
+    TRAY_WAIT_MS + 5000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The marks wait for the dice — the defect the owner reported on a push
+//
+// The successes and the banes were drawn in the render that committed the
+// throw, so the numbers stood on the screen while the 3D dice were still
+// tumbling. The owner saw it on a push, where the dice are already on the
+// table and the jump is unmissable. The first roll carried the same defect and
+// was hidden only by the builder covering the table.
+//
+// The gate is `stillTumbling` in `src/shell/state.ts`, and it reads the
+// renderer as well as the ordinals, so a player on the flat dice never waits.
+// ---------------------------------------------------------------------------
+
+/** Every mark on the status line, with the number beside it. */
+function markCounts(): string[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-el="status-line"] .mark')].map((mark) =>
+    (mark.parentElement?.textContent ?? '').trim(),
+  );
+}
+
+/** Every die cell on the table, by name, with the name a reader hears. */
+function dieLabels(): Record<string, string> {
+  return Object.fromEntries(
+    [...document.querySelectorAll<HTMLElement>('[data-el^="die-"]')].map((cell) => [
+      cell.dataset['el'] ?? '',
+      cell.getAttribute('aria-label') ?? '',
+    ]),
+  );
+}
+
+/**
+ * How long a mark may take to arrive after the tray reports rest.
+ *
+ * **It is far under `REST_BOUND_MS` on purpose.** The bound covers a tray that
+ * never mounts, and every tray below mounts, so nothing but the tray's own
+ * report of rest can bring the marks back. A wait longer than the bound would
+ * be satisfied by the bound instead, and the check would pass with the report
+ * deleted. Measured at about 10 ms with the report in place.
+ */
+const MARK_WAIT_MS = 2000;
+
+/** Wait for the marks, and name what did not arrive when they do not. */
+async function untilMarks(): Promise<void> {
+  const deadline = Date.now() + MARK_WAIT_MS;
+  while (markCounts().length === 0) {
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 5));
+    });
+    if (Date.now() > deadline) {
+      throw new Error(
+        `the tray reported rest and no mark arrived within ${MARK_WAIT_MS} ms. ` +
+          `The bound of ${REST_BOUND_MS} ms cannot answer here, because the tray mounted.`,
+      );
+    }
+  }
+}
+
+/**
+ * A tray that holds a throw open until the check lands it.
+ *
+ * The stand-in above resolves every throw at once, so the window this defect
+ * lives in does not exist there. This one keeps the promise of the LAST call of
+ * each path open — `roll` for a roll and `reroll` for a push — so the check can
+ * read the screen while the tray is still acting the throw out. `land` is rest.
+ */
+function heldTray(): { tray: FakeTray; land: () => void } {
+  const tray = fakeTray();
+  const box = tray as unknown as {
+    roll: (notation: string) => Promise<unknown>;
+    reroll: (ids: number[], forced: number[]) => Promise<unknown>;
+  };
+  const rolls = box.roll;
+  const rerolls = box.reroll;
+  let release: (() => void) | null = null;
+  const hold = async (answer: Promise<unknown>): Promise<unknown> => {
+    const held = await answer;
+    await new Promise<void>((done) => {
+      release = done;
+    });
+    return held;
+  };
+  box.roll = (notation) => hold(rolls(notation));
+  box.reroll = (ids, forced) => hold(rerolls(ids, forced));
+  return {
+    tray,
+    land: () => {
+      const done = release;
+      release = null;
+      done?.();
+    },
+  };
+}
+
+describe('the marks wait for the dice', () => {
+  it(
+    'draws no mark between the throw and the rest, on the roll and on the push',
+    async () => {
+      const held = profile('pool-stress-and-complications');
+      const opening = builtState({ attribute: 3, skill: 2 }, held.id);
+      const tray = heldTray();
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        mount: fakeMount('mounts', tray.tray),
+        initial: opening,
+        random: seededRandom(4),
+      });
+      await settle();
+      await settleTray();
+      expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
+
+      // The oracle draws from ONE seeded source, in the order the screen draws
+      // from its own: the roll first and the push after it. No number below is
+      // written down here.
+      const source = seededRandom(4);
+      const rolled = rollNow(opening, source);
+      const pushed = pushNow(rolled, source);
+      const afterRoll = readout(rolled);
+      const afterPush = readout(pushed);
+      expect(afterPush.pushes, 'the fixture really pushed').toBe(1);
+
+      // ---- The roll ----
+      click(element('roll-button'));
+      await settleTray(() => tray.tray.thrown.length > 0);
+      expect(markCounts(), 'the dice are still tumbling, so no mark is drawn').toEqual([]);
+      expect(spoken(), 'and the live region names the throw, never its result').toBe(ROLLING_TEXT);
+
+      tray.land();
+      await untilMarks();
+      expect(markCounts(), 'the tray reported rest, so the marks arrive').toEqual([
+        String(afterRoll.successes),
+        String(afterRoll.banes),
+      ]);
+      expect(spoken(), 'and the reader hears the same numbers in the same render').toBe(
+        `${afterRoll.successes} ${afterRoll.successes === 1 ? 'success' : 'successes'}. ` +
+          `${afterRoll.banes} ${afterRoll.banes === 1 ? 'bane' : 'banes'}. Push 0. ` +
+          `The table holds ${readout(rolled).dice} dice. Stress ${afterRoll.stress}.`,
+      );
+
+      // ---- The push, which is the surface the owner reported ----
+      expect(pushButton().disabled, 'the push is live at this seed').toBe(false);
+      click(pushButton());
+      await settleTray(() => tray.tray.rerolled.length > 0);
+      expect(markCounts(), 'the pushed dice are tumbling as well, so the marks go').toEqual([]);
+      expect(spoken(), 'and the sentence goes with them').toBe(ROLLING_TEXT);
+
+      tray.land();
+      await untilMarks();
+      expect(markCounts(), 'the pushed result arrives when the dice stop').toEqual([
+        String(afterPush.successes),
+        String(afterPush.banes),
+      ]);
+      expect(spoken()).toContain(
+        `${afterPush.successes} ${afterPush.successes === 1 ? 'success' : 'successes'}.`,
+      );
+    },
+    TRAY_WAIT_MS + 5000,
+  );
+
+  it(
+    'names no face on a die cell while the dice are still moving',
+    async () => {
+      // The live region and the die cells are one claim, not two. A reader who
+      // walks the cells during the flight would have every face, every success
+      // and every bane while the eye had nothing, which is the same defect
+      // read through another surface.
+      const opening = builtState({ attribute: 3, skill: 2 }, 'pool-stress-and-complications');
+      const tray = heldTray();
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        mount: fakeMount('mounts', tray.tray),
+        initial: opening,
+        random: seededRandom(4),
+      });
+      await settle();
+      await settleTray();
+
+      click(element('roll-button'));
+      await settleTray(() => tray.tray.thrown.length > 0);
+      const flying = dieLabels();
+      const names = Object.keys(flying);
+      expect(names.length, 'the dice are on the table, so there are cells to read').toBeGreaterThan(
+        0,
+      );
+      expect(
+        names.filter((name) => /shows \d/.test(flying[name] ?? '')),
+        'no cell names the face it landed on while the dice are still moving',
+      ).toEqual([]);
+      expect(
+        names.filter((name) => (flying[name] ?? '').includes('is rolling.')),
+        'every cell says the throw is still running',
+      ).toEqual(names);
+
+      tray.land();
+      await untilMarks();
+      const rested = dieLabels();
+      expect(
+        names.filter((name) => /shows \d/.test(rested[name] ?? '')),
+        'and every cell names its face again once the dice stop',
+      ).toEqual(names);
+    },
+    TRAY_WAIT_MS + 5000,
+  );
+
+  it('draws the marks in the render that threw, where the dice are flat', () => {
+    const opening = builtState({ attribute: 3, skill: 2 }, 'pool-stress-and-complications');
+    mount({ store: fakeStore(), initial: opening, random: seededRandom(4) });
+    expect(screen().dataset['renderer'], 'the probe never answers, so the dice are flat').toBe(
+      'flat',
+    );
+    const oracle = readout(rollNow(opening, seededRandom(4)));
+
+    // Nothing is awaited between the press and the reading. No tray, no rest
+    // and no timer stands between a flat player and the result.
+    click(element('roll-button'));
+    expect(markCounts(), 'the marks are in the render the throw produced').toEqual([
+      String(oracle.successes),
+      String(oracle.banes),
+    ]);
+    expect(spoken(), 'and so is the sentence').toContain(
+      `${oracle.successes} ${oracle.successes === 1 ? 'success' : 'successes'}.`,
+    );
+
+    // The rule itself, with no free parameter in it: a committed throw with no
+    // table under it is never in flight, whatever the two ordinals hold.
+    expect(
+      stillTumbling(rollNow(opening, seededRandom(4)), false),
+      'a throw the flat dice drew waits for nothing',
+    ).toBe(false);
+  });
+
+  it('lets the marks through when the tray never reports rest', async () => {
+    vi.useFakeTimers();
+    try {
+      const opening = builtState({ attribute: 3, skill: 2 }, 'pool-stress-and-complications');
+      const oracle = readout(rollNow(opening, seededRandom(4)));
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        // A mount that never answers. The tray takes no throw, so it reports no
+        // rest, and nothing but the bound can release the marks.
+        mount: () => new Promise<unknown>(() => {}),
+        initial: opening,
+        random: seededRandom(4),
+      });
+      await settle();
+      expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
+
+      click(element('roll-button'));
+      expect(markCounts(), 'the throw is in flight and no tray is answering').toEqual([]);
+
+      act(() => {
+        vi.advanceTimersByTime(REST_BOUND_MS);
+      });
+      expect(markCounts(), 'the bound let the result through rather than holding it').toEqual([
+        String(oracle.successes),
+        String(oracle.banes),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds the marks past the bound while a mounted tray still has the throw', async () => {
+    // The other side of the bound. A clock that can release the marks while a
+    // tray is acting a throw out is the defect with a delay on it, so the bound
+    // covers the mount alone and a mounted tray is left to answer for itself.
+    vi.useFakeTimers();
+    try {
+      const opening = builtState({ attribute: 3, skill: 2 }, 'pool-stress-and-complications');
+      const tray = heldTray();
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        mount: fakeMount('mounts', tray.tray),
+        initial: opening,
+        random: seededRandom(4),
+      });
+      // The clock is held here, so every step below is the promise chain and
+      // never the passage of time.
+      const tick = async (ms: number): Promise<void> => {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(ms);
+        });
+      };
+      await tick(1);
+      await tick(1);
+      expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
+
+      click(element('roll-button'));
+      for (let step = 0; step < 20 && tray.tray.thrown.length === 0; step += 1) await tick(1);
+      expect(tray.tray.thrown.length, 'the tray took the throw and is holding it').toBe(1);
+      expect(markCounts(), 'so no mark is drawn').toEqual([]);
+
+      await tick(REST_BOUND_MS * 2);
+      expect(
+        markCounts(),
+        'and the clock does not release them, because the tray is mounted and still moving dice',
+      ).toEqual([]);
+      expect(spoken(), 'the reader is told the same thing').toBe(ROLLING_TEXT);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('draws the marks at once for a roll of no dice, which reaches no tray', async () => {
+    // A roll of an empty pool fails automatically. It raises the throw ordinal
+    // and puts no result on the table, so it reaches the tray as no throw at
+    // all and no rest is ever reported for it. Without the arm that reads the
+    // result, the screen would say the dice are rolling until the bound.
+    const empty = { ...emptyState('pool'), builderOpen: false };
+    mount({
+      store: fakeStore(),
+      probe: answers(ABOVE_THE_BAR),
+      mount: fakeMount('mounts'),
+      initial: empty,
+      random: seededRandom(4),
+    });
+    await settle();
+    await settleTray();
+    expect(screen().dataset['renderer'], 'the probe cleared the bar').toBe('tray');
+
+    click(element('roll-button'));
+    expect(markCounts(), 'the marks are drawn in the render that failed the roll').toEqual([
+      '0',
+      '0',
+    ]);
+    expect(spoken(), 'and the reader is told what happened, not that dice are rolling').not.toBe(
+      ROLLING_TEXT,
+    );
+  });
+
+  it(
+    'refuses a report of rest from a table that has left the document',
+    async () => {
+      // The renderer toggle takes the table away mid-throw. The drain loop it
+      // left behind still runs to the end and still holds the callback, and the
+      // table that replaces it acts the same throw out again from the start.
+      // A report accepted from the old table would draw the marks over the new
+      // table's moving dice.
+      const opening = builtState({ attribute: 3, skill: 2 }, 'pool-stress-and-complications');
+      const tray = heldTray();
+      mount({
+        store: fakeStore(),
+        probe: answers(ABOVE_THE_BAR),
+        mount: fakeMount('mounts', tray.tray),
+        initial: opening,
+        random: seededRandom(4),
+      });
+      await settle();
+      await settleTray();
+
+      click(element('roll-button'));
+      await settleTray(() => tray.tray.thrown.length > 0);
+      expect(markCounts(), 'the throw is in flight').toEqual([]);
+
+      const toggle = (): HTMLInputElement => {
+        const found = element('sheet-tray-renderer').querySelector<HTMLInputElement>('input');
+        if (found === null) throw new Error('the sheet holds no renderer toggle');
+        return found;
+      };
+      click(element('disclosure-toggle'));
+      click(toggle());
+      expect(screen().dataset['renderer'], 'the player asked for flat dice').toBe('flat');
+      expect(markCounts().length, 'the flat dice draw the marks at once').toBe(2);
+
+      // The old table finishes its throw here, with nothing of it on the screen.
+      tray.land();
+      await settleTray();
+
+      const before = tray.tray.thrown.length;
+      click(toggle());
+      expect(screen().dataset['renderer'], 'and the player asks for the table back').toBe('tray');
+      await settleTray(() => tray.tray.thrown.length > before);
+      expect(
+        tray.tray.thrown.length,
+        'the new table acts the same throw out again, because it holds no dice yet',
+      ).toBe(before + 1);
+      expect(
+        markCounts(),
+        'so the marks go again: the report from the old table released nothing',
+      ).toEqual([]);
+
+      tray.land();
+      await untilMarks();
+      expect(markCounts().length, 'and the new table brings them back itself').toBe(2);
     },
     TRAY_WAIT_MS + 5000,
   );

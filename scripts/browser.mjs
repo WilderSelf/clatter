@@ -2877,6 +2877,28 @@ const SOUND_TEST_VOLUME = 0.4;
 const RENDER_SECONDS = 0.5;
 const RENDER_RATE = 48000;
 
+/**
+ * The two bands the rendered sound is weighed in, in hertz.
+ *
+ * A peak says a sound was made. It says nothing about what the sound is, so a
+ * peak check cannot tell a wooden knock from a tinny one and cannot see a
+ * regression back. These two numbers give the render a shape to be judged on.
+ */
+const LOW_BAND_HZ = 1000;
+const HIGH_BAND_HZ = 3000;
+
+/**
+ * How far the low band must stand above the high band, as a ratio of energy.
+ *
+ * Measured on 2026-08-10 over the twelve-die throw at `--throw-seed 5`: the
+ * wooden tray reads 42.4 and the single band at 2400 hertz it replaced reads
+ * 0.6. The floor is five times under the first and thirteen times over the
+ * second, so this check fails on the sound it was written against. The peak
+ * check below passed on that sound at 1.041782, which is why a peak alone
+ * cannot hold this ground.
+ */
+const LOW_OVER_HIGH_FLOOR = 8;
+
 /** Percentiles of a list of numbers, for the report. */
 function spread(values) {
   if (values.length === 0) return 'none';
@@ -3174,10 +3196,31 @@ async function runSoundScene(page, options, checks) {
 
   // --- what the graph actually renders --------------------------------------
   const rendered = await page.evaluate(
-    async ({ seconds, rate, volume, skip }) => {
+    async ({ seconds, rate, volume, lowHz, highHz, skip }) => {
       const { sound, impacts } = window.__sound;
       // The collisions of the sounded throw only. The silent throw came first.
       const heard = impacts.slice(skip);
+      // The energy of one band of an already rendered buffer. The samples go
+      // back through one more offline pass, so what is measured is the audio
+      // the graph produced and not a model of it. A flat corner needs a Q of
+      // 20*log10(1/sqrt(2)), because the specification reads the Q of a
+      // low-pass and of a high-pass in decibels.
+      const bandEnergy = async (buffer, type, hz) => {
+        const ctx = new OfflineAudioContext(1, buffer.length, buffer.sampleRate);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        const filter = ctx.createBiquadFilter();
+        filter.type = type;
+        filter.frequency.value = hz;
+        filter.Q.value = -3.01;
+        source.connect(filter).connect(ctx.destination);
+        source.start(0);
+        const out = await ctx.startRendering();
+        let sum = 0;
+        for (const value of out.getChannelData(0)) sum += value * value;
+        return sum;
+      };
+
       const render = async (level) => {
         const ctx = new OfflineAudioContext(1, Math.ceil(seconds * rate), rate);
         // The spread is pinned, so the two renders differ only in the level.
@@ -3191,10 +3234,19 @@ async function runSoundScene(page, options, checks) {
         const buffer = await ctx.startRendering();
         let peak = 0;
         for (const value of buffer.getChannelData(0)) peak = Math.max(peak, Math.abs(value));
-        return { peak, triggers: engine.counts.triggers, hasContext: engine.context !== null };
+        return {
+          peak,
+          triggers: engine.counts.triggers,
+          hasContext: engine.context !== null,
+          buffer,
+        };
       };
       const loud = await render(volume);
       const shut = await render(0);
+      const low = await bandEnergy(loud.buffer, 'lowpass', lowHz);
+      const high = await bandEnergy(loud.buffer, 'highpass', highHz);
+      delete loud.buffer;
+      delete shut.buffer;
 
       // The same recorded collisions, through the same pure function the engine
       // uses. A stream that made one sound over and over shows one level here.
@@ -3205,6 +3257,8 @@ async function runSoundScene(page, options, checks) {
       return {
         loud,
         shut,
+        low,
+        high,
         recomputedTriggers: voices.length,
         distinctLevels: new Set(voices.map((voice) => voice.level.toFixed(4))).size,
         kinds: new Set(heard.map((one) => one.kind)).size,
@@ -3214,14 +3268,37 @@ async function runSoundScene(page, options, checks) {
       seconds: RENDER_SECONDS,
       rate: RENDER_RATE,
       volume: SOUND_TEST_VOLUME,
+      lowHz: LOW_BAND_HZ,
+      highHz: HIGH_BAND_HZ,
       skip: off.dispatches,
     },
   );
+  const bandRatio = rendered.low / rendered.high;
   console.log(
     `browser: sound render peak_at_${SOUND_TEST_VOLUME}=${rendered.loud.peak.toFixed(6)} ` +
       `peak_at_0=${rendered.shut.peak.toFixed(6)} rendered_triggers=${rendered.loud.triggers} ` +
       `distinct_levels=${rendered.distinctLevels} kinds=${rendered.kinds}`,
   );
+  console.log(
+    `browser: sound bands low_under_${LOW_BAND_HZ}=${rendered.low.toExponential(3)} ` +
+      `high_over_${HIGH_BAND_HZ}=${rendered.high.toExponential(3)} ratio=${bandRatio.toFixed(1)} ` +
+      `floor=${LOW_OVER_HIGH_FLOOR}`,
+  );
+
+  checks.push({
+    name: 'sound.the-low-band-carries-the-sound',
+    // A high band of 0 would make the ratio infinite, so it is named. A low
+    // band of 0 cannot decide anything the ratio does not decide already.
+    ok: bandRatio >= LOW_OVER_HIGH_FLOOR && rendered.high > 0,
+    detail:
+      `the rendered throw carries ${rendered.low.toExponential(3)} of energy under ` +
+      `${LOW_BAND_HZ} Hz against ${rendered.high.toExponential(3)} over ${HIGH_BAND_HZ} Hz, a ` +
+      `ratio of ${bandRatio.toFixed(1)} against a floor of ${LOW_OVER_HIGH_FLOOR}. Both bands ` +
+      `are measured by sending the rendered samples through one more offline pass, so this ` +
+      `judges the audio the graph made and not the numbers the module holds. The peak check ` +
+      `above says a sound was made and says nothing about what it is: a bright single band ` +
+      `over noise passes it and is heard as tinny. This is the check that fails on that sound.`,
+  });
 
   checks.push({
     name: 'sound.a-level-of-zero-renders-silence-and-is-not-the-same-as-off',
@@ -7234,21 +7311,7 @@ async function runShell(page, options, checks) {
   // next block puts back. Measured on this host on 2026-08-09: without this
   // wait the walk of rest B started at the footer and reached one stop. A run
   // on flat dice holds no seam and the wait returns at once.
-  await withTimeout(
-    page.evaluate(async () => {
-      const frame = () =>
-        new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
-      let quiet = 0;
-      for (let step = 0; step < 2000 && quiet < 3; step += 1) {
-        const seam = window.__clatterTable;
-        if (seam === undefined) return;
-        quiet = seam.busy ? 0 : quiet + 1;
-        await frame();
-      }
-    }),
-    120000,
-    'the table never came to rest',
-  );
+  await waitForRest(page);
 
   // Put the sequential focus navigation starting point back at the top of the
   // screen. The walk of rest A left it on the roll button, and neither `blur()`
@@ -7443,6 +7506,33 @@ async function liveRegion(page) {
       text: (copy.textContent || '').replace(/\s+/g, ' ').trim(),
     };
   });
+}
+
+/**
+ * Wait for the 3D table to come to rest, where one is running.
+ *
+ * **A reading of the result is taken after this and never before it.** The
+ * successes, the banes and the spoken sentence are held back until the dice
+ * stop, because a result printed over dice that are still moving is a result
+ * the player has not been shown yet. `src/shell/state.ts` holds the gate. A run
+ * on flat dice reads no seam and returns at once.
+ */
+async function waitForRest(page) {
+  await withTimeout(
+    page.evaluate(async () => {
+      const frame = () =>
+        new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+      let quiet = 0;
+      for (let step = 0; step < 2000 && quiet < 3; step += 1) {
+        const seam = window.__clatterTable;
+        if (seam === undefined) return;
+        quiet = seam.busy ? 0 : quiet + 1;
+        await frame();
+      }
+    }),
+    120000,
+    'the table never came to rest',
+  );
 }
 
 /**
@@ -7645,6 +7735,9 @@ async function a11yJourney(page, size, design, checks, options) {
       return button !== null && !button.disabled;
     });
   }
+  // The dice stop first. The screen holds the result back until they do, so a
+  // reading taken here is the reading the player reads.
+  await waitForRest(held);
   const rolled = await liveRegion(held);
   const afterRoll = await sumOfTheDice(held);
   const clicks = await held.evaluate(() => window.__clatterClicks || []);
@@ -7682,21 +7775,7 @@ async function a11yJourney(page, size, design, checks, options) {
   });
 
   // ---- Rest B, walked with real presses ----
-  await withTimeout(
-    held.evaluate(async () => {
-      const frame = () =>
-        new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
-      let quiet = 0;
-      for (let step = 0; step < 2000 && quiet < 3; step += 1) {
-        const seam = window.__clatterTable;
-        if (seam === undefined) return;
-        quiet = seam.busy ? 0 : quiet + 1;
-        await frame();
-      }
-    }),
-    120000,
-    'the table never came to rest',
-  );
+  await waitForRest(held);
   await resetFocus(held);
   const walkB = await walkShell(held, after.stated + 6, after.stated);
   const namedB = walkB.filter((visit) => !visit.implicit);
@@ -7738,6 +7817,7 @@ async function a11yJourney(page, size, design, checks, options) {
   await held.evaluate(
     () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
   );
+  await waitForRest(held);
   const afterPush = await sumOfTheDice(held);
   const pushed = await liveRegion(held);
   console.log(

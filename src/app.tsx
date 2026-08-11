@@ -98,10 +98,12 @@ import {
   pushNote,
   pushNow,
   readout,
+  rollingLabel,
   rollNow,
   settingsFromState,
   signedDifficulty,
   stateFromSettings,
+  stillTumbling,
   throwDice,
   tilesFor,
   toggleDie,
@@ -112,6 +114,7 @@ import {
   withOverride,
   withoutOverride,
   withPreset,
+  withSettled,
   zonesOf,
 } from './shell/state';
 import type { BuiltTheme } from './theme/builder';
@@ -185,6 +188,20 @@ function moveWithin(length: number, from: number, delta: number): number {
 }
 
 /**
+ * What the live region says while the dice are still tumbling.
+ *
+ * The sentence names the throw and no part of its result, so the reader and
+ * the eye reach the successes and the banes in the same render.
+ */
+export const ROLLING_TEXT = 'The dice are rolling.';
+
+/**
+ * How long the marks wait for a tray that has not mounted, in milliseconds.
+ * The effect that reads it states what the bound covers and how it is sized.
+ */
+export const REST_BOUND_MS = 10000;
+
+/**
  * The header. It carries status and it never navigates. Decision 2.
  *
  * It is also the live region, so what it says is spoken on every change. The
@@ -192,8 +209,22 @@ function moveWithin(length: number, from: number, delta: number): number {
  * aloud is a stream of digits, so the row is hidden from the reader and one
  * sentence carries the same facts. Both come from the same values in the same
  * render, so the two cannot disagree.
+ *
+ * **The marks wait for the dice.** `tumbling` is `stillTumbling` in
+ * `src/shell/state.ts`, and while it holds, the two marks and the sentence are
+ * both absent: a result printed over dice the player can still see moving is a
+ * result the table has not shown yet. The row and the sentence are hidden by
+ * the same value in the same render, so the eye and the reader wait together.
  */
-function StatusLine({ state, dice }: { state: AppState; dice: readonly Die[] }) {
+function StatusLine({
+  state,
+  dice,
+  tumbling,
+}: {
+  state: AppState;
+  dice: readonly Die[];
+  tumbling: boolean;
+}) {
   const { successes, banes, stress, pushes } = readout(state);
   // Before a throw the line names what the next throw takes. After one it names
   // what landed, so the result reaches the live region on the roll and on the
@@ -203,20 +234,28 @@ function StatusLine({ state, dice }: { state: AppState; dice: readonly Die[] }) 
       ? composition(dice)
       : `The table holds ${state.result.dice.length} ` +
         `${state.result.dice.length === 1 ? 'die' : 'dice'}. Stress ${stress}.`;
-  const spoken = `${successes} ${successes === 1 ? 'success' : 'successes'}. ${banes} ${banes === 1 ? 'bane' : 'banes'}. Push ${pushes}. ${table}`;
+  const spoken = tumbling
+    ? ROLLING_TEXT
+    : `${successes} ${successes === 1 ? 'success' : 'successes'}. ${banes} ${banes === 1 ? 'bane' : 'banes'}. Push ${pushes}. ${table}`;
   return (
     <header class="shell-h" data-el="shell-header">
       <div class="statusline" data-el="status-line" role="status" aria-live="polite">
         <span class="st-row" aria-hidden="true">
-          <span class="st-item">
-            <i class="mark s" />
-            {successes}
-          </span>
-          <span class="st-item">
-            <i class="mark b" />
-            {banes}
-          </span>
-          <i class="st-rule" />
+          {tumbling ? null : (
+            <>
+              <span class="st-item">
+                <i class="mark s" />
+                {successes}
+              </span>
+              <span class="st-item">
+                <i class="mark b" />
+                {banes}
+              </span>
+              {/* The rule divides the marks from the dim readings, so it goes
+                  with them and the row never opens with a line. */}
+              <i class="st-rule" />
+            </>
+          )}
           <span class="st-item st-dim">
             {state.result === null ? dice.length : state.result.dice.length} dice
           </span>
@@ -485,6 +524,7 @@ function Slot({
   colours,
   shaken,
   active,
+  tumbling,
   onPress,
 }: {
   view: DieView;
@@ -493,9 +533,15 @@ function Slot({
   colours: DiceTheme;
   shaken: boolean;
   active: boolean;
+  tumbling: boolean;
   onPress: () => void;
 }) {
   const over = layout === 'over';
+  // The name waits for the dice as the status line does. A cell that named the
+  // face would hand a reader the whole result, die by die, while the eye had
+  // nothing to read. `tumbling` is only ever true over the 3D table, and this
+  // cell draws no die there, so nothing on the screen is hidden with it.
+  const label = tumbling ? rollingLabel(view) : view.label;
   // The dice axis reaches the flat die here, one body colour per dice type,
   // exactly as `src/tray/throw.ts` reaches the 3D die. The cell over the table
   // draws no die, so the colour costs it nothing.
@@ -556,7 +602,7 @@ function Slot({
         data-el={view.element}
         role="img"
         tabIndex={active ? 0 : -1}
-        aria-label={view.label}
+        aria-label={label}
         style={style}
       >
         {drawn}
@@ -570,7 +616,7 @@ function Slot({
       type="button"
       tabIndex={active ? 0 : -1}
       aria-pressed={view.state === 'choice'}
-      aria-label={view.label}
+      aria-label={label}
       onClick={onPress}
       style={style}
     >
@@ -590,6 +636,7 @@ function Zone({
   thrown,
   ordinal,
   activeId,
+  tumbling,
   onPress,
 }: {
   kind: string;
@@ -602,6 +649,7 @@ function Zone({
   thrown: readonly string[];
   ordinal: number;
   activeId: string;
+  tumbling: boolean;
   onPress: (id: string) => void;
 }) {
   return (
@@ -632,6 +680,7 @@ function Zone({
             colours={colours}
             shaken={thrown.includes(view.die.id)}
             active={view.element === activeId}
+            tumbling={tumbling}
             onPress={() => onPress(view.die.id)}
           />
         ))}
@@ -658,12 +707,14 @@ function DiceTray({
   layout,
   spots,
   colours,
+  tumbling,
 }: {
   state: AppState;
   setState: (change: Change) => void;
   layout: TrayLayout;
   spots: TraySpots;
   colours: DiceTheme;
+  tumbling: boolean;
 }) {
   const profile = profileOf(state);
   const zones = zonesOf(state);
@@ -725,6 +776,7 @@ function DiceTray({
         thrown={state.thrown}
         ordinal={state.throwOrdinal}
         activeId={active}
+        tumbling={tumbling}
         onPress={(id) => setState((previous) => toggleDie(previous, id))}
       />
       <Zone
@@ -738,6 +790,7 @@ function DiceTray({
         thrown={state.thrown}
         ordinal={state.throwOrdinal}
         activeId={active}
+        tumbling={tumbling}
         onPress={(id) => setState((previous) => toggleDie(previous, id))}
       />
     </div>
@@ -1247,6 +1300,9 @@ export function App({
   // arrives from a mount callback, nothing on the screen is drawn from it, and
   // a render of the whole application on every mount would buy nothing.
   const trayBox = useRef<DiceBox | null>(null);
+  // True once the tray has mounted, and false again when it leaves. The bound
+  // on the wait for rest reads it, so it is hook state and not a ref.
+  const [trayMounted, setTrayMounted] = useState(false);
   const [madeCard, setMadeCard] = useState<MadeCard | null>(null);
   const [shareNote, setShareNote] = useState('');
   const [shareBusy, setShareBusy] = useState(false);
@@ -1305,6 +1361,10 @@ export function App({
   const applied = appliedTheme(renderer.settings);
   const onTheTable = renderer.choice.renderer === 'tray';
   const layout: TrayLayout = onTheTable ? 'over' : 'flat';
+  // The dice are still moving through the throw the screen holds, so the marks
+  // wait for them. The renderer is part of the reading, so the flat dice show
+  // the marks in the render that draws them and never wait a frame.
+  const tumbling = stillTumbling(state, onTheTable);
   const toggle = useRef<HTMLButtonElement>(null);
   const closeSheet = (): void => {
     setState((previous) => ({ ...previous, sheetOpen: false }));
@@ -1607,6 +1667,45 @@ export function App({
     });
   }, [state.throwOrdinal]);
 
+  // The bound on the wait for rest, and what it does NOT cover.
+  //
+  // **A tray that has mounted always answers.** `drain` reports rest from a
+  // `finally`, so every path through it reports: a throw it acted out, a throw
+  // it coalesced away, and a throw that threw an error, which also falls to
+  // flat dice. A table that leaves the document reports nothing, and the
+  // renderer is flat by then, so the marks are drawn. None of those paths
+  // needs a timer, and a timer that fired on one of them would show the marks
+  // over dice that are still moving, which is the defect this file closes.
+  //
+  // The one path that reports nothing is a mount that never finishes. There is
+  // no tray, no canvas and no die in motion there, so releasing the marks is
+  // safe. **The bound therefore covers the mount alone**, and it is cleared as
+  // soon as the tray mounts, whatever the throw is doing.
+  //
+  // ponytail: one constant, sized by the cost of being wrong in each
+  // direction. A bound shorter than a real mount brings the defect back. A
+  // bound longer than a dead mount delays a result nothing is drawing. The
+  // second cost is the smaller one, so the number is generous.
+  //
+  // Measured on this host on 2026-08-10, over a pool at every cap, driven
+  // through a preview server with a cold browser profile. The press reaches a
+  // mounted tray in 565 to 960 ms, and the slowest reading is the software
+  // rasteriser, which is the slowest target reachable here. Ten seconds is
+  // over ten times the slowest mount measured.
+  //
+  // The same run reads 3.9 to 5.5 s from the press to rest. An earlier version
+  // of this bound started at the press and ran for five seconds, so it fired
+  // BEFORE the dice stopped on the slowest run. That is the whole reason the
+  // bound covers the mount and not the throw.
+  useEffect(() => {
+    if (!tumbling || trayMounted) return;
+    const timer = setTimeout(
+      () => setState((previous) => withSettled(previous, previous.throwOrdinal)),
+      REST_BOUND_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [tumbling, trayMounted, state.throwOrdinal]);
+
   /**
    * Open the history.
    *
@@ -1731,7 +1830,7 @@ export function App({
       data-renderer={renderer.choice.renderer}
       data-tray-decision={renderer.decision === null ? 'pending' : String(renderer.decision.tray)}
     >
-      <StatusLine state={state} dice={dice} />
+      <StatusLine state={state} dice={dice} tumbling={tumbling} />
 
       <main
         class={onTheTable && !state.builderOpen ? 'shell-m stretch' : 'shell-m'}
@@ -1766,12 +1865,23 @@ export function App({
               onSpots={setSpots}
               onBox={(box) => {
                 trayBox.current = box;
+                // The bound below reads this. A tray that has mounted answers
+                // every throw, so the bound covers the mount alone.
+                setTrayMounted(box !== null);
               }}
               colours={applied.diceColours}
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
               onImpact={(impact) => sound.current?.impact(impact)}
               onMotion={(at, evidence) => perf.current?.motion(at, evidence)}
-              onSettled={(at) => perf.current?.settled(at)}
+              // Rest closes the overlay's measurement window AND releases the
+              // marks. Both readings are the same event, so they are taken
+              // from the same report and cannot fall out of step. The ordinal
+              // is the throw the tray acted out, and `withSettled` refuses a
+              // report that names any other throw.
+              onSettled={(at, ordinal) => {
+                perf.current?.settled(at);
+                setState((previous) => withSettled(previous, ordinal));
+              }}
             />
             {state.result === null ? null : (
               <DiceTray
@@ -1780,6 +1890,7 @@ export function App({
                 layout={layout}
                 spots={spots}
                 colours={applied.diceColours}
+                tumbling={tumbling}
               />
             )}
           </div>
@@ -1792,6 +1903,7 @@ export function App({
                 layout={layout}
                 spots={NO_SPOTS}
                 colours={applied.diceColours}
+                tumbling={tumbling}
               />
             )}
             <Table
