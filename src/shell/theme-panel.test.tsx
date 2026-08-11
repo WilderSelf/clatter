@@ -4,8 +4,8 @@
 //
 // Four claims need a document:
 //
-//   1. Three axes of six, each one a group with a role, a name and a state, and
-//      the six names read out of the theme module rather than restated.
+//   1. One group of six rows, with a role, a name and a state, and the six
+//      names read out of the theme module rather than restated.
 //   2. A colour the builder cannot use is REPORTED and never replaced. The
 //      report names each finding, and the count of findings is the count both
 //      checkers answered with, so a report that named one of five would fail.
@@ -24,7 +24,7 @@ import type { BuiltTheme } from '../theme/builder';
 import { checkDiceTheme, checkPalette, findingSentence } from '../theme/builder';
 import { appliedTheme } from '../theme/css-vars';
 import { INTERFACE_PALETTES, THEME_IDS, TRAY_SURFACES } from '../theme/themes';
-import { judgeBuilt, THEME_APPLIED_TEXT, THEME_AXES, ThemePanel } from './theme-panel';
+import { judgeBuilt, THEME_APPLIED_TEXT, THEME_ROWS_ELEMENT, ThemePanel } from './theme-panel';
 
 let host: HTMLDivElement | null = null;
 
@@ -35,29 +35,22 @@ afterEach(() => {
 });
 
 interface Mounted {
-  readonly rows: { axis: string; id: string }[];
+  readonly rows: string[];
   readonly built: (BuiltTheme | null)[];
 }
 
 function mount(builtTheme: BuiltTheme | null = null): Mounted {
   host = document.createElement('div');
   document.body.append(host);
-  const rows: { axis: string; id: string }[] = [];
+  const rows: string[] = [];
   const built: (BuiltTheme | null)[] = [];
   act(() => {
     render(
       <ThemePanel
-        applied={appliedTheme({
-          diceThemeId: 'ash',
-          traySurfaceId: 'ash',
-          interfacePaletteId: 'ash',
-          builtTheme,
-        })}
-        diceThemeId="ash"
-        traySurfaceId="ash"
-        interfacePaletteId="ash"
+        applied={appliedTheme({ themeId: 'ash', builtTheme })}
+        themeId="ash"
         builtTheme={builtTheme}
-        onChooseRow={(axis, id) => rows.push({ axis, id })}
+        onChooseRow={(id) => rows.push(id)}
         onBuild={(next) => built.push(next)}
       />,
       host as HTMLDivElement,
@@ -87,54 +80,44 @@ function press(name: string): void {
   });
 }
 
-describe('the three axes', () => {
-  it('draws six rows on each axis, and each row carries a name and a state', () => {
+describe('the six rows', () => {
+  it('draws six rows in one group, and each row carries a name and a state', () => {
     mount();
+    const group = element(THEME_ROWS_ELEMENT);
+    expect(group.tagName, 'the rows are a group').toBe('FIELDSET');
+    const inputs = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    // The six names come out of the theme module, so a seventh row appears
+    // here without an edit and a row that is dropped fails this line.
+    expect(
+      inputs.map((each) => each.value),
+      'the group draws one row per preset',
+    ).toEqual([...THEME_IDS]);
     let counted = 0;
-    for (const axis of THEME_AXES) {
-      const group = element(axis.element);
-      expect(group.tagName, `${axis.axis} is a group`).toBe('FIELDSET');
-      const inputs = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
-      // The six names come out of the theme module, so a seventh row appears
-      // here without an edit and a row that is dropped fails this line.
-      expect(
-        inputs.map((each) => each.value),
-        `${axis.axis} draws one row per preset`,
-      ).toEqual([...THEME_IDS]);
-      for (const input of inputs) {
-        const label = input.closest('label');
-        expect(label?.textContent?.trim().length, `${input.value} carries a name`).toBeGreaterThan(
-          0,
-        );
-        counted += 1;
-      }
-      // One state, and only one, on every axis.
-      expect(inputs.filter((each) => each.checked).length, `${axis.axis} holds one state`).toBe(1);
+    for (const input of inputs) {
+      const label = input.closest('label');
+      expect(label?.textContent?.trim().length, `${input.value} carries a name`).toBeGreaterThan(0);
+      counted += 1;
     }
-    // Three axes by six rows, counted as a product.
-    expect(counted, 'three axes by six rows were read').toBe(THEME_AXES.length * THEME_IDS.length);
-    expect(THEME_AXES.length, 'the design names three axes').toBe(3);
+    expect(counted, 'six rows were read').toBe(THEME_IDS.length);
+    // One state, and only one.
+    expect(inputs.filter((each) => each.checked).length, 'the group holds one state').toBe(1);
   });
 
-  it('reports a choice on the axis the player pressed, and on no other', () => {
+  it('reports the row the player pressed, and reports one choice', () => {
     const seen = mount();
-    for (const axis of THEME_AXES) {
-      const input = element(axis.element).querySelector<HTMLInputElement>('input[value="void"]');
-      act(() => {
-        input?.click();
-      });
-    }
-    expect(seen.rows, 'one choice per axis, each on its own axis').toEqual(
-      THEME_AXES.map((axis) => ({ axis: axis.axis, id: 'void' })),
-    );
+    const input =
+      element(THEME_ROWS_ELEMENT).querySelector<HTMLInputElement>('input[value="oxblood"]');
+    act(() => {
+      input?.click();
+    });
+    // One id, so one call. There is no second axis to report separately.
+    expect(seen.rows, 'one choice, and it names the row').toEqual(['oxblood']);
   });
 
   it('draws a swatch a reader never has to say', () => {
     mount();
     const swatches = [...(host?.querySelectorAll('.thm-sw') ?? [])];
-    expect(swatches.length, 'one swatch per row on every axis').toBe(
-      THEME_AXES.length * THEME_IDS.length,
-    );
+    expect(swatches.length, 'one swatch per row').toBe(THEME_IDS.length);
     expect(
       swatches.filter((each) => each.getAttribute('aria-hidden') === 'true').length,
       'a swatch is decoration, because a colour has no name to say',
@@ -242,12 +225,7 @@ describe('the colour builder', () => {
     expect(seen.built, 'the two seeds and the mode are what is stored').toEqual([
       { diceSeed: '#FF8B68', interfaceSeed: '#3CBFA5', mode: 'dark', exactDice: false },
     ]);
-    const applied = appliedTheme({
-      diceThemeId: 'ash',
-      traySurfaceId: 'ash',
-      interfacePaletteId: 'ash',
-      builtTheme: seen.built[0] ?? null,
-    });
+    const applied = appliedTheme({ themeId: 'ash', builtTheme: seen.built[0] ?? null });
     expect(applied.palette.accent, 'the accent is the colour the player typed').toBe('#3CBFA5');
     expect(applied.palette, 'a built palette is not a shipped row').not.toBe(
       INTERFACE_PALETTES.ash,
@@ -294,14 +272,14 @@ describe('every control', () => {
       unnamed.map((each) => each.getAttribute('data-el') ?? each.tagName),
       'every control carries a name',
     ).toEqual([]);
-    // The state of a chosen row, on all three axes plus the page mode.
-    const groups = [...THEME_AXES.map((axis) => axis.element), 'theme-mode'];
+    // The state of a chosen row, plus the page mode of the builder.
+    const groups = [THEME_ROWS_ELEMENT, 'theme-mode'];
     let stated = 0;
     for (const group of groups) {
       const inputs = [...element(group).querySelectorAll<HTMLInputElement>('input[type="radio"]')];
       expect(inputs.filter((each) => each.checked).length, `${group} states one choice`).toBe(1);
       stated += 1;
     }
-    expect(stated, 'four groups state a choice').toBe(groups.length);
+    expect(stated, 'two groups state a choice').toBe(groups.length);
   });
 });

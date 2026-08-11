@@ -7,22 +7,22 @@
 //
 // Three claims, three denominators, and the denominators are the point.
 //
-//   6    text contrast inside the interface. Three axes of six presets give 216
-//        combinations, but a text pair that never leaves the interface palette
-//        cannot answer to the dice or to the tray. The 216 are all enumerated
-//        below and the answer is measured, not assumed: if any pair moved with
-//        the other two axes the reduction would not be six, and this file says
-//        so rather than asserting it away.
-//   36   a readout drawn over the tray. That one leaves the interface axis, so
-//        it is every interface palette against every tray surface.
+//   6    text contrast inside the interface. A text pair never leaves the
+//        palette, and one id names the palette, so six palettes are six
+//        answers.
+//   36   a readout drawn over the tray. Only six palette and surface pairings
+//        are reachable through the picker now, but a theme a player BUILDS puts
+//        a derived palette over a shipped tray surface, so a readout still has
+//        to hold over every surface. The wider denominator stays for that
+//        reason, and `appliedTheme` is where the crossing happens.
 //   15   the pairs of six dice types, inside each of the six dice themes. Unit
 //        3.3 proved the ladder for one theme. Six is a different claim.
 
 import { describe, expect, it } from 'vitest';
 import { checkDiceTheme, checkPalette } from './builder';
 import { contrastRatio, lightness } from './contrast';
-import type { InterfacePalette, ThemeId } from './themes';
-import { DICE_THEMES, INTERFACE_PALETTES, resolveTheme, THEME_IDS, TRAY_SURFACES } from './themes';
+import type { InterfacePalette } from './themes';
+import { DICE_THEMES, INTERFACE_PALETTES, THEME_IDS, TRAY_SURFACES } from './themes';
 
 /** The floors, restated. WCAG 2.2 SC 1.4.3 for text, SC 1.4.11 for a control. */
 const TEXT_FLOOR = 4.5;
@@ -33,7 +33,7 @@ const LADDER_FLOOR = 8;
 const INK_FLOOR = 4;
 
 /** The six names, restated, in the order the plan names them. */
-const NAMES = ['ember', 'ash', 'verdigris', 'bone', 'void', 'cobalt'] as const;
+const NAMES = ['leather', 'ash', 'moss', 'bone', 'iron', 'oxblood'] as const;
 
 /** The seven pairs a palette answers for on its own, restated with their floors. */
 const TEXT_PAIRS: readonly (readonly [keyof InterfacePalette, keyof InterfacePalette, number])[] = [
@@ -49,21 +49,21 @@ const TEXT_PAIRS: readonly (readonly [keyof InterfacePalette, keyof InterfacePal
 /** The six dice types, restated. */
 const TYPES = ['stress', 'artifact', 'gear', 'skill', 'bonus', 'attribute'] as const;
 
-const AXES = 3;
+/** The three records one id reads. */
+const RECORDS = 3;
 
-describe('the three axes', () => {
-  it('offers six presets on each of the three axes, and the same six names', () => {
-    expect(THEME_IDS.length, 'the axis carries six presets').toBe(NAMES.length);
+describe('the six themes', () => {
+  it('carries the same six names in all three records', () => {
+    expect(THEME_IDS.length, 'the picker offers six themes').toBe(NAMES.length);
     expect([...THEME_IDS].sort()).toEqual([...NAMES].sort());
-    let axesCounted = 0;
-    for (const axis of [DICE_THEMES, TRAY_SURFACES, INTERFACE_PALETTES]) {
-      expect(Object.keys(axis).sort(), 'the axis carries one row per name').toEqual(
+    let recordsCounted = 0;
+    for (const record of [DICE_THEMES, TRAY_SURFACES, INTERFACE_PALETTES]) {
+      expect(Object.keys(record).sort(), 'the record carries one row per name').toEqual(
         [...NAMES].sort(),
       );
-      axesCounted += 1;
+      recordsCounted += 1;
     }
-    expect(axesCounted, 'three axes were read').toBe(AXES);
-    expect(NAMES.length ** AXES, 'six presets on three axes give 216 combinations').toBe(216);
+    expect(recordsCounted, 'three records were read').toBe(RECORDS);
   });
 
   it('gives every dice theme one colour per dice type', () => {
@@ -76,52 +76,10 @@ describe('the three axes', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Claim 1 — the denominator is 6, and that is measured.
+// Claim 1 — the denominator is 6.
 // ---------------------------------------------------------------------------
 
-/** The seven ratios of one combination, read through the resolved theme. */
-function textRatios(dice: ThemeId, tray: ThemeId, palette: ThemeId): number[] {
-  const resolved = resolveTheme({ dice, traySurface: tray, interface: palette });
-  return TEXT_PAIRS.map(([ink, ground]) =>
-    contrastRatio(resolved.palette[ink], resolved.palette[ground]),
-  );
-}
-
 describe('text contrast', () => {
-  it('does not move when the dice axis or the tray axis moves, so the denominator is 6', () => {
-    const seen = new Map<string, Set<string>>();
-    let combinations = 0;
-    for (const dice of NAMES) {
-      for (const tray of NAMES) {
-        for (const palette of NAMES) {
-          const key = textRatios(dice, tray, palette)
-            .map((ratio) => ratio.toFixed(6))
-            .join('/');
-          const answers = seen.get(palette) ?? new Set<string>();
-          answers.add(key);
-          seen.set(palette, answers);
-          combinations += 1;
-        }
-      }
-    }
-    // Every combination ran, counted as a product rather than as a literal.
-    expect(combinations, 'all 216 combinations ran').toBe(NAMES.length ** AXES);
-
-    // The measurement. One palette gave one answer across all 36 settings of
-    // the other two axes. A text colour that read the tray would give more.
-    for (const [palette, answers] of seen) {
-      expect(
-        answers.size,
-        `the ${palette} palette answered ${answers.size} ways as the other two axes moved`,
-      ).toBe(1);
-    }
-    const distinct = new Set([...seen.values()].flatMap((answers) => [...answers]));
-    expect(distinct.size, 'the 216 combinations collapse to one answer per interface palette').toBe(
-      NAMES.length,
-    );
-    expect(seen.size, 'the reduction is to six and not to fewer').toBe(6);
-  });
-
   it('meets its floor in all six palettes, on all seven pairs', () => {
     let measurements = 0;
     for (const id of NAMES) {
@@ -148,6 +106,9 @@ describe('text contrast', () => {
 // ---------------------------------------------------------------------------
 
 describe('a readout drawn over the tray', () => {
+  // The picker reaches six of these 36 pairings. The other 30 stay measured
+  // because `appliedTheme` puts a BUILT palette over a shipped tray surface,
+  // and a built palette is derived from the same targets as these six rows.
   it('meets the text floor on all 36 palette and surface pairs', () => {
     let enumerated = 0;
     let lowest = Number.POSITIVE_INFINITY;
@@ -235,9 +196,11 @@ describe('the dice type colours', () => {
   });
 
   it('keeps every die visible on every tray surface, all 216 of them', () => {
-    // Unit 3.3 measured one dice theme against one surface. Adding two axes
-    // multiplies that claim by 36, and an invariant proven for one instance
-    // does not compose, so it is measured again at the scale that ships.
+    // Unit 3.3 measured one dice theme against one surface. The picker pairs a
+    // dice row with its own surface, but a theme a player builds crosses a
+    // derived dice ladder with a shipped surface, so the wider denominator is
+    // the one that ships. An invariant proven for one instance does not
+    // compose, so it is measured again at that scale.
     let measured = 0;
     for (const dice of NAMES) {
       for (const surface of NAMES) {

@@ -41,7 +41,7 @@ import { emptyState, nudge, pushNow, readout, rollNow, toggleDie, zonesOf } from
 import { APP_NAME, plural } from './words';
 
 /** The six palettes, named again here rather than read off the module. */
-const NAMES: readonly ThemeId[] = ['ember', 'ash', 'verdigris', 'bone', 'void', 'cobalt'];
+const NAMES: readonly ThemeId[] = ['leather', 'ash', 'moss', 'bone', 'iron', 'oxblood'];
 
 /** The five readings a card holds, written out again so the module has a denominator. */
 const READINGS: readonly string[] = ['dice', 'kept', 'inTheCup', 'stress', 'pushes'];

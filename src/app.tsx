@@ -912,7 +912,7 @@ function Sheet({
   onMovePreset: (preset: PoolPreset, toIndex: number) => void;
   onDeletePreset: (preset: PoolPreset) => void;
   onAskForTray: (wanted: boolean) => void;
-  onChooseRow: (axis: 'interface' | 'surface' | 'dice', id: ThemeId) => void;
+  onChooseRow: (id: ThemeId) => void;
   onBuildTheme: (built: BuiltTheme | null) => void;
   onOpenHistory: () => void;
   onClose: () => void;
@@ -1032,18 +1032,15 @@ function Sheet({
           ))}
           <p class="sheet-note">{ARTIFACT_CURVE_NOTE[state.artifactCurve]}</p>
         </fieldset>
-        {/* The theme, on three independent axes, plus the colour builder.
+        {/* The theme, one choice, plus the colour builder.
 
             Section 4 of `docs/design/0002-screen-design.md` names it against
             Unit 4.8. The sheet is a second surface and carries no share of the
-            control budget of section 3, and none of the three groups holds a
-            tab stop of the main screen, so both keyboard walks of section 6 are
-            unchanged. */}
+            control budget of section 3, and the group holds no tab stop of the
+            main screen, so both keyboard walks of section 6 are unchanged. */}
         <ThemePanel
           applied={applied}
-          diceThemeId={renderer.settings.diceThemeId}
-          traySurfaceId={renderer.settings.traySurfaceId}
-          interfacePaletteId={renderer.settings.interfacePaletteId}
+          themeId={renderer.settings.themeId}
           builtTheme={renderer.settings.builtTheme}
           onChooseRow={onChooseRow}
           onBuild={onBuildTheme}
@@ -1330,12 +1327,7 @@ export function App({
     for (const [role, colour] of Object.entries(themeVariables(applied))) {
       root.style.setProperty(role, colour);
     }
-  }, [
-    renderer.settings.diceThemeId,
-    renderer.settings.traySurfaceId,
-    renderer.settings.interfacePaletteId,
-    renderer.settings.builtTheme,
-  ]);
+  }, [renderer.settings.themeId, renderer.settings.builtTheme]);
 
   const held = useRef(renderer);
   const apply = (change: (previous: RendererState) => RendererState): void => {
@@ -1347,22 +1339,16 @@ export function App({
   };
 
   /**
-   * Choose a row on one axis.
+   * Choose a theme.
    *
    * The write goes through the one writer, so the record the renderer choice
    * lives in is the record the theme lives in and a later fall to flat dice
    * cannot put an older theme back. Choosing a row does not clear a theme the
-   * player built: the rows stay chosen underneath it, and `theme-clear` is what
-   * returns to them.
+   * player built: the row stays chosen underneath it, and `theme-clear` is what
+   * returns to it.
    */
-  const chooseThemeRow = (axis: 'interface' | 'surface' | 'dice', id: ThemeId): void => {
-    const field =
-      axis === 'interface'
-        ? 'interfacePaletteId'
-        : axis === 'surface'
-          ? 'traySurfaceId'
-          : 'diceThemeId';
-    apply((previous) => ({ ...previous, settings: { ...previous.settings, [field]: id } }));
+  const chooseThemeRow = (themeId: ThemeId): void => {
+    apply((previous) => ({ ...previous, settings: { ...previous.settings, themeId } }));
   };
 
   /** Put a built theme on the screen, or take it off. */

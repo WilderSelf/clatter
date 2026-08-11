@@ -13,7 +13,8 @@
 // push-profile override added a field, another step, and four ways a stored
 // override is unusable. The open half of Unit 4.8 added the last four, because
 // the theme a player builds added a field, another step, and two ways a stored
-// theme is unusable.
+// theme is unusable. The one theme colour added the last one, because the three
+// theme axes collapsed to one id and that collapse is a migration step.
 //
 // The allowed values are written out again in this file. Reading them from the
 // module under test would let the module answer its own question.
@@ -58,8 +59,8 @@ const ENUMERATED_CASES = [
   'a sound volume that is not a number',
   'a sound flag that is not a boolean',
   'a version 4 record from before the theme axes existed',
-  'a dice theme id that no longer ships',
-  'a tray surface id that is not a string',
+  'a theme id that no longer ships',
+  'a theme id that is not a string',
   'a version 5 record from before the pool presets existed',
   'a pool preset list that is not an array',
   'a pool preset with a name that is not a string',
@@ -76,10 +77,11 @@ const ENUMERATED_CASES = [
   'a built theme both seeds and a mode',
   'a built theme with a seed that is not a colour',
   'a built theme with a mode that does not ship',
+  'a version 8 record from before the one theme colour existed',
 ] as const;
 
 /** The six theme names, written out again for the same reason as the modes. */
-const THEME_NAMES = ['ember', 'ash', 'verdigris', 'bone', 'void', 'cobalt'];
+const THEME_NAMES = ['leather', 'ash', 'moss', 'bone', 'iron', 'oxblood'];
 
 /**
  * The two preset caps, written out again for the same reason as the modes.
@@ -229,24 +231,12 @@ const CASES: readonly Case[] = [
     },
   },
   {
-    name: 'a dice theme id that no longer ships',
-    stored: {
-      version: SETTINGS_VERSION,
-      diceThemeId: 'a-theme-this-build-no-longer-carries',
-      traySurfaceId: 'void',
-      interfacePaletteId: 'cobalt',
-    },
-    expect: { traySurfaceId: 'void', interfacePaletteId: 'cobalt' },
+    name: 'a theme id that no longer ships',
+    stored: { version: SETTINGS_VERSION, themeId: 'a-theme-this-build-no-longer-carries' },
   },
   {
-    name: 'a tray surface id that is not a string',
-    stored: {
-      version: SETTINGS_VERSION,
-      diceThemeId: 'ember',
-      traySurfaceId: 11,
-      interfacePaletteId: null,
-    },
-    expect: { diceThemeId: 'ember' },
+    name: 'a theme id that is not a string',
+    stored: { version: SETTINGS_VERSION, themeId: 11 },
   },
   {
     name: 'a version 5 record from before the pool presets existed',
@@ -269,9 +259,8 @@ const CASES: readonly Case[] = [
       flatFallback: true,
       soundEnabled: true,
       soundVolume: 0.25,
-      diceThemeId: 'void',
-      traySurfaceId: 'ember',
-      interfacePaletteId: 'cobalt',
+      // The page id wins the collapse, and `cobalt` is called `iron` now.
+      themeId: 'iron',
     },
   },
   {
@@ -334,9 +323,7 @@ const CASES: readonly Case[] = [
       flatFallback: true,
       soundEnabled: true,
       soundVolume: 0.25,
-      diceThemeId: 'void',
-      traySurfaceId: 'ember',
-      interfacePaletteId: 'cobalt',
+      themeId: 'iron',
     },
   },
   {
@@ -399,7 +386,9 @@ const CASES: readonly Case[] = [
       presetId: 'step-banes-cost-health',
       diceThemeId: 'void',
     },
-    expect: { mode: 'step', presetId: 'step-banes-cost-health', diceThemeId: 'void' },
+    // No page id was stored, so the one that wins the collapse is absent and
+    // the theme reads as the default. The dice id is dropped, not promoted.
+    expect: { mode: 'step', presetId: 'step-banes-cost-health' },
   },
   {
     name: 'a built theme both seeds and a mode',
@@ -426,6 +415,23 @@ const CASES: readonly Case[] = [
       version: SETTINGS_VERSION,
       builtTheme: { diceSeed: '#3CBFA5', interfaceSeed: '#FF8B68', mode: 'sepia' },
     },
+  },
+  // ---- the collapse to one theme colour ----
+  //
+  // Three stored ids, all different, and the PAGE one wins: it is the id the
+  // player saw on every pixel of the page. `verdigris` is called `moss` now.
+  // A record that expected the dice id to win would read `oxblood` here.
+  {
+    name: 'a version 8 record from before the one theme colour existed',
+    stored: {
+      version: 8,
+      mode: 'step',
+      presetId: 'step-banes-cost-health',
+      diceThemeId: 'void',
+      traySurfaceId: 'ember',
+      interfacePaletteId: 'verdigris',
+    },
+    expect: { mode: 'step', presetId: 'step-banes-cost-health', themeId: 'moss' },
   },
 ];
 
@@ -460,18 +466,9 @@ function assertUsable(settings: Settings, caseName: string): void {
     settings.soundVolume,
     `${caseName}: the volume is a level from 0 to 1`,
   ).toBeLessThanOrEqual(1);
-  let axesChecked = 0;
-  for (const chosen of [
-    settings.diceThemeId,
-    settings.traySurfaceId,
-    settings.interfacePaletteId,
-  ]) {
-    expect(THEME_NAMES, `${caseName}: the theme id names a preset this build ships`).toContain(
-      chosen,
-    );
-    axesChecked += 1;
-  }
-  expect(axesChecked, `${caseName}: all three theme axes were read`).toBe(3);
+  expect(THEME_NAMES, `${caseName}: the theme id names a preset this build ships`).toContain(
+    settings.themeId,
+  );
   // A built theme is either absent or complete. Half a theme is not a theme,
   // and a seed that is not a six-digit hex colour never reaches the screen.
   const built = settings.builtTheme;
@@ -592,7 +589,7 @@ describe('migrate', () => {
     expect(CASES.length, 'the table holds one case per enumerated case').toBe(
       ENUMERATED_CASES.length,
     );
-    expect(ENUMERATED_CASES.length, 'the enumeration holds thirty-six cases').toBe(36);
+    expect(ENUMERATED_CASES.length, 'the enumeration holds thirty-seven cases').toBe(37);
   });
 
   it('cuts an over-long preset list at the cap and keeps the presets it holds', () => {
@@ -617,9 +614,7 @@ describe('migrate', () => {
       flatFallback: true,
       soundEnabled: true,
       soundVolume: 0.25,
-      diceThemeId: 'void',
-      traySurfaceId: 'ember',
-      interfacePaletteId: 'cobalt',
+      themeId: 'iron',
       builtTheme: { diceSeed: '#3CBFA5', interfaceSeed: '#FF8B68', mode: 'light', exactDice: true },
       poolPresets: [{ name: 'the quiet approach', counts: { attribute: 3, artifact: [8] } }],
       profileOverride: { maxPushes: 3, cost: { perUnit: 2 } },
@@ -631,9 +626,7 @@ describe('migrate', () => {
     expect(stored.flatFallback).not.toBe(DEFAULT_SETTINGS.flatFallback);
     expect(stored.soundEnabled).not.toBe(DEFAULT_SETTINGS.soundEnabled);
     expect(stored.soundVolume).not.toBe(DEFAULT_SETTINGS.soundVolume);
-    expect(stored.diceThemeId).not.toBe(DEFAULT_SETTINGS.diceThemeId);
-    expect(stored.traySurfaceId).not.toBe(DEFAULT_SETTINGS.traySurfaceId);
-    expect(stored.interfacePaletteId).not.toBe(DEFAULT_SETTINGS.interfacePaletteId);
+    expect(stored.themeId).not.toBe(DEFAULT_SETTINGS.themeId);
     expect(stored.builtTheme).not.toStrictEqual(DEFAULT_SETTINGS.builtTheme);
     expect(stored.poolPresets.length).not.toBe(DEFAULT_SETTINGS.poolPresets.length);
     expect(stored.profileOverride).not.toStrictEqual(DEFAULT_SETTINGS.profileOverride);
@@ -649,9 +642,7 @@ describe('migrate', () => {
       flatFallback: DEFAULT_SETTINGS.flatFallback,
       soundEnabled: DEFAULT_SETTINGS.soundEnabled,
       soundVolume: DEFAULT_SETTINGS.soundVolume,
-      diceThemeId: DEFAULT_SETTINGS.diceThemeId,
-      traySurfaceId: DEFAULT_SETTINGS.traySurfaceId,
-      interfacePaletteId: DEFAULT_SETTINGS.interfacePaletteId,
+      themeId: DEFAULT_SETTINGS.themeId,
       builtTheme: DEFAULT_SETTINGS.builtTheme,
       poolPresets: DEFAULT_SETTINGS.poolPresets,
       profileOverride: DEFAULT_SETTINGS.profileOverride,
