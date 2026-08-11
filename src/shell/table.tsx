@@ -22,14 +22,14 @@ import { useEffect, useRef } from 'preact/hooks';
 import type { Die } from '../rules/die';
 import type { RollResult } from '../rules/roll';
 import type { AffordanceHandle } from '../tray/affordance';
-import { mountAffordance } from '../tray/affordance';
+import { lockMarkerColours, mountAffordance } from '../tray/affordance';
 import { prefersReducedMotion } from '../tray/capability';
 import type { MountTrayOptions } from '../tray/scene';
 import type { DieSpot } from '../tray/spots';
 import { dieSpots } from '../tray/spots';
 import { watchFirstMotion } from '../tray/motion';
 import { paintPool, pushPool, throwPool } from '../tray/throw';
-import type { DiceTheme } from '../theme/themes';
+import type { DiceTheme, InterfacePalette } from '../theme/themes';
 import type { DiceBox, TrayImpact } from '../tray/vendor/dice-tray.js';
 import type { MotionEvidence } from './perf';
 import type { AppState } from './state';
@@ -130,6 +130,11 @@ export interface TableProps {
   /** The dice axis in force — Unit 4.8. A change of it repaints the pool. */
   readonly colours: DiceTheme;
   /**
+   * The interface palette in force. The lock marks are drawn out of it, so a
+   * change of it repaints them exactly as `colours` repaints the dice.
+   */
+  readonly palette: InterfacePalette;
+  /**
    * Every collision the physics world reports — Unit 3.6.
    *
    * The sound engine is the caller. The tray plays nothing and holds no
@@ -180,6 +185,7 @@ export function Table({
   onBox,
   onToggle,
   colours,
+  palette,
   onImpact,
   onMotion,
   onSettled,
@@ -198,6 +204,7 @@ export function Table({
   const boxed = useRef(onBox);
   const seam = useRef<TableSeam>({ box: null, ordered: [], throws: 0, busy: false });
   const painted = useRef(colours);
+  const themed = useRef(palette);
   // The three callbacks below arrive from a render and are called from a mount
   // callback or a frame callback, so each is held in a ref rather than
   // captured. A stale sound hook would go on playing at an old volume, and a
@@ -211,6 +218,7 @@ export function Table({
   // replaced it.
   const live = useRef(true);
   painted.current = colours;
+  themed.current = palette;
   toggle.current = onToggle;
   spotted.current = onSpots;
   boxed.current = onBox;
@@ -324,6 +332,7 @@ export function Table({
           held as DiceBox,
           [],
           profileOf(state),
+          themed.current,
           (_pool, clicked) => toggle.current(clicked.id),
         );
         publish();
@@ -378,7 +387,7 @@ export function Table({
     affordance.current = null;
     let live = true;
     const pool = state.result === null ? [] : ordered.current;
-    void mountAffordance(held, pool, profileOf(state), (_pool, clicked) =>
+    void mountAffordance(held, pool, profileOf(state), themed.current, (_pool, clicked) =>
       toggle.current(clicked.id),
     ).then((handle) => {
       if (live) affordance.current = handle;
@@ -433,6 +442,16 @@ export function Table({
     if (held === null || ordered.current.length === 0) return;
     paintPool(held, ordered.current, colours);
   }, [colours]);
+
+  // The lock marks follow the interface palette the same way, and they are
+  // repainted whether or not the table holds dice, because the two materials
+  // are shared and outlive any one throw. The two COLOURS are the dependency
+  // rather than the palette object: a theme a player built is derived again on
+  // every render, so the object is new each time and the colours are not.
+  const marks = lockMarkerColours(palette);
+  useEffect(() => {
+    affordance.current?.paint(palette);
+  }, [marks.rule, marks.choice]);
 
   // The dice hold their world positions through a resize and the camera does
   // not, so the cells are read again rather than scaled.

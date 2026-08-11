@@ -264,6 +264,11 @@
 // is judged against the rules and never against itself. A machine that cannot
 // draw the table prints every check as NOT JUDGED and counts them in skipped=.
 //
+// `--theme-id <id>` names the theme the run is drawn in. It belongs to `--table`
+// and it exists for the captures: `--capture` then writes the table in a row a
+// player can choose rather than in the default row alone. The run picks the row
+// through the panel and prints the tray surface the engine resolved.
+//
 // The sandbox hides /dev/dri, so a sandboxed run gets no WebGL context at all
 // and a hardware run inside the sandbox fails by design. Run a hardware run
 // through the `node scripts/browser.mjs*` sandbox exclusion.
@@ -1989,7 +1994,17 @@ const AFFORDANCE_MODULES = [
   'src/rules/push-profile.ts',
   'src/tray/throw.ts',
   'src/tray/affordance.ts',
+  'src/theme/themes.ts',
 ];
+
+/**
+ * The theme this scene is drawn in.
+ *
+ * `src/tray/scene.ts` fills the container with the `ash` surface, so the marks
+ * take the `ash` palette and the pairing is one a player can really reach. A
+ * mark from one row over the table of another would prove nothing about either.
+ */
+const AFFORDANCE_THEME_ID = 'ash';
 
 /**
  * The shape probe. How many directions out of this many the mark occupies.
@@ -2010,8 +2025,8 @@ const MIN_MARK_CONTRAST = 3;
 async function mountAffordanceScene(page, pageUrl) {
   const modules = AFFORDANCE_MODULES.map((path) => new URL(path, pageUrl).href);
   return page.evaluate(
-    async ({ modules, fixture, profileId }) => {
-      const [die, profiles, thrower, affordance] = await Promise.all(
+    async ({ modules, fixture, profileId, themeId }) => {
+      const [die, profiles, thrower, affordance, themes] = await Promise.all(
         modules.map((url) => import(url)),
       );
       const profile = profiles.PUSH_PROFILES.find((one) => one.id === profileId);
@@ -2023,10 +2038,13 @@ async function mountAffordanceScene(page, pageUrl) {
       const ordered = await thrower.throwPool(box, { dice, stressAfter: 0 });
       const held = { module: affordance, profiles, profile, ordered, pool: ordered, clicks: [] };
       window.__clatterAffordance = held;
+      const palette = themes.INTERFACE_PALETTES[themeId];
+      held.palette = palette;
       held.stop = await affordance.mountAffordance(
         box,
         ordered,
         profile,
+        palette,
         (pool, clicked, outcome) => {
           held.pool = pool;
           held.clicks.push({ id: clicked.id, outcome });
@@ -2035,9 +2053,17 @@ async function mountAffordanceScene(page, pageUrl) {
       return {
         order: ordered.map((one) => one.id),
         states: ordered.map((one) => profiles.lockState(one, profile)),
+        // What the marks were ASKED for, so the run can compare it against
+        // what the renderer put in the material.
+        wanted: affordance.lockMarkerColours(palette),
       };
     },
-    { modules, fixture: AFFORDANCE_FIXTURE, profileId: AFFORDANCE_PROFILE_ID },
+    {
+      modules,
+      fixture: AFFORDANCE_FIXTURE,
+      profileId: AFFORDANCE_PROFILE_ID,
+      themeId: AFFORDANCE_THEME_ID,
+    },
   );
 }
 
@@ -2190,6 +2216,30 @@ async function readMarks(page, surface) {
       surface,
     },
   );
+}
+
+/**
+ * Repaint every mark in one palette and read the colour back off the material.
+ *
+ * The palette crosses from node, so the page is never asked which colour it
+ * ought to have used. `getHexString()` answers in sRGB, which is the space the
+ * hex in a theme row is written in, so the two are comparable without a
+ * conversion of this file's own.
+ */
+async function paintMarks(page, palette) {
+  return page.evaluate((row) => {
+    window.__clatterAffordance.stop.paint(row);
+    const drawn = [];
+    window.__clatterTray.scene.traverse((node) => {
+      if (typeof node.name === 'string' && node.name.startsWith('clatter-lock-marker:')) {
+        drawn.push({
+          index: Number(node.name.split(':')[1]),
+          colour: `#${node.material.color.getHexString().toUpperCase()}`,
+        });
+      }
+    });
+    return drawn;
+  }, palette);
 }
 
 /**
@@ -2575,6 +2625,74 @@ async function runAffordanceScene(page, options, checks) {
       `and not gated. too_dim=${dim.length} never_seen=${unseen.length}` +
       (dim.length ? ` [${dim.join('; ')}]` : '') +
       (unseen.length ? ` [${unseen.join('; ')}]` : ''),
+  });
+
+  // --- the marks follow the theme, read off the materials the renderer holds --
+  //
+  // `affordance.test.ts` measures the two floors over the six rows. It reads
+  // data, so it cannot say that the colour a row names ever reached a material.
+  // This reads the material the renderer draws with, after a real repaint, and
+  // it needs no pixel: the marks are unlit, so the material IS the colour on
+  // the screen and the check above already proves the pixels arrive.
+  // `scripts/ts-resolve.mjs` supplies the extension Vite would have supplied,
+  // so this file reads the rows the screen reads and never a copy of them.
+  register('./ts-resolve.mjs', import.meta.url);
+  const themeRows = await import('../src/theme/themes.ts');
+  const affordanceMod = await import('../src/tray/affordance.ts');
+  const painted = [];
+  for (const id of themeRows.THEME_IDS) {
+    const drawn = await paintMarks(page, themeRows.INTERFACE_PALETTES[id]);
+    painted.push({
+      id,
+      drawn,
+      wanted: affordanceMod.lockMarkerColours(themeRows.INTERFACE_PALETTES[id]),
+    });
+  }
+  // Back to the row this scene's table is drawn in, so nothing after this reads
+  // a mark from another theme.
+  await paintMarks(page, themeRows.INTERFACE_PALETTES[AFFORDANCE_THEME_ID]);
+  const wrongColour = [];
+  let repainted = 0;
+  const seen = { rule: new Set(), choice: new Set() };
+  for (const row of painted) {
+    for (const mark of row.drawn) {
+      const state = thrown.states[mark.index];
+      if (state !== 'rule' && state !== 'choice') {
+        wrongColour.push(`${row.id} drew a mark on a ${state} die`);
+        continue;
+      }
+      repainted += 1;
+      seen[state].add(mark.colour);
+      if (mark.colour !== row.wanted[state].toUpperCase()) {
+        wrongColour.push(
+          `${row.id} ${state} drew ${mark.colour} against ${row.wanted[state].toUpperCase()}`,
+        );
+      }
+    }
+  }
+  const wantedMarks = markedCount * themeRows.THEME_IDS.length;
+  console.log(
+    `browser: affordance theme rows=${themeRows.THEME_IDS.length} marks_read=${repainted} ` +
+      `of ${wantedMarks} distinct_rule=${seen.rule.size} distinct_choice=${seen.choice.size} ` +
+      `wrong=${wrongColour.length}`,
+  );
+  checks.push({
+    name: 'affordance.the-marks-carry-the-colour-of-the-theme-in-force',
+    ok:
+      wrongColour.length === 0 &&
+      repainted === wantedMarks &&
+      wantedMarks > 0 &&
+      seen.rule.size === themeRows.THEME_IDS.length &&
+      seen.choice.size === themeRows.THEME_IDS.length,
+    detail:
+      `read=${repainted} of the ${wantedMarks} marks the ${themeRows.THEME_IDS.length} rows ` +
+      `draw over ${markedCount} marked dice, each one off the material the renderer holds ` +
+      `after a real repaint, as sRGB. Every one must equal the colour ` +
+      `lockMarkerColours names for that row, and the rows must give ` +
+      `${themeRows.THEME_IDS.length} different colours for each mark, because a fixed literal ` +
+      `would give one. distinct_rule=${seen.rule.size} distinct_choice=${seen.choice.size} ` +
+      `wrong=${wrongColour.length}` +
+      (wrongColour.length ? ` [${wrongColour.join('; ')}]` : ''),
   });
 
   if (options.capture) await captureTray(page, options.capture);
@@ -9108,6 +9226,22 @@ async function rollUntilPushable(page, limit) {
 
 async function runTable(page, options, checks) {
   await page.evaluate(TABLE_HELPERS);
+  // The theme the run is drawn in — captures only. It is chosen the way a
+  // player chooses one, through the panel, and the resolved tray surface is
+  // printed so a capture in the wrong theme cannot pass for one in the right
+  // theme.
+  if (options.themeId !== null) {
+    await openSheet(page);
+    await chooseThemeRow(page, options.themeId);
+    await closeSheet(page);
+    register('./ts-resolve.mjs', import.meta.url);
+    const themeRows = await import('../src/theme/themes.ts');
+    const drawn = await paintOf(page, '[data-el="dice-table"]', 'backgroundColor');
+    console.log(
+      `browser: table theme=${options.themeId} tray_surface=${drawn} ` +
+        `wanted=${themeRows.TRAY_SURFACES[options.themeId] ?? 'no such row'}`,
+    );
+  }
   const opening = await page.evaluate(() => window.__table.read());
   const onTheTable = opening.renderer === 'tray';
   const why =
@@ -9363,8 +9497,27 @@ async function runTable(page, options, checks) {
   );
 
   if (options.capture !== null) {
+    // **A frame that shows one mark says nothing about the other.** Every die
+    // the player kept was released again by the checks above, so the table now
+    // carries rule frames alone. Four loose dice are kept back here, spread
+    // across the list rather than taken off the front, so the capture carries
+    // both shapes and the owner can judge the pair. It runs after every check
+    // and gates nothing.
+    const shown = await page.evaluate((wanted) => {
+      const loose = [...document.querySelectorAll('[data-el^="die-"]')].filter(
+        (cell) => cell.getAttribute('aria-pressed') === 'false',
+      );
+      const step = Math.max(1, Math.floor(loose.length / wanted));
+      const taken = loose.filter((_, at) => at % step === 0).slice(0, wanted);
+      for (const cell of taken) cell.click();
+      return taken.length;
+    }, 4);
+    await page.evaluate(() => window.__table.frame());
     await page.screenshot({ path: options.capture });
-    console.log(`browser: table captured the push to ${options.capture}`);
+    console.log(
+      `browser: table captured the push to ${options.capture}, with ${shown} dice kept back ` +
+        `so the frame carries both marks`,
+    );
   }
 }
 
@@ -13771,6 +13924,7 @@ function parseArgs(argv) {
     quotaKb: null,
     captureBefore: null,
     offsetKept: null,
+    themeId: null,
     viewport: { width: 800, height: 600, dpr: 1 },
     resizeTo: null,
     priceRatios: [],
@@ -13824,6 +13978,7 @@ function parseArgs(argv) {
     else if (arg === '--quota-kb') options.quotaKb = Number(next());
     else if (arg === '--capture-before') options.captureBefore = next();
     else if (arg === '--offset-kept') options.offsetKept = Number(next());
+    else if (arg === '--theme-id') options.themeId = next();
     else if (arg === '--viewport') options.viewport = parseViewport(next());
     else if (arg === '--resize-to') options.resizeTo = parseViewport(next());
     else if (arg === '--price-frames') options.priceFrames = Number(next());
@@ -13918,6 +14073,9 @@ function parseArgs(argv) {
     if (!Number.isInteger(options.offsetKept) || options.offsetKept < 0) {
       throw new Error('--offset-kept needs a whole number of 0 or more');
     }
+  }
+  if (options.themeId !== null && !options.table) {
+    throw new Error('--theme-id belongs to --table');
   }
   if (options.noWebgl && !options.a11y) {
     throw new Error('--no-webgl belongs to --a11y');

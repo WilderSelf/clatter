@@ -16,8 +16,8 @@
 //
 // A player who separates no hue reads three shapes, and a greyscale copy of the
 // tray still separates them. The two colours carry the same three-way answer a
-// second time: `affordance.test.ts` measures the contrast of each one against
-// the tray surface and against the other, from the hex values below.
+// second time: `affordance.test.ts` measures the contrast of each mark against
+// every tray surface and against the other mark, over all six themes.
 //
 // A marker is a flat shape lying on the desk around its die, not a child of the
 // die. A child would join `box.diceList` under a recursive raycast, and the
@@ -26,6 +26,7 @@
 import type { Die } from '../rules/die';
 import type { LockState, PushProfile } from '../rules/push-profile';
 import { lockState } from '../rules/push-profile';
+import type { InterfacePalette } from '../theme/themes';
 import type { DiceBox, ThreeObject3D, TrayDie } from './vendor/dice-tray.js';
 
 // ---------------------------------------------------------------------------
@@ -67,17 +68,48 @@ export function clickDie(dice: readonly Die[], id: string, profile: PushProfile)
 // The marks
 // ---------------------------------------------------------------------------
 
+/** The two marks a state may draw. `loose` draws nothing. */
+export type MarkedState = 'rule' | 'choice';
+
+/** The colour of each mark. Redundant with the shape, never instead of it. */
+export type LockMarkerColours = Readonly<Record<MarkedState, string>>;
+
 /**
- * The colour of each mark. Redundant with the shape, never instead of it.
+ * Which palette token each mark is drawn in. **The marks follow the theme.**
  *
- * Both sit well clear of the tray surface and of each other in luminance, so
- * the pair reads in greyscale as well. `affordance.test.ts` computes every one
- * of those numbers from these hex values and from `TRAY_SURFACE_COLOR`.
+ * `themes.ts` keeps `markSuccess` and `markBane` fixed across every palette, so
+ * a meaning does not move when the page does. The lock marks are NOT in that
+ * class, and the measurement that separates the two cases is the contrast of
+ * each pair against itself. `affordance.test.ts` takes both readings.
+ *
+ *   * The success and bane marks sit at one lightness in every row, so they
+ *     read as one shade in greyscale and hue is the whole of their colour
+ *     separation. Move the hue and nothing of it is left.
+ *   * The lock marks are separated by lightness, and they carry no convention
+ *     from outside the app: nothing says the rules are slate. Their hue was
+ *     therefore free, and it now takes the theme. The shape still carries the
+ *     state, as the comment at the top of this file records.
+ *
+ * The two tokens below are the two a DERIVED palette pins by lightness as
+ * well — `PALETTE_TARGETS` puts `line` on its rung and `ON_TRAY_TARGET` puts
+ * `onTray` on its own — so a theme a player builds holds the same floors as the
+ * six shipped rows. `accent` would not: it is the seed itself, unchanged, and a
+ * dark seed cannot clear the tray.
+ *
+ * The roles read the right way round as well. A frame the rules hold is a
+ * boundary the player may not cross, and `line` is the boundary token. Four
+ * blocks the player put there are a readout over the table, and `onTray` is the
+ * token for one.
  */
-export const LOCK_MARKER_COLOR: Readonly<Record<'rule' | 'choice', string>> = {
-  rule: '#8A93A5', // slate, held by the rules
-  choice: '#F2EFE6', // near-white, held by the player
+export const LOCK_MARKER_TOKEN: Readonly<Record<MarkedState, keyof InterfacePalette>> = {
+  rule: 'line',
+  choice: 'onTray',
 };
+
+/** The two mark colours one palette names. A lookup, and nothing else. */
+export function lockMarkerColours(palette: InterfacePalette): LockMarkerColours {
+  return { rule: palette[LOCK_MARKER_TOKEN.rule], choice: palette[LOCK_MARKER_TOKEN.choice] };
+}
 
 /**
  * How far each mark reaches past the die, as a multiple of the die radius.
@@ -144,7 +176,7 @@ interface MarkerKit {
  * Two geometries and two materials, built once and shared by every mark, so a
  * redraw allocates nothing and `info.memory` does not climb with the clicks.
  */
-async function buildKit(): Promise<MarkerKit> {
+async function buildKit(colours: LockMarkerColours): Promise<MarkerKit> {
   const { ThreeBufferAttribute, ThreeBufferGeometry, ThreeMesh, ThreeMeshBasicMaterial } =
     await import('./vendor/dice-tray.js');
   const build = <T>(
@@ -161,7 +193,7 @@ async function buildKit(): Promise<MarkerKit> {
     }),
     // Unlit, so the mark keeps the exact colour it is given wherever a die
     // throws its shadow. A shaded mark would read as a fourth state.
-    material: build((state) => new ThreeMeshBasicMaterial({ color: LOCK_MARKER_COLOR[state] })),
+    material: build((state) => new ThreeMeshBasicMaterial({ color: colours[state] })),
     meshes: [],
   };
 }
@@ -222,6 +254,14 @@ function drawMarkers(box: DiceBox, kit: MarkerKit, states: readonly LockState[])
  */
 export interface AffordanceHandle {
   update(ordered: readonly Die[]): void;
+  /**
+   * Take the marks to another theme, in place.
+   *
+   * The two materials are shared by every mark, so this is two colour writes
+   * and one frame. Nothing is thrown again and no mesh is rebuilt: the dice
+   * stay where they lie, exactly as `paintPool` leaves them.
+   */
+  paint(palette: InterfacePalette): void;
   dispose(): void;
 }
 
@@ -234,14 +274,18 @@ export interface AffordanceHandle {
  *
  * `onClick` is called after the pool changes, with the pool as it now stands.
  * A refused click reports the refusal and hands back the same pool.
+ *
+ * `palette` is the theme in force. It is read once here and again on every
+ * `paint`, so the caller that owns the theme stays the one authority on it.
  */
 export async function mountAffordance(
   box: DiceBox,
   ordered: readonly Die[],
   profile: PushProfile,
+  palette: InterfacePalette,
   onClick: (dice: readonly Die[], clicked: Die, outcome: ClickOutcome) => void = () => {},
 ): Promise<AffordanceHandle> {
-  const kit = await buildKit();
+  const kit = await buildKit(lockMarkerColours(palette));
   let pool = ordered;
   const redraw = (): void =>
     drawMarkers(
@@ -266,6 +310,13 @@ export async function mountAffordance(
     update(next: readonly Die[]): void {
       pool = next;
       redraw();
+    },
+    paint(next: InterfacePalette): void {
+      const colours = lockMarkerColours(next);
+      for (const state of ['rule', 'choice'] as const) {
+        kit.material[state].color.set(colours[state]);
+      }
+      box.renderer.render(box.scene, box.camera);
     },
     dispose(): void {
       box.container.removeEventListener('click', listener);

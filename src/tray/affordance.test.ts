@@ -4,15 +4,28 @@
 // measured here rather than in a browser. The shape claim needs a renderer and
 // lives in `scripts/browser.mjs --affordance`.
 //
-// Every colour number below is computed from the hex values in `affordance.ts`
-// and `scene.ts`. Neither module states a measurement of its own, so nothing
-// here reads the constant it bounds.
+// Every colour number below is computed from the rows of `themes.ts`, through
+// the token map `affordance.ts` holds. Neither module states a measurement of
+// its own, so nothing here reads the constant it bounds, and the arithmetic is
+// this file's own copy rather than `contrast.ts`.
 
 import { describe, expect, it } from 'vitest';
 import { appendValue, createDie, type Die } from '../rules/die';
 import { lockState, PUSH_PROFILES, type LockState } from '../rules/push-profile';
-import { clickDie, clickOutcome, LOCK_MARKER_COLOR, type ClickOutcome } from './affordance';
-import { TRAY_SURFACE_COLOR } from './scene';
+import {
+  INTERFACE_PALETTES,
+  THEME_IDS,
+  TRAY_SURFACES,
+  type InterfacePalette,
+  type ThemeId,
+} from '../theme/themes';
+import {
+  clickDie,
+  clickOutcome,
+  lockMarkerColours,
+  type ClickOutcome,
+  type MarkedState,
+} from './affordance';
 
 /** Successes lock, and a 1 on an attribute or a gear die locks as well. */
 const PROFILE = PUSH_PROFILES[0]!;
@@ -125,20 +138,79 @@ function contrast(a: Rgb, b: Rgb): number {
   return (high + 0.05) / (low + 0.05);
 }
 
-describe('LOCK_MARKER_COLOR', () => {
-  const marks = Object.keys(LOCK_MARKER_COLOR) as (keyof typeof LOCK_MARKER_COLOR)[];
+const MARKED: readonly MarkedState[] = ['rule', 'choice'];
 
-  it('covers the two marked states and no others', () => {
-    expect(marks.sort()).toEqual(['choice', 'rule']);
+/** The mark colours one theme names. */
+const marksOf = (id: ThemeId): Readonly<Record<MarkedState, string>> =>
+  lockMarkerColours(INTERFACE_PALETTES[id]);
+
+/** Every colour a palette holds, so a mark can be traced back to a row. */
+const valuesOf = (palette: InterfacePalette): string[] =>
+  Object.values(palette).map((colour) => colour.toUpperCase());
+
+const ratio = (a: string, b: string): number => contrast(toLinear(a), toLinear(b));
+
+describe('the lock marker colours', () => {
+  it('names the two marked states and no others', () => {
+    expect(Object.keys(marksOf('leather')).sort()).toEqual(['choice', 'rule']);
   });
 
-  it.each(marks)('separates %s from the tray surface', (mark) => {
-    const measured = contrast(toLinear(LOCK_MARKER_COLOR[mark]), toLinear(TRAY_SURFACE_COLOR));
-    expect(measured).toBeGreaterThanOrEqual(MIN_SURFACE_CONTRAST);
+  // **The mark follows the theme.** The claim is not that the colour came out
+  // of some palette. It is that the colour came out of THIS theme's palette and
+  // out of no other one, so a row is what moves it. A colour held in
+  // `affordance.ts` fails both halves: it is in no palette, and it is the same
+  // for all six rows.
+  it.each(MARKED)('draws %s out of the row the theme names, and out of no other', (mark) => {
+    const drawn = THEME_IDS.map((id) => marksOf(id)[mark].toUpperCase());
+    expect(drawn).toHaveLength(THEME_IDS.length);
+    expect(new Set(drawn).size).toBe(THEME_IDS.length);
+    const stray = THEME_IDS.flatMap((id, at) => {
+      const mine = drawn[at]!;
+      const mineIsHers = valuesOf(INTERFACE_PALETTES[id]).includes(mine);
+      const elsewhere = THEME_IDS.filter(
+        (other) => other !== id && valuesOf(INTERFACE_PALETTES[other]).includes(mine),
+      );
+      return mineIsHers && elsewhere.length === 0
+        ? []
+        : [`${id} ${mark} is ${mine}, in its own row=${mineIsHers}, also in [${elsewhere}]`];
+    });
+    expect(stray).toEqual([]);
   });
 
-  it('separates the two marks from each other in luminance', () => {
-    const measured = contrast(toLinear(LOCK_MARKER_COLOR.rule), toLinear(LOCK_MARKER_COLOR.choice));
-    expect(measured).toBeGreaterThanOrEqual(MIN_MARK_CONTRAST);
+  // Every mark against every surface, and not the six matched pairs alone: a
+  // theme a player builds derives the palette and keeps a SHIPPED tray row, so
+  // any palette can land on any of the six tables. `css-vars.ts` settles that.
+  it.each(MARKED)('keeps %s clear of every tray surface', (mark) => {
+    const readings = THEME_IDS.flatMap((id) =>
+      THEME_IDS.map((table) => ({
+        pair: `${id} ${mark} on the ${table} table`,
+        measured: ratio(marksOf(id)[mark], TRAY_SURFACES[table]),
+      })),
+    );
+    expect(readings).toHaveLength(THEME_IDS.length ** 2);
+    expect(readings.filter((one) => one.measured < MIN_SURFACE_CONTRAST)).toEqual([]);
+  });
+
+  it('separates the two marks from each other in luminance, in every theme', () => {
+    const readings = THEME_IDS.map((id) => ({
+      pair: `the two marks of ${id}`,
+      measured: ratio(marksOf(id).rule, marksOf(id).choice),
+    }));
+    expect(readings).toHaveLength(THEME_IDS.length);
+    expect(readings.filter((one) => one.measured < MIN_MARK_CONTRAST)).toEqual([]);
+  });
+
+  // The measurement that keeps the success and bane marks OUT of the theme,
+  // taken here beside the one that puts the lock marks into it. The two read as
+  // one shade in greyscale, so hue is the whole of their colour separation and
+  // a theme that moved it would leave them nothing. The lock marks are the
+  // other case, which the reading above states.
+  it('finds the success and bane marks separated by hue alone, in every theme', () => {
+    const readings = THEME_IDS.map((id) => ({
+      pair: `the success and bane marks of ${id}`,
+      measured: ratio(INTERFACE_PALETTES[id].markSuccess, INTERFACE_PALETTES[id].markBane),
+    }));
+    expect(readings).toHaveLength(THEME_IDS.length);
+    expect(readings.filter((one) => one.measured >= MIN_MARK_CONTRAST)).toEqual([]);
   });
 });
