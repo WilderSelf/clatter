@@ -146,8 +146,15 @@ export interface TableProps {
    * synchronous simulation lies inside the measurement rather than before it.
    */
   readonly onMotion?: (at: number, evidence: MotionEvidence) => void;
-  /** The table came to rest. It closes the overlay's measurement window. */
-  readonly onSettled?: (at: number) => void;
+  /**
+   * The table came to rest, on the throw `ordinal` names.
+   *
+   * It closes the overlay's measurement window and it releases the marks. The
+   * ordinal is the throw this tray last acted out, and it is `-1` before the
+   * first one, so a caller can refuse a report that names an older throw than
+   * the one it holds.
+   */
+  readonly onSettled?: (at: number, ordinal: number) => void;
 }
 
 /**
@@ -199,6 +206,10 @@ export function Table({
   const moved = useRef(onMotion);
   const settled = useRef(onSettled);
   const stopWatch = useRef<(() => void) | null>(null);
+  // True while this table is in the document. `drain` reads it: the loop is
+  // not cancelled by an unmount and it must not report to a screen that has
+  // replaced it.
+  const live = useRef(true);
   painted.current = colours;
   toggle.current = onToggle;
   spotted.current = onSpots;
@@ -284,7 +295,12 @@ export function Table({
       // Every die is asleep by here, because `throwPool` and `pushPool` both
       // resolve at rest. The overlay's measurement window closes on this, so
       // the idle frames after a throw are not samples of it.
-      settled.current?.(performance.now());
+      //
+      // **A tray that has left the document reports nothing.** This loop is not
+      // cancelled by an unmount, so a table the player switched off mid-throw
+      // would still report rest, and the table that replaced it would act the
+      // same throw out again under marks that report had already released.
+      if (live.current) settled.current?.(performance.now(), taken.current);
     }
   };
 
@@ -327,6 +343,7 @@ export function Table({
   // whose canvas has left the document.
   useEffect(
     () => () => {
+      live.current = false;
       boxed.current?.(null);
     },
     [],

@@ -98,6 +98,7 @@ import {
   pushNote,
   pushNow,
   readout,
+  rollingLabel,
   rollNow,
   settingsFromState,
   signedDifficulty,
@@ -195,10 +196,10 @@ function moveWithin(length: number, from: number, delta: number): number {
 export const ROLLING_TEXT = 'The dice are rolling.';
 
 /**
- * How long the marks wait for a tray that has stopped reporting, in
- * milliseconds. The effect that reads it states why the bound exists.
+ * How long the marks wait for a tray that has not mounted, in milliseconds.
+ * The effect that reads it states what the bound covers and how it is sized.
  */
-export const REST_BOUND_MS = 5000;
+export const REST_BOUND_MS = 10000;
 
 /**
  * The header. It carries status and it never navigates. Decision 2.
@@ -523,6 +524,7 @@ function Slot({
   colours,
   shaken,
   active,
+  tumbling,
   onPress,
 }: {
   view: DieView;
@@ -531,9 +533,15 @@ function Slot({
   colours: DiceTheme;
   shaken: boolean;
   active: boolean;
+  tumbling: boolean;
   onPress: () => void;
 }) {
   const over = layout === 'over';
+  // The name waits for the dice as the status line does. A cell that named the
+  // face would hand a reader the whole result, die by die, while the eye had
+  // nothing to read. `tumbling` is only ever true over the 3D table, and this
+  // cell draws no die there, so nothing on the screen is hidden with it.
+  const label = tumbling ? rollingLabel(view) : view.label;
   // The dice axis reaches the flat die here, one body colour per dice type,
   // exactly as `src/tray/throw.ts` reaches the 3D die. The cell over the table
   // draws no die, so the colour costs it nothing.
@@ -594,7 +602,7 @@ function Slot({
         data-el={view.element}
         role="img"
         tabIndex={active ? 0 : -1}
-        aria-label={view.label}
+        aria-label={label}
         style={style}
       >
         {drawn}
@@ -608,7 +616,7 @@ function Slot({
       type="button"
       tabIndex={active ? 0 : -1}
       aria-pressed={view.state === 'choice'}
-      aria-label={view.label}
+      aria-label={label}
       onClick={onPress}
       style={style}
     >
@@ -628,6 +636,7 @@ function Zone({
   thrown,
   ordinal,
   activeId,
+  tumbling,
   onPress,
 }: {
   kind: string;
@@ -640,6 +649,7 @@ function Zone({
   thrown: readonly string[];
   ordinal: number;
   activeId: string;
+  tumbling: boolean;
   onPress: (id: string) => void;
 }) {
   return (
@@ -670,6 +680,7 @@ function Zone({
             colours={colours}
             shaken={thrown.includes(view.die.id)}
             active={view.element === activeId}
+            tumbling={tumbling}
             onPress={() => onPress(view.die.id)}
           />
         ))}
@@ -696,12 +707,14 @@ function DiceTray({
   layout,
   spots,
   colours,
+  tumbling,
 }: {
   state: AppState;
   setState: (change: Change) => void;
   layout: TrayLayout;
   spots: TraySpots;
   colours: DiceTheme;
+  tumbling: boolean;
 }) {
   const profile = profileOf(state);
   const zones = zonesOf(state);
@@ -763,6 +776,7 @@ function DiceTray({
         thrown={state.thrown}
         ordinal={state.throwOrdinal}
         activeId={active}
+        tumbling={tumbling}
         onPress={(id) => setState((previous) => toggleDie(previous, id))}
       />
       <Zone
@@ -776,6 +790,7 @@ function DiceTray({
         thrown={state.thrown}
         ordinal={state.throwOrdinal}
         activeId={active}
+        tumbling={tumbling}
         onPress={(id) => setState((previous) => toggleDie(previous, id))}
       />
     </div>
@@ -1288,6 +1303,9 @@ export function App({
   // arrives from a mount callback, nothing on the screen is drawn from it, and
   // a render of the whole application on every mount would buy nothing.
   const trayBox = useRef<DiceBox | null>(null);
+  // True once the tray has mounted, and false again when it leaves. The bound
+  // on the wait for rest reads it, so it is hook state and not a ref.
+  const [trayMounted, setTrayMounted] = useState(false);
   const [madeCard, setMadeCard] = useState<MadeCard | null>(null);
   const [shareNote, setShareNote] = useState('');
   const [shareBusy, setShareBusy] = useState(false);
@@ -1663,24 +1681,44 @@ export function App({
     });
   }, [state.throwOrdinal]);
 
-  // The bound on the wait for rest.
+  // The bound on the wait for rest, and what it does NOT cover.
   //
-  // The tray reports rest through `onSettled` and it reports it once per drain
-  // loop, so a throw the tray coalesced away still ends in a report. A tray
-  // that never mounts at all reports nothing, and the marks would then be held
-  // back for as long as the player looked at the screen. This is the floor
-  // under that: the marks arrive late rather than never.
+  // **A tray that has mounted always answers.** `drain` reports rest from a
+  // `finally`, so every path through it reports: a throw it acted out, a throw
+  // it coalesced away, and a throw that threw an error, which also falls to
+  // flat dice. A table that leaves the document reports nothing, and the
+  // renderer is flat by then, so the marks are drawn. None of those paths
+  // needs a timer, and a timer that fired on one of them would show the marks
+  // over dice that are still moving, which is the defect this file closes.
   //
-  // ponytail: one fixed bound, and it is a safety net rather than a schedule.
-  // Five seconds is longer than any throw this tray has taken and short enough
-  // that a player reads it as slow rather than as broken. A tray that really
-  // needs longer would report rest itself and clear the timer. Measure a throw
-  // that runs past it and the number is wrong, not the shape.
+  // The one path that reports nothing is a mount that never finishes. There is
+  // no tray, no canvas and no die in motion there, so releasing the marks is
+  // safe. **The bound therefore covers the mount alone**, and it is cleared as
+  // soon as the tray mounts, whatever the throw is doing.
+  //
+  // ponytail: one constant, sized by the cost of being wrong in each
+  // direction. A bound shorter than a real mount brings the defect back. A
+  // bound longer than a dead mount delays a result nothing is drawing. The
+  // second cost is the smaller one, so the number is generous.
+  //
+  // Measured on this host on 2026-08-10, over a pool at every cap, driven
+  // through a preview server with a cold browser profile. The press reaches a
+  // mounted tray in 565 to 960 ms, and the slowest reading is the software
+  // rasteriser, which is the slowest target reachable here. Ten seconds is
+  // over ten times the slowest mount measured.
+  //
+  // The same run reads 3.9 to 5.5 s from the press to rest. An earlier version
+  // of this bound started at the press and ran for five seconds, so it fired
+  // BEFORE the dice stopped on the slowest run. That is the whole reason the
+  // bound covers the mount and not the throw.
   useEffect(() => {
-    if (!tumbling) return;
-    const timer = setTimeout(() => setState(withSettled), REST_BOUND_MS);
+    if (!tumbling || trayMounted) return;
+    const timer = setTimeout(
+      () => setState((previous) => withSettled(previous, previous.throwOrdinal)),
+      REST_BOUND_MS,
+    );
     return () => clearTimeout(timer);
-  }, [tumbling, state.throwOrdinal]);
+  }, [tumbling, trayMounted, state.throwOrdinal]);
 
   /**
    * Open the history.
@@ -1841,6 +1879,9 @@ export function App({
               onSpots={setSpots}
               onBox={(box) => {
                 trayBox.current = box;
+                // The bound below reads this. A tray that has mounted answers
+                // every throw, so the bound covers the mount alone.
+                setTrayMounted(box !== null);
               }}
               colours={applied.diceColours}
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
@@ -1848,10 +1889,12 @@ export function App({
               onMotion={(at, evidence) => perf.current?.motion(at, evidence)}
               // Rest closes the overlay's measurement window AND releases the
               // marks. Both readings are the same event, so they are taken
-              // from the same report and cannot fall out of step.
-              onSettled={(at) => {
+              // from the same report and cannot fall out of step. The ordinal
+              // is the throw the tray acted out, and `withSettled` refuses a
+              // report that names any other throw.
+              onSettled={(at, ordinal) => {
                 perf.current?.settled(at);
-                setState(withSettled);
+                setState((previous) => withSettled(previous, ordinal));
               }}
             />
             {state.result === null ? null : (
@@ -1861,6 +1904,7 @@ export function App({
                 layout={layout}
                 spots={spots}
                 colours={applied.diceColours}
+                tumbling={tumbling}
               />
             )}
           </div>
@@ -1873,6 +1917,7 @@ export function App({
                 layout={layout}
                 spots={NO_SPOTS}
                 colours={applied.diceColours}
+                tumbling={tumbling}
               />
             )}
             <Table

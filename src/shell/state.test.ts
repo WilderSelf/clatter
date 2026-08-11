@@ -19,6 +19,8 @@ import {
   readout,
   rollNow,
   signedDifficulty,
+  stillTumbling,
+  withSettled,
   throwDice,
   worstCaseState,
   withDifficulty,
@@ -291,5 +293,43 @@ describe('the tray past the draw target', () => {
     // at once and rests at the target.
     expect(Math.min(...seen)).toBe(target);
     expect(seen[seen.length - 1]).toBeGreaterThan(target);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The tray reports rest, and the screen decides what that report means
+// ---------------------------------------------------------------------------
+
+describe('the report of rest', () => {
+  it('takes a report for the throw the screen holds, and refuses every other', () => {
+    const state = rollNow(fullPool(), seededRandom(4));
+    expect(state.throwOrdinal, 'the fixture has thrown once').toBe(1);
+    expect(stillTumbling(state, true), 'and the dice on the table are moving').toBe(true);
+
+    // A tray reports rest from a callback it took when it took the job, so a
+    // report can arrive after the screen has committed a newer throw. A report
+    // read as "the newest throw" would draw the marks over moving dice.
+    expect(withSettled(state, 0), 'a report for the throw before it moves nothing').toBe(state);
+    expect(withSettled(state, -1), 'a tray that has acted nothing out moves nothing').toBe(state);
+    expect(
+      withSettled(state, 2),
+      'a report for a throw the screen has not made moves nothing',
+    ).toBe(state);
+    expect(stillTumbling(withSettled(state, 0), true), 'so the marks stay hidden').toBe(true);
+
+    const rested = withSettled(state, 1);
+    expect(rested.settledOrdinal, 'the report for this throw is taken').toBe(1);
+    expect(stillTumbling(rested, true), 'and the marks are drawn').toBe(false);
+    expect(withSettled(rested, 1), 'a second report of the same rest costs no render').toBe(rested);
+  });
+
+  it('never holds a roll of no dice, which reaches no tray at all', () => {
+    // An empty pool fails automatically: the ordinal rises and the table stays
+    // empty, so nothing is ever acted out and no rest is ever reported.
+    const failed = rollNow(emptyState('pool'), seededRandom(4));
+    expect(failed.result, 'the roll failed automatically').toBeNull();
+    expect(failed.throwOrdinal, 'and it still counts as a throw').toBe(1);
+    expect(failed.settledOrdinal, 'which nothing reported rest for').toBe(0);
+    expect(stillTumbling(failed, true), 'yet no mark waits on it').toBe(false);
   });
 });

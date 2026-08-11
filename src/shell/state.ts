@@ -751,16 +751,23 @@ export function pushNow(state: AppState, random: RandomSource): AppState {
 }
 
 /**
- * The tray came to rest on the throw the screen holds.
+ * The tray came to rest on the throw `ordinal` names.
  *
  * One action for a roll and a push alike, because both are one throw and both
  * hide the marks until the dice stop. A second report of the same rest changes
  * nothing, so a tray that answers twice costs no render.
+ *
+ * **The report carries the throw it came from, and a report for any other
+ * throw is refused.** A tray reports rest from a callback it has held since it
+ * took the job, and the screen may hold a newer throw by the time the report
+ * arrives. A report read as "the newest throw is at rest" would then show the
+ * marks over dice that are still moving, which is the defect this whole field
+ * closes.
  */
-export function withSettled(state: AppState): AppState {
-  return state.settledOrdinal === state.throwOrdinal
+export function withSettled(state: AppState, ordinal: number): AppState {
+  return ordinal !== state.throwOrdinal || state.settledOrdinal === ordinal
     ? state
-    : { ...state, settledOrdinal: state.throwOrdinal };
+    : { ...state, settledOrdinal: ordinal };
 }
 
 /**
@@ -890,6 +897,22 @@ export function dieView(die: Die, profile: PushProfile, artifactCurve?: Artifact
       (bane ? ' A bane.' : '') +
       ` ${STATE_SENTENCE[state]}`,
   };
+}
+
+/**
+ * What one die cell is called while the dice are still moving.
+ *
+ * `dieView` names the face, what it is worth and whether it is a bane, and
+ * that is the whole result of the throw, one die at a time. A reader would
+ * take it off the cells while the eye had nothing to read, so the cell names
+ * the die and says the throw is still running.
+ *
+ * The lock state stays out of it for the same reason it stays in the drawn
+ * marks on the tray: the tray draws those marks from the moment the throw is
+ * handed over, so the eye already has them.
+ */
+export function rollingLabel(view: DieView): string {
+  return `${view.tag} is rolling.`;
 }
 
 /** What the status line reads. Every figure is derived, never stored. */
