@@ -9464,6 +9464,57 @@ async function readSheet(page) {
   });
 }
 
+/**
+ * Where the sheet sits and where each of its categories sits, in CSS pixels.
+ *
+ * Every number is read off `getBoundingClientRect`, so it is the laid-out
+ * screen and never the stylesheet. A check that read the CSS would prove the
+ * rule exists and nothing about what a player meets.
+ */
+async function readSheetLayout(page) {
+  return page.evaluate(() => {
+    const sheet = document.querySelector('[data-el="disclosure-sheet"]');
+    if (sheet === null) return null;
+    const box = sheet.getBoundingClientRect();
+    return {
+      width: Math.round(box.width),
+      top: Math.round(box.top),
+      bottom: Math.round(box.bottom),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      // The way out of the dialog is not a category.
+      groups: [...sheet.children]
+        .filter((child) => child.getAttribute('data-el') !== 'sheet-close')
+        .map((child) => {
+          const rect = child.getBoundingClientRect();
+          return {
+            name: child.getAttribute('data-el'),
+            left: Math.round(rect.left),
+            top: Math.round(rect.top),
+            bottom: Math.round(rect.bottom),
+          };
+        }),
+    };
+  });
+}
+
+/**
+ * How many pairs of categories sit BESIDE each other rather than under.
+ *
+ * Two boxes are side by side when their left edges differ and their vertical
+ * ranges overlap. An indented box is not a column, and a box under another one
+ * is not a column either, so both are refused by construction.
+ */
+function sideBySide(layout) {
+  let pairs = 0;
+  for (const [index, one] of layout.groups.entries()) {
+    for (const other of layout.groups.slice(index + 1)) {
+      if (one.left !== other.left && one.top < other.bottom && other.top < one.bottom) pairs += 1;
+    }
+  }
+  return pairs;
+}
+
 async function openSheet(page) {
   await page.click('[data-el="disclosure-toggle"]');
   await page.waitForSelector('[data-el="sheet-overrides"]', { timeout: 15000 });
@@ -10459,6 +10510,65 @@ async function runSheet(page, options, checks) {
       `never by clipping.`,
   });
 
+  // ---- 5b. The desktop dialog is not the phone sheet made wider. ----
+  //
+  // The owner's complaint was that the options are too narrow on a desktop and
+  // badly grouped. Both halves are geometry, so both are measured on the
+  // rendered screen at two widths rather than read off the stylesheet.
+  //
+  // The phone half of the claim is measured in the same breath: the bottom
+  // sheet has to stay a bottom sheet, in one column, sitting on the bottom
+  // edge of the viewport.
+  await closeSheet(page);
+  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  await openSheet(page);
+  const wide = await readSheetLayout(page);
+  await closeSheet(page);
+  await page.setViewport({ width: 360, height: 760, deviceScaleFactor: 1 });
+  await openSheet(page);
+  const narrow = await readSheetLayout(page);
+  const wideColumns = new Set(wide.groups.map((each) => each.left)).size;
+  const narrowColumns = new Set(narrow.groups.map((each) => each.left)).size;
+  const widePairs = sideBySide(wide);
+  const narrowPairs = sideBySide(narrow);
+  // The share of the screen the dialog takes. A claim about the WIDTH cannot
+  // be a number copied out of the stylesheet, so it is a proportion of the
+  // window the dialog was given.
+  const wideShare = wide.width / wide.viewportWidth;
+  console.log(
+    `browser: sheet layout 1440=[width=${wide.width} share=${wideShare.toFixed(2)} ` +
+      `top=${wide.top} groups=${wide.groups.length} columns=${wideColumns} ` +
+      `side_by_side=${widePairs}] 360=[width=${narrow.width} top=${narrow.top} ` +
+      `bottom=${narrow.bottom} of ${narrow.viewportHeight} groups=${narrow.groups.length} ` +
+      `columns=${narrowColumns} side_by_side=${narrowPairs}]`,
+  );
+  for (const group of wide.groups) {
+    console.log(`browser: sheet layout 1440 ${group.name} left=${group.left} top=${group.top}`);
+  }
+  checks.push({
+    name: 'sheet.the-desktop-dialog-lays-its-categories-in-columns-and-the-phone-does-not',
+    ok:
+      wide.groups.length >= 4 &&
+      wide.groups.length === narrow.groups.length &&
+      wideColumns === 2 &&
+      widePairs > 0 &&
+      wide.width > narrow.width &&
+      wideShare >= 0.5 &&
+      wide.top > 0 &&
+      narrowColumns === 1 &&
+      narrowPairs === 0 &&
+      narrow.bottom >= narrow.viewportHeight - 1,
+    detail:
+      `at 1440 the dialog measures ${wide.width} px, which is ${(wideShare * 100).toFixed(0)} ` +
+      `per cent of the window, and its ${wide.groups.length} categories stand at ` +
+      `${wideColumns} different left edges with ${widePairs} pairs of them side by side. Its ` +
+      `top edge is at ${wide.top} px, so it is centred and not sitting on the bottom edge. At ` +
+      `360 the same ${narrow.groups.length} categories measure ${narrow.width} px at ` +
+      `${narrowColumns} left edge with ${narrowPairs} pairs side by side, and the sheet bottom ` +
+      `is at ${narrow.bottom} of ${narrow.viewportHeight} px, so the phone still meets a bottom ` +
+      `sheet in one column. Every number is a laid-out rectangle and none is read off the CSS.`,
+  });
+
   // ---- 6. A saved pool goes in, comes back, and crosses a reload. ----
   //
   // The viewport is 360 px from here on, because the phone is the case that
@@ -10717,6 +10827,7 @@ async function runSheet(page, options, checks) {
         ['top', '[data-el="sheet-ruleset"]'],
         ['overrides', '[data-el="overrides-reset"]'],
         ['presets', '[data-el="sheet-presets"]'],
+        ['data', '[data-el="sheet-close"]'],
       ]) {
         await page.evaluate((selector) => {
           document.querySelector(selector)?.scrollIntoView({ block: 'end' });

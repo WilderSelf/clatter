@@ -985,11 +985,15 @@ body {
 }
 
 /* One heading style for a category, wherever a category is: inside a `.cat`,
-   or on a single group that stands as one directly in the sheet. */
+   or on a single group that stands as one directly in the sheet. A category
+   is a heading and a group is a label, so the two read apart by case as well
+   as by size: `SAVED POOLS` beside `Rules` read as two different levels of
+   the same tree. A render caught that, and the suite could not. */
 .cat > legend,
 .sheet > .field > legend {
   font-size: 13px;
   letter-spacing: 0.06em;
+  text-transform: none;
   color: var(--ink);
 }
 
