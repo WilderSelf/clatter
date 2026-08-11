@@ -1882,8 +1882,11 @@ body {
  * ground either side of the middle, so the average of every surface is still
  * the colour the palette named. */
 
-/* The page: a coarse mottle, the way a plastered or a papered wall reads. */
-.screen {
+/* The page: a coarse mottle, the way a plastered or a papered wall reads. The
+   element behind the screen takes the same one, because a short screen leaves
+   it showing and a flat strip under a grained page reads as a seam. */
+.screen,
+body {
   background-image: var(--texture-noise);
   background-size: 300px 300px;
   background-blend-mode: soft-light;
@@ -1891,7 +1894,15 @@ body {
 
 /* Every panel a player reads against: a fine grain, the way tanned leather and
    woven cloth read. The list is long because "everything" is what was asked
-   for, and one rule is cheaper than a declaration in each block. */
+   for, and one rule is cheaper than a declaration in each block.
+ *
+ * **The list is not a taste and it is not maintained by hand.**
+ * `theme.every-ground-the-stylesheet-paints-carries-the-grain-or-says-why` in
+ * `scripts/browser.mjs` enumerates every rule of this file that paints a ground
+ * and requires each one to be grained, or to measure under one coarse feature
+ * of the grain that would apply to it, or to be a declared meaning mark. A
+ * ground dropped from this list is not dropped from that population, so the
+ * gate goes red rather than shrinking to fit. */
 .shell-h,
 .shell-f,
 .card,
@@ -1907,7 +1918,32 @@ body {
 .shelf,
 .costrow,
 .fault,
-.hist-warn {
+.hist-warn,
+.tk-n,
+.tk-n.centre,
+.tk-n.on,
+.slot.rule,
+.slot.choice,
+.die,
+.scrim,
+.perf,
+.ovr-row.changed,
+.ovr-input,
+.thm-pick,
+.hist-pair,
+.hist-mx th[scope='row'],
+.hist-mx td[data-cell='absent'],
+.mx-dot,
+.chart,
+.chart-track,
+.chart-bar.s-success,
+.chart-bar.s-better,
+.chart-bar.s-same,
+.chart-bar.s-worse,
+.cmark.c-success,
+.cmark.c-better,
+.cmark.c-same,
+.cmark.c-worse {
   background-image: var(--texture-noise);
   background-size: 90px 90px;
   background-blend-mode: soft-light;

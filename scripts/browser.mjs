@@ -10421,13 +10421,65 @@ async function readGrounds(page, selectors) {
       }
       if (found === null) continue;
       const box = found.getBoundingClientRect();
+      const style = getComputedStyle(found);
+      // **A rule that paints a ground does not paint one in every state.**
+      // `.zones.over .shelf` takes the whole background away over the 3D
+      // table, so the shelf is not a ground there and a reading taken there
+      // would report a ground with no grain on it. Only a state where the
+      // element really paints one is a reading of that ground.
+      if (style.backgroundColor === 'transparent' || /,\s*0\)$/.test(style.backgroundColor)) {
+        continue;
+      }
       answer[selector] = {
         width: box.width,
         height: box.height,
         // The renderer resolves the custom property, so this is the image the
         // element really carries and not the text of the rule.
-        grained: getComputedStyle(found).backgroundImage.includes('image/svg+xml'),
+        grained: style.backgroundImage.includes('image/svg+xml'),
       };
+    }
+    return answer;
+  }, selectors);
+}
+
+/**
+ * Whether the cascade puts the grain on a selector no state of the screen drew.
+ *
+ * The element is built from the selector and put in the document, so the
+ * browser resolves the cascade for it exactly as it would for a real one. This
+ * answers the GRAIN and never the box: `background-image` does not depend on
+ * layout, and a box does. A probe appended to the body would report a height of
+ * zero for a bar that takes its height from a track, and a zero box would then
+ * excuse the ground as too small. So a ground the screen never draws can be
+ * covered by the grain or declared a meaning mark, and it can never be excused
+ * by its size.
+ */
+async function probeGrain(page, selectors) {
+  return page.evaluate((list) => {
+    const answer = {};
+    for (const selector of list) {
+      // `.hist-mx td[data-cell='absent']` is a chain, so each step is built and
+      // nested. Every step is a simple compound: a tag, classes and attributes.
+      const steps = selector.trim().split(/\s+/);
+      let root = null;
+      let leaf = null;
+      let usable = true;
+      for (const step of steps) {
+        const tag = /^[a-zA-Z][\w-]*/.exec(step)?.[0] ?? 'div';
+        const classes = [...step.matchAll(/\.([\w-]+)/g)].map((one) => one[1]);
+        const attributes = [...step.matchAll(/\[([\w-]+)='([^']*)'\]/g)];
+        if (/[#:>+~]/.test(step)) usable = false;
+        const made = document.createElement(tag);
+        for (const one of classes) made.classList.add(one);
+        for (const [, name, value] of attributes) made.setAttribute(name, value);
+        if (leaf === null) root = made;
+        else leaf.append(made);
+        leaf = made;
+      }
+      if (!usable || root === null || leaf === null) continue;
+      document.body.append(root);
+      answer[selector] = getComputedStyle(leaf).backgroundImage.includes('image/svg+xml');
+      root.remove();
     }
     return answer;
   }, selectors);
@@ -10494,11 +10546,35 @@ async function runGroundCoverage(page, checks) {
   await settleScreen(page);
   await sweep('a roll on the table');
 
+  // The flat dice. `.die`, `.badge` and the two kept slots are drawn by that
+  // renderer alone, and `.zones.over .shelf` takes the shelf's ground away
+  // while the 3D table is on, so the shelf is only a ground here.
+  await openSheet(page);
+  await page.evaluate(() => {
+    const box = document.querySelector('[data-el="sheet-tray-renderer"] input');
+    if (box !== null && box.checked) box.click();
+  });
+  await closeSheet(page);
+  await settleScreen(page);
+  await page.evaluate(() => {
+    // One kept die, so `.slot.choice` is a slot a player really made.
+    document.querySelector('[data-el^="die-"][aria-pressed="false"]')?.click();
+  });
+  await settleScreen(page);
+  await sweep('the flat dice');
+
   await openHistory(page);
   await sweep('the history');
   await page.click('[data-el="statistics-button"]');
   await settleScreen(page);
   await sweep('the statistics');
+
+  // The grain on the grounds no state drew, from the cascade rather than from a
+  // drawn element. The box of those stays unknown on purpose.
+  const neverDrawn = population
+    .map((one) => one.selector)
+    .filter((selector) => !states.some((state) => state.read[selector] !== undefined));
+  const probed = await probeGrain(page, neverDrawn);
 
   // The largest box of any state, and grained if any state drew it grained.
   const measured = population.map((member) => {
@@ -10513,16 +10589,20 @@ async function runGroundCoverage(page, checks) {
     // stretches it to. `background-size` is a pair, so the two axes can differ:
     // the table pulls the noise flat and its two features are not the same.
     const feature = rule.size.map((size) => (noise.wavelength * size) / noise.span);
+    const drawn = seen.length > 0;
     return {
       ...member,
       states: seen.map((state) => state.name),
+      drawn,
       width: widest.width,
       height: widest.height,
-      grained: boxes.some((box) => box.grained),
+      grained: drawn ? boxes.some((box) => box.grained) : (probed[member.selector] ?? false),
       feature,
       // Under one coarse feature on either axis the noise cannot make a
       // pattern at all, so what lands there is a smudge and not a material.
-      small: widest.width < feature[0] || widest.height < feature[1],
+      // Only a ground the screen really drew may take this arm: an undrawn one
+      // has no box, and a box of nothing would excuse every one of them.
+      small: drawn && (widest.width < feature[0] || widest.height < feature[1]),
       mark: MEANING_MARKS.some((one) => one.selector === member.selector),
     };
   });
@@ -10550,16 +10630,15 @@ async function runGroundCoverage(page, checks) {
       : [`${one.token} is not a token the palette pins fixed across every row`];
   });
 
-  const uncovered = measured.filter(
-    (member) => !member.grained && !member.small && !member.mark && member.states.length > 0,
-  );
-  const unseen = measured.filter((member) => member.states.length === 0);
-  const covered = measured.length - uncovered.length - unseen.length;
+  const uncovered = measured.filter((member) => !member.grained && !member.small && !member.mark);
+  const covered = measured.length - uncovered.length;
   console.log(
     `browser: theme grounds population=${measured.length} grained=${measured.filter((one) => one.grained).length} ` +
       `too_small=${measured.filter((one) => !one.grained && one.small).length} ` +
       `meaning_marks=${measured.filter((one) => !one.grained && !one.small && one.mark).length} ` +
-      `uncovered=${uncovered.length} never_drawn=${unseen.length} ` +
+      `uncovered=${uncovered.length} ` +
+      `never_drawn=${measured.filter((one) => !one.drawn).length} ` +
+      `probed_for_grain=${Object.keys(probed).length} ` +
       `fixed_tokens=${fixedRoles.size} mark_faults=${markFaults.length}`,
   );
   console.log(
@@ -10574,17 +10653,17 @@ async function runGroundCoverage(page, checks) {
         )
         .join(', '),
   );
-  for (const member of [...uncovered, ...unseen]) {
+  for (const member of uncovered) {
     console.log(
       `browser: theme grounds NOT COVERED ${member.selector} paints ${member.paint} at ` +
-        `${member.width.toFixed(1)}x${member.height.toFixed(1)} px against a feature of ` +
-        `${member.feature.map((one) => one.toFixed(2)).join('x')} px, seen in ` +
+        `${member.drawn ? `${member.width.toFixed(1)}x${member.height.toFixed(1)} px` : 'no box, never drawn'} ` +
+        `against a feature of ${member.feature.map((one) => one.toFixed(2)).join('x')} px, seen in ` +
         `[${member.states.join(', ') || 'no state'}]`,
     );
   }
   checks.push({
     name: 'theme.every-ground-the-stylesheet-paints-carries-the-grain-or-says-why',
-    ok: uncovered.length === 0 && unseen.length === 0 && markFaults.length === 0 && covered > 0,
+    ok: uncovered.length === 0 && markFaults.length === 0 && covered === measured.length,
     detail:
       `${covered} of the ${measured.length} grounds src/shell.css paints are covered, over ` +
       `${states.length} states of the screen. The population is every rule that paints a ` +
@@ -10596,8 +10675,10 @@ async function runGroundCoverage(page, checks) {
       `one of the ${MEANING_MARKS.length} declared meaning marks, each of which must paint a ` +
       `token the palette pins fixed across every row — ${fixedRoles.size} such tokens were ` +
       `counted out of derivePalette. ` +
-      `uncovered=${uncovered.length} [${uncovered.map((one) => `${one.selector} at ${one.width.toFixed(1)}x${one.height.toFixed(1)} px`).join('; ')}] ` +
-      `never_drawn=${unseen.length} [${unseen.map((one) => one.selector).join('; ')}] ` +
+      `A ground no state drew is read for its GRAIN off a probe the cascade resolves, and it is ` +
+      `never read for its box, because a box of nothing would excuse every one of them: ` +
+      `${measured.filter((one) => !one.drawn).length} of the population were probed that way. ` +
+      `uncovered=${uncovered.length} [${uncovered.map((one) => `${one.selector} at ${one.drawn ? `${one.width.toFixed(1)}x${one.height.toFixed(1)} px` : 'no box'}`).join('; ')}] ` +
       `mark_faults=${markFaults.length} [${markFaults.join('; ')}]`,
   });
 }
