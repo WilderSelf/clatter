@@ -9727,6 +9727,63 @@ async function readSheet(page) {
   });
 }
 
+/**
+ * Where the sheet sits and where each of its categories sits, in CSS pixels.
+ *
+ * Every number is read off `getBoundingClientRect`, so it is the laid-out
+ * screen and never the stylesheet. A check that read the CSS would prove the
+ * rule exists and nothing about what a player meets.
+ */
+async function readSheetLayout(page) {
+  return page.evaluate(() => {
+    const sheet = document.querySelector('[data-el="disclosure-sheet"]');
+    if (sheet === null) return null;
+    const box = sheet.getBoundingClientRect();
+    return {
+      width: Math.round(box.width),
+      top: Math.round(box.top),
+      bottom: Math.round(box.bottom),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      // Where the sheet stands in its own scroll, and whether it has one at
+      // all. A sheet that fits its box cannot prove anything about opening at
+      // the top, so both numbers are reported and the check reads both.
+      scrollTop: Math.round(sheet.scrollTop),
+      scrollHeight: Math.round(sheet.scrollHeight),
+      clientHeight: Math.round(sheet.clientHeight),
+      // The way out of the dialog is not a category.
+      groups: [...sheet.children]
+        .filter((child) => child.getAttribute('data-el') !== 'sheet-close')
+        .map((child) => {
+          const rect = child.getBoundingClientRect();
+          return {
+            name: child.getAttribute('data-el'),
+            left: Math.round(rect.left),
+            top: Math.round(rect.top),
+            bottom: Math.round(rect.bottom),
+          };
+        }),
+    };
+  });
+}
+
+/**
+ * How many pairs of categories sit BESIDE each other rather than under.
+ *
+ * Two boxes are side by side when their left edges differ and their vertical
+ * ranges overlap. An indented box is not a column, and a box under another one
+ * is not a column either, so both are refused by construction.
+ */
+function sideBySide(layout) {
+  let pairs = 0;
+  for (const [index, one] of layout.groups.entries()) {
+    for (const other of layout.groups.slice(index + 1)) {
+      if (one.left !== other.left && one.top < other.bottom && other.top < one.bottom) pairs += 1;
+    }
+  }
+  return pairs;
+}
+
 async function openSheet(page) {
   await page.click('[data-el="disclosure-toggle"]');
   await page.waitForSelector('[data-el="sheet-overrides"]', { timeout: 15000 });
@@ -11010,6 +11067,122 @@ async function runSheet(page, options, checks) {
       `never by clipping.`,
   });
 
+  // ---- 5b. The desktop dialog is not the phone sheet made wider. ----
+  //
+  // The owner's complaint was that the options are too narrow on a desktop and
+  // badly grouped. Both halves are geometry, so both are measured on the
+  // rendered screen at two widths rather than read off the stylesheet.
+  //
+  // The phone half of the claim is measured in the same breath: the bottom
+  // sheet has to stay a bottom sheet, in one column, sitting on the bottom
+  // edge of the viewport.
+  await closeSheet(page);
+  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  await openSheet(page);
+  const wide = await readSheetLayout(page);
+  await closeSheet(page);
+  await page.setViewport({ width: 360, height: 760, deviceScaleFactor: 1 });
+  await openSheet(page);
+  const narrow = await readSheetLayout(page);
+  const wideColumns = new Set(wide.groups.map((each) => each.left)).size;
+  const narrowColumns = new Set(narrow.groups.map((each) => each.left)).size;
+  const widePairs = sideBySide(wide);
+  const narrowPairs = sideBySide(narrow);
+  // The share of the screen the dialog takes. A claim about the WIDTH cannot
+  // be a number copied out of the stylesheet, so it is a proportion of the
+  // window the dialog was given.
+  const wideShare = wide.width / wide.viewportWidth;
+  // Centred, said as a measurement rather than as a word: the room above the
+  // dialog equals the room below it. A bottom sheet has room above and none
+  // below, so it cannot pass this by standing tall enough to reach the top.
+  const wideOffCentre = Math.abs(wide.top - (wide.viewportHeight - wide.bottom));
+  console.log(
+    `browser: sheet layout 1440=[width=${wide.width} share=${wideShare.toFixed(2)} ` +
+      `top=${wide.top} off_centre=${wideOffCentre} groups=${wide.groups.length} ` +
+      `columns=${wideColumns} ` +
+      `side_by_side=${widePairs}] 360=[width=${narrow.width} top=${narrow.top} ` +
+      `bottom=${narrow.bottom} of ${narrow.viewportHeight} groups=${narrow.groups.length} ` +
+      `columns=${narrowColumns} side_by_side=${narrowPairs}]`,
+  );
+  for (const group of wide.groups) {
+    console.log(`browser: sheet layout 1440 ${group.name} left=${group.left} top=${group.top}`);
+  }
+  // One category stands in the left column and every other one stacks in the
+  // right, so the tall one is beside each of the rest and nothing else is
+  // beside anything. That is one pair per category less the tall one, and it
+  // is the arrangement the tab order depends on: reading down the left column
+  // and then the right is the document order only while the split is that one.
+  // A positive count is not enough. A row span of two leaves three pairs, puts
+  // a category from the foot of the document at the head of the left column,
+  // and parts the reading order from the tab order while still reading
+  // "some pairs are side by side".
+  const wantedPairs = wide.groups.length - 1;
+  // Said in words that follow the numbers, because a failure is read under
+  // pressure and a fixed sentence would report the layout it was written for.
+  const phoneHolds =
+    narrowColumns === 1 && narrowPairs === 0 && narrow.bottom >= narrow.viewportHeight - 1;
+  checks.push({
+    name: 'sheet.the-desktop-dialog-lays-its-categories-in-columns-and-the-phone-does-not',
+    ok:
+      wide.groups.length >= 4 &&
+      wide.groups.length === narrow.groups.length &&
+      wideColumns === 2 &&
+      widePairs === wantedPairs &&
+      wideShare >= 0.5 &&
+      wideOffCentre <= 2 &&
+      phoneHolds,
+    detail:
+      `at 1440 the dialog measures ${wide.width} px, which is ${(wideShare * 100).toFixed(0)} ` +
+      `per cent of the window against a floor of 50, and its ${wide.groups.length} categories ` +
+      `stand at ${wideColumns} different left edges with ${widePairs} pairs of them side by ` +
+      `side against the ${wantedPairs} one column beside a stack of the rest makes. It ` +
+      `leaves ${wide.top} px above it and ${wide.viewportHeight - wide.bottom} px below it, ` +
+      `so it is ${wideOffCentre} px off centre against a bound of 2. At ` +
+      `360 the same ${narrow.groups.length} categories measure ${narrow.width} px at ` +
+      `${narrowColumns} left edge with ${narrowPairs} pairs side by side, and the sheet bottom ` +
+      `is at ${narrow.bottom} of ${narrow.viewportHeight} px, so ` +
+      `${phoneHolds ? 'the phone still meets a bottom sheet in one column' : 'THE PHONE NO LONGER MEETS A BOTTOM SHEET IN ONE COLUMN'}` +
+      `. Every number is a laid-out rectangle and none is read off the CSS.`,
+  });
+
+  // ---- 5c. The sheet opens at its own top, at both widths. ----
+  //
+  // The way out is the last child of the sheet, and the sheet takes the focus
+  // when it opens. A browser asked to focus an element scrolls it into view,
+  // so the player met the foot of the dialog before its first setting. Both
+  // readings above were taken straight after `openSheet` and before anything
+  // scrolled, so each one is the offset a player opens on.
+  //
+  // The denominator is the scroll itself: a sheet whose content fits its box
+  // reads zero whatever the focus does, so a run that could not scroll proves
+  // nothing and fails here instead.
+  const scrolls = (layout) => layout.scrollHeight > layout.clientHeight;
+  console.log(
+    `browser: sheet opening_scroll 1440=[scroll_top=${wide.scrollTop} ` +
+      `content=${wide.scrollHeight} box=${wide.clientHeight}] 360=[scroll_top=${narrow.scrollTop} ` +
+      `content=${narrow.scrollHeight} box=${narrow.clientHeight}]`,
+  );
+  checks.push({
+    name: 'sheet.opens-at-its-own-top-and-not-at-the-way-out',
+    ok:
+      scrolls(wide) &&
+      scrolls(narrow) &&
+      wide.scrollTop === 0 &&
+      narrow.scrollTop === 0 &&
+      // The first category has to start inside the box, or the sheet opened
+      // somewhere else by a route the offset above cannot see.
+      wide.groups[0].top >= wide.top &&
+      narrow.groups[0].top >= narrow.top,
+    detail:
+      `the sheet opened at ${wide.scrollTop} px of its own scroll at 1440 and at ` +
+      `${narrow.scrollTop} px at 360. It holds ${wide.scrollHeight} px of content in a ` +
+      `${wide.clientHeight} px box at 1440 and ${narrow.scrollHeight} in ${narrow.clientHeight} ` +
+      `at 360, so it scrolls at both widths and a reading of zero is a fact about the opening ` +
+      `and not about a sheet that fits. The first category starts at ${wide.groups[0].top} px ` +
+      `against a sheet top of ${wide.top} at 1440, and at ${narrow.groups[0].top} against ` +
+      `${narrow.top} at 360.`,
+  });
+
   // ---- 6. A saved pool goes in, comes back, and crosses a reload. ----
   //
   // The viewport is 360 px from here on, because the phone is the case that
@@ -11268,6 +11441,7 @@ async function runSheet(page, options, checks) {
         ['top', '[data-el="sheet-ruleset"]'],
         ['overrides', '[data-el="overrides-reset"]'],
         ['presets', '[data-el="sheet-presets"]'],
+        ['data', '[data-el="sheet-close"]'],
       ]) {
         await page.evaluate((selector) => {
           document.querySelector(selector)?.scrollIntoView({ block: 'end' });

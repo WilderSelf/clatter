@@ -187,6 +187,34 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | `sheet-overlay` | Shows the performance readings over the screen: p95 and p99 frame duration, the long-task total, and throw-to-first-motion. Every line names its unit and its sample count, a percentile below its floor is refused, and a figure this browser cannot measure is named rather than printed as a zero. **It reports and never gates**, and the switch is not stored. Decision 18. | 3.8 |
 | `sheet-close` | Closes the sheet and returns focus to `disclosure-toggle`. | 2.1 |
 
+**Amended 2026-08-10: five categories, and two columns on a desktop.** The sheet drew the twelve
+rows above as twelve children of one column, three of them bare controls under no heading at all, at
+520 px on a phone and on a desktop alike. The rows now sit in five categories: **Rules**
+(`sheet-ruleset`, `sheet-overrides`, `sheet-mode`, `sheet-artifact-curve`), **Saved pools**
+(`sheet-presets`), **Look** (`sheet-theme`, `sheet-renderer` holding `sheet-tray-renderer`),
+**Sound** (`sheet-sound`), and **Session and data** (`sheet-history-group` holding `sheet-history`
+and `sheet-storage-estimate`, `sheet-share`, `sheet-stress` holding `sheet-stress-reset`, and
+`sheet-readings` holding `sheet-overlay`). A category that holds one group is that group, so
+`sheet-presets` and `sheet-sound` carry no second heading. Every `data-el` above keeps its name and
+its place inside the sheet.
+
+Above 760 px the sheet is a centred dialog of `min(880px, 92vw)` and the categories sit in two
+columns. It is not a nav rail and it is not tabs, and the reason is the keyboard: a rail draws one
+pane at a time, so the walk from `sheet-tray-renderer` to `sheet-sound-toggle` would need a pane
+change first, and `node scripts/browser.mjs --sound-controls` presses exactly that walk. Two columns
+keep one linear tab order and run no script. The phone keeps the bottom sheet and the one column.
+`src/app.test.tsx` counts the categories and refuses a loose control beside them, and
+`node scripts/browser.mjs --sheet` measures both layouts as laid-out rectangles at 1440 and at 360.
+
+**A heading holds a member of its own.** The categories put a third label over the six theme rows,
+which already carried "Theme" outside them and "Colour" inside them. The rows now carry no heading
+of their own and `sheet-theme` names them. The rule this states is not a depth: a group earns its
+heading by holding a control of its own, and only the five categories may hold nothing but groups.
+A depth alone would refuse groups that are correct — the blockers of the push profile are a named set
+inside "The rules in force", and the page mode is a named set inside "Build your own", and both stand
+deeper than the heading this rule removed. `src/app.test.tsx` counts the controls and the headings
+off the open sheet and holds each count as an equality. Read the numbers there.
+
 The mode switch sits here on purpose. It destroys the built pool, so it must not sit one tap away
 from the throw. `sheet-ruleset`, `sheet-overrides` and `sheet-artifact-curve` sit here for the same
 reason: each of the three clears the roll on the table, which Decision 10 settles. `sheet-presets`
