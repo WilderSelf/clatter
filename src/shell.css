@@ -494,6 +494,17 @@ body {
   cursor: pointer;
 }
 
+/* The one surface Unit 4.12 left flat, and why.
+ *
+ * ponytail: a flat die keeps a solid body. `.f1` to `.f6` below own
+ * `background-image` for the pips and `.pips` sizes every layer of it at 21 per
+ * cent, so a grain layer here is either overwritten by the pip rules or sized
+ * as a pip. Six rules would carry it, and on a die 46 px across a grain the
+ * player can find reads as dirt rather than as a material. The die already
+ * carries an edge, a shadow and the pips, so it is not a flat colour a player
+ * sees. Give the flat die a grain when it grows past about 84 px, which is the
+ * size the widest breakpoint at the end of this file already gives it, and put
+ * the layer in `.pips` where the pip sizing lives. */
 .die {
   position: relative;
   width: var(--die);

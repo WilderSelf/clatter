@@ -73,7 +73,7 @@ export function appliedTheme(settings: ThemeSettings): AppliedTheme {
  *
  * Two roles read one token on purpose and the reason is written beside each.
  * A role with no entry here is a colour the stylesheet would have to hold
- * itself, which `shell-css.test.ts` refuses.
+ * itself, which `css-vars.test.ts` refuses.
  */
 export const PALETTE_ROLES: Readonly<Record<string, keyof InterfacePalette>> = {
   // The page behind everything, and the screen that fills it. The screen is

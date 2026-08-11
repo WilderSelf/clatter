@@ -10063,6 +10063,8 @@ async function runTheme(page, options, checks) {
   register('./ts-resolve.mjs', import.meta.url);
   const themes = await import('../src/theme/themes.ts');
   const builder = await import('../src/theme/builder.ts');
+  // The row a player meets first, read off the defaults rather than typed here.
+  const settings = await import('../src/settings/settings.ts');
 
   // The run starts from the defaults, so nothing an earlier run stored decides
   // what this one reads.
@@ -10625,6 +10627,29 @@ async function runTheme(page, options, checks) {
       await new Promise((done) => setTimeout(done, 200));
       writeFileSync(
         join(options.captureShell, `0019-theme-builder-${width}.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+    }
+    // The open sheet on the two rows a grain reads differently on — Unit 4.12.
+    // The panel above is captured on one row, which said nothing about how a
+    // texture lands on a light ground. `bone` is the one light row, and the
+    // default is the row a player meets first.
+    for (const id of [settings.DEFAULT_SETTINGS.themeId, 'bone']) {
+      await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+      await openSheet(page);
+      await chooseThemeRow(page, id);
+      await page.evaluate(() => {
+        document.querySelector('[data-el="sheet-theme"]')?.scrollIntoView({ block: 'start' });
+      });
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0022-grain-panel-${id}-1440.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+      await closeSheet(page);
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0022-grain-page-${id}-1440.png`),
         await page.screenshot({ type: 'png' }),
       );
     }
