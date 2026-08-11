@@ -1910,6 +1910,7 @@ export function App({
                 setTrayMounted(box !== null);
               }}
               colours={applied.diceColours}
+              palette={applied.palette}
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
               onImpact={(impact) => sound.current?.impact(impact)}
               onMotion={(at, evidence) => perf.current?.motion(at, evidence)}
@@ -1954,6 +1955,7 @@ export function App({
               onFall={() => apply(fallToFlat)}
               onSpots={setSpots}
               colours={applied.diceColours}
+              palette={applied.palette}
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
             />
           </>

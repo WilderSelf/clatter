@@ -32,8 +32,21 @@ import { DICE_THEMES, INTERFACE_PALETTES, resolveTheme, TRAY_SURFACES } from './
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/shell.css'), 'utf8');
 
-/** The file with every comment taken out, so a colour named in prose is not one. */
-const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, ' ');
+/**
+ * The file with every comment taken out, so a colour named in prose is not one,
+ * and with every percent escape decoded.
+ *
+ * **A data URI is a colour channel of its own.** `--texture-noise` carries an
+ * SVG as text, and `%23ff0000` inside it is a red the browser paints and a raw
+ * scan never sees, because the hash is written as `%23`. Decoding first puts
+ * every such colour in front of the scan below. Nothing else in the file needs
+ * the decode: a percent in `rgb(0 0 0 / 55%)` is followed by a bracket and not
+ * by two hex digits.
+ */
+const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(
+  /%([0-9a-fA-F]{2})/g,
+  (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)),
+);
 
 /** The six names, restated in the order the plan names them. */
 const NAMES: readonly ThemeId[] = ['leather', 'ash', 'moss', 'bone', 'iron', 'oxblood'];
