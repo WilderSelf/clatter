@@ -10139,6 +10139,141 @@ async function readPaints(page, probes) {
 /** The floor for text, restated. WCAG 2.2 SC 1.4.3. */
 const GRAIN_TEXT_FLOOR = 4.5;
 
+// ---------------------------------------------------------------------------
+// The population the grain has to cover
+//
+// The check above measures three surfaces. Three is a FIXTURE, not a scope: it
+// went green while thirteen selectors were cut out of the grain rule, because
+// the three it names were not among them. A denominator taken from the grain
+// rule's own selector list carries the same fault the other way round, because
+// deleting a selector deletes it from the population too.
+//
+// So the population is every rule of `src/shell.css` that paints a GROUND, and
+// a member passes on one of three arms:
+//
+//   1. It is grained. Read off the rendered element, so a rule that never
+//      reached it fails here whatever the stylesheet says.
+//   2. Its painted box is under the coarse feature of the grain that would
+//      apply to it. A texture smaller than one of its own features is noise.
+//      Read off the rendered box.
+//   3. It is a meaning mark. Declared, and counted against the tokens the
+//      palette pins fixed across every row, so the list cannot grow a member
+//      that is only a colour somebody liked.
+//
+// Deleting a selector from the grain rule moves that ground into arm 1 with no
+// excuse, so the gate fires. A new ground-painting rule in none of the three
+// arms fires it as well.
+// ---------------------------------------------------------------------------
+
+/**
+ * The marks that carry a meaning, and the token each one paints.
+ *
+ * Every entry is checked against `builder.ts`, which names the tokens a derived
+ * palette copies rather than derives. A mark added here that paints anything
+ * else fails the count, so the list cannot be widened into an excuse.
+ */
+const MEANING_MARKS = [
+  { selector: '.mark.s', token: '--mark-success' },
+  { selector: '.mark.b', token: '--mark-bane' },
+  { selector: '.badge.s', token: '--mark-success' },
+  { selector: '.badge.b', token: '--mark-bane' },
+];
+
+/** `src/shell.css` with every comment taken out. */
+function styleSheetText() {
+  return readFileSync(join(here, '..', 'src', 'shell.css'), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    ' ',
+  );
+}
+
+/**
+ * Every rule of the stylesheet, as a selector list and a body.
+ *
+ * A media query is skipped rather than parsed: its head is followed by another
+ * `{` and never by a `}`, so no match starts on it, and the rules inside it are
+ * matched on their own.
+ */
+function cssRules(text) {
+  return [...text.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, head, body]) => ({
+    selectors: head
+      .split(',')
+      .map((one) => one.trim().replace(/\s+/g, ' '))
+      .filter(Boolean),
+    body,
+  }));
+}
+
+/** Every selector the stylesheet paints a ground for, with what it paints. */
+function groundSelectors(text) {
+  const found = [];
+  for (const rule of cssRules(text)) {
+    for (const [, value] of rule.body.matchAll(/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/g)) {
+      const paint = value.trim();
+      if (/^(none|transparent)/.test(paint) || paint.includes('--texture-noise')) continue;
+      for (const selector of rule.selectors) found.push({ selector, paint });
+    }
+  }
+  return found;
+}
+
+/** Every selector the stylesheet grains, and the size it stretches the noise to. */
+function grainRules(text) {
+  const rules = [];
+  for (const rule of cssRules(text)) {
+    if (!/background-image:\s*var\(--texture-noise\)/.test(rule.body)) continue;
+    const stated = /background-size:\s*([^;]+)/.exec(rule.body);
+    const parts = (stated?.[1] ?? '')
+      .trim()
+      .split(/\s+/)
+      .map((one) => Number.parseFloat(one));
+    rules.push({ selectors: rule.selectors, size: [parts[0], parts[1] ?? parts[0]] });
+  }
+  return rules;
+}
+
+/**
+ * The coarse feature of the surface noise, in CSS pixels, on a surface that
+ * stretches it to `size`.
+ *
+ * `feTurbulence` states `baseFrequency` in cycles per SVG user unit, so the
+ * coarsest octave has a wavelength of `1 / baseFrequency` user units. The SVG
+ * is `width` units across and `background-size` stretches it, so one wavelength
+ * lands on `size / width` CSS pixels per unit. Both numbers are read out of the
+ * `--texture-noise` declaration, so neither is retyped here.
+ *
+ * **This is NOT `GRAIN_OCTAVES`.** That constant belongs to `dice-grain.ts`,
+ * which builds the grain on a DIE out of a canvas of cells and has its own
+ * generator. The surface grain is an SVG filter and its octave lives in the
+ * stylesheet. Reading the die's cell count here would measure the wrong thing.
+ */
+function noiseFeature(text) {
+  const declaration = /--texture-noise:\s*([^;]+)/.exec(text)?.[1] ?? '';
+  const decoded = declaration.replace(/%([0-9a-fA-F]{2})/g, (_, code) =>
+    String.fromCharCode(Number.parseInt(code, 16)),
+  );
+  const frequency = Number.parseFloat(/baseFrequency='([\d.]+)'/.exec(decoded)?.[1] ?? 'NaN');
+  const span = Number.parseFloat(/<svg[^>]*width='(\d+)'/.exec(decoded)?.[1] ?? 'NaN');
+  return { wavelength: 1 / frequency, span, frequency };
+}
+
+/**
+ * The rule that grains one selector, or the rule a new ground would join.
+ *
+ * A ground already in a grain rule answers to that rule's own size. A ground
+ * that is not in one is measured against the FINEST grain the stylesheet has,
+ * because that is the grain it would be given: a small control belongs with the
+ * panels and never with the page or the table. The finest is read off the rules
+ * rather than named, so it follows the stylesheet.
+ */
+function grainForSelector(rules, selector) {
+  const own = rules.find((rule) => rule.selectors.includes(selector));
+  if (own !== undefined) return own;
+  return rules.reduce((held, rule) =>
+    Math.min(...rule.size) < Math.min(...held.size) ? rule : held,
+  );
+}
+
 /**
  * The three surfaces, the rule that grains each one, and the ink it carries.
  *
@@ -10264,6 +10399,207 @@ async function readGrain(page, selector) {
     },
     { grained, flat, marked },
   );
+}
+
+/**
+ * The painted box and the grain of every ground, in one state of the screen.
+ *
+ * The box comes off `getBoundingClientRect` and the grain off the computed
+ * `background-image`, so both are what the browser resolved and neither is a
+ * reading of the rule. An element the state does not draw answers `seen: false`.
+ */
+async function readGrounds(page, selectors) {
+  return page.evaluate((list) => {
+    const answer = {};
+    for (const selector of list) {
+      let found;
+      try {
+        found = document.querySelector(selector);
+      } catch {
+        // A selector the browser refuses is a fault of this list, not a state.
+        found = null;
+      }
+      if (found === null) continue;
+      const box = found.getBoundingClientRect();
+      answer[selector] = {
+        width: box.width,
+        height: box.height,
+        // The renderer resolves the custom property, so this is the image the
+        // element really carries and not the text of the rule.
+        grained: getComputedStyle(found).backgroundImage.includes('image/svg+xml'),
+      };
+    }
+    return answer;
+  }, selectors);
+}
+
+/**
+ * Every ground the stylesheet paints, measured on the screen that paints it.
+ *
+ * The states below are the states a player reaches, and every ground is looked
+ * for in all of them. The reading kept for a selector is its LARGEST box,
+ * because the surface a player judges is the surface when it is shown and not
+ * when it is empty. A ground no state produced is named and fails.
+ */
+async function runGroundCoverage(page, checks) {
+  const css = styleSheetText();
+  const population = groundSelectors(css);
+  const rules = grainRules(css);
+  const noise = noiseFeature(css);
+
+  // The states. Each one is a short drive and then a sweep.
+  const states = [];
+  const sweep = async (name) => {
+    states.push({
+      name,
+      read: await readGrounds(
+        page,
+        population.map((one) => one.selector),
+      ),
+    });
+  };
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // A browser that refuses storage answers the defaults anyway.
+    }
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 30000 });
+  await sweep('the pool builder');
+
+  // The overlay of Unit 3.8 draws `.perf`, and the sheet holds its switch.
+  await openSheet(page);
+  await page.evaluate(() => {
+    const box = document.querySelector('[data-el="sheet-overlay-toggle"]');
+    if (box !== null && !box.checked) box.click();
+  });
+  // A changed override, so `.ovr-row.changed` is a row a player can really see.
+  await page.evaluate(() => {
+    const field = document.querySelector('[data-el="sheet-overrides"] input.ovr-input');
+    if (field === null) return;
+    field.focus();
+    field.value = String(Number(field.value || 0) + 1);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await sweep('the open sheet');
+  await closeSheet(page);
+
+  await pressTile(page, 'attribute', 'p', 4);
+  await pressTile(page, 'skill', 'p', 3);
+  await pressTile(page, 'stress', 'p', 2);
+  await page.click('[data-el="roll-button"]');
+  await settleScreen(page);
+  await sweep('a roll on the table');
+
+  await openHistory(page);
+  await sweep('the history');
+  await page.click('[data-el="statistics-button"]');
+  await settleScreen(page);
+  await sweep('the statistics');
+
+  // The largest box of any state, and grained if any state drew it grained.
+  const measured = population.map((member) => {
+    const seen = states.filter((state) => state.read[member.selector] !== undefined);
+    const boxes = seen.map((state) => state.read[member.selector]);
+    const widest = boxes.reduce(
+      (held, box) => (box.width * box.height > held.width * held.height ? box : held),
+      boxes[0] ?? { width: 0, height: 0, grained: false },
+    );
+    const rule = grainForSelector(rules, member.selector);
+    // The coarse wavelength of the noise, per axis, on the surface this rule
+    // stretches it to. `background-size` is a pair, so the two axes can differ:
+    // the table pulls the noise flat and its two features are not the same.
+    const feature = rule.size.map((size) => (noise.wavelength * size) / noise.span);
+    return {
+      ...member,
+      states: seen.map((state) => state.name),
+      width: widest.width,
+      height: widest.height,
+      grained: boxes.some((box) => box.grained),
+      feature,
+      // Under one coarse feature on either axis the noise cannot make a
+      // pattern at all, so what lands there is a smudge and not a material.
+      small: widest.width < feature[0] || widest.height < feature[1],
+      mark: MEANING_MARKS.some((one) => one.selector === member.selector),
+    };
+  });
+
+  // The meaning-mark arm, counted against the palette rather than against
+  // itself. `builder.ts` names the tokens a derived palette COPIES instead of
+  // deriving, which is the same list `themes.ts` holds fixed across every row.
+  const builder = await import('../src/theme/builder.ts');
+  const fixedTokens = new Set(
+    Object.keys(builder.derivePalette('#808080')).filter(
+      (token) =>
+        builder.derivePalette('#808080')[token] === builder.derivePalette('#204060')[token],
+    ),
+  );
+  const cssToken = (token) => `--${token.replace(/[A-Z]/g, (up) => `-${up.toLowerCase()}`)}`;
+  const fixedRoles = new Set([...fixedTokens].map(cssToken));
+  const markFaults = MEANING_MARKS.flatMap((one) => {
+    const member = measured.find((each) => each.selector === one.selector);
+    if (member === undefined) return [`${one.selector} is not a ground the stylesheet paints`];
+    if (!member.paint.includes(one.token)) {
+      return [`${one.selector} paints ${member.paint} and not ${one.token}`];
+    }
+    return fixedRoles.has(one.token)
+      ? []
+      : [`${one.token} is not a token the palette pins fixed across every row`];
+  });
+
+  const uncovered = measured.filter(
+    (member) => !member.grained && !member.small && !member.mark && member.states.length > 0,
+  );
+  const unseen = measured.filter((member) => member.states.length === 0);
+  const covered = measured.length - uncovered.length - unseen.length;
+  console.log(
+    `browser: theme grounds population=${measured.length} grained=${measured.filter((one) => one.grained).length} ` +
+      `too_small=${measured.filter((one) => !one.grained && one.small).length} ` +
+      `meaning_marks=${measured.filter((one) => !one.grained && !one.small && one.mark).length} ` +
+      `uncovered=${uncovered.length} never_drawn=${unseen.length} ` +
+      `fixed_tokens=${fixedRoles.size} mark_faults=${markFaults.length}`,
+  );
+  console.log(
+    `browser: theme grounds noise wavelength=${noise.wavelength.toFixed(3)} user units at ` +
+      `baseFrequency=${noise.frequency} over a ${noise.span} unit tile, so a feature measures ` +
+      rules
+        .map(
+          (rule) =>
+            `${rule.size.join('x')} => ${rule.size
+              .map((size) => ((noise.wavelength * size) / noise.span).toFixed(2))
+              .join('x')} px`,
+        )
+        .join(', '),
+  );
+  for (const member of [...uncovered, ...unseen]) {
+    console.log(
+      `browser: theme grounds NOT COVERED ${member.selector} paints ${member.paint} at ` +
+        `${member.width.toFixed(1)}x${member.height.toFixed(1)} px against a feature of ` +
+        `${member.feature.map((one) => one.toFixed(2)).join('x')} px, seen in ` +
+        `[${member.states.join(', ') || 'no state'}]`,
+    );
+  }
+  checks.push({
+    name: 'theme.every-ground-the-stylesheet-paints-carries-the-grain-or-says-why',
+    ok: uncovered.length === 0 && unseen.length === 0 && markFaults.length === 0 && covered > 0,
+    detail:
+      `${covered} of the ${measured.length} grounds src/shell.css paints are covered, over ` +
+      `${states.length} states of the screen. The population is every rule that paints a ` +
+      `ground, read off the stylesheet, so a rule added tomorrow joins it without anybody ` +
+      `remembering this check, and a selector cut OUT of the grain rule stays in it. ` +
+      `A ground passes on one of three arms: it is grained, read off the computed ` +
+      `background-image of the rendered element; or its painted box is under one coarse ` +
+      `feature of the grain that would apply to it, read off getBoundingClientRect; or it is ` +
+      `one of the ${MEANING_MARKS.length} declared meaning marks, each of which must paint a ` +
+      `token the palette pins fixed across every row — ${fixedRoles.size} such tokens were ` +
+      `counted out of derivePalette. ` +
+      `uncovered=${uncovered.length} [${uncovered.map((one) => `${one.selector} at ${one.width.toFixed(1)}x${one.height.toFixed(1)} px`).join('; ')}] ` +
+      `never_drawn=${unseen.length} [${unseen.map((one) => one.selector).join('; ')}] ` +
+      `mark_faults=${markFaults.length} [${markFaults.join('; ')}]`,
+  });
 }
 
 async function runTheme(page, options, checks) {
@@ -10789,6 +11125,9 @@ async function runTheme(page, options, checks) {
       `as ${heldSeeds} in the page's own localStorage, and it holds the two SEEDS rather than ` +
       `the colours, so the colours are derived again on every read.`,
   });
+
+  // ---- 9. Every ground the stylesheet paints is covered, or says why. ----
+  await runGroundCoverage(page, checks);
 
   // ---- The captures. A green suite is blind to a screen that looks wrong. ----
   if (options.captureShell !== null) {
