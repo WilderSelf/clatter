@@ -48,7 +48,8 @@ state and the constraints. Change this.
 3. A dice tray that shows a predetermined result and re-throws a named subset while the rest stay put.
 4. A push affordance on the dice themselves, with three visible states.
 5. A cost readout visible **before** the player commits to the push.
-6. Themes across three independent axes, plus a colour builder.
+6. One theme colour that drives the dice, the tray and the interface together, plus a colour builder.
+   *Amended 2026-08-10 on owner request. The plan first named three independent axes.*
 7. A roll log that survives a campaign, exports to a spreadsheet, and shows its own statistics.
 
 ### End state

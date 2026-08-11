@@ -178,7 +178,7 @@ plan requires. The sheet is a second surface and carries no share of the budget.
 | `sheet-mode` | Pool dice or step dice. A switch discards the built pool. | 2.1 |
 | `sheet-presets` | The saved pools. A name field, one save control, and one row per saved pool carrying recall, move up, move down and delete. It draws no control in step mode, because a saved pool holds counts and step mode holds two rated sizes. Decision 11. | 4.3 |
 | `sheet-artifact-curve` | Escalating or flat. | 4.1 |
-| `sheet-theme` | Three axes — surface, accent and dice material — plus the colour builder. Each axis is one group of six rows with a roving arrow walk, so the panel adds four tab stops to the sheet and none to the main screen. The builder takes two colours as text, reports every reading a built set misses, and applies nothing while a finding stands. | 4.8 |
+| `sheet-theme` | Three axes — surface, accent and dice material — plus the colour builder. Each axis is one group of six rows with a roving arrow walk, so the panel adds four tab stops to the sheet and none to the main screen. The builder takes two colours as text, reports every reading a built set misses, and applies nothing while a finding stands. **Amended 2026-08-11:** the three axes are one. One group of six rows sets the dice, the surface and the interface together, so the panel adds two tab stops to the sheet and still none to the main screen. The builder is unchanged. | 4.8 |
 | `sheet-history` | Opens the history destination. The log, its statistics and its export live there, not here. A read-only storage reading sits beside it, `sheet-storage-estimate`, which holds no tab stop. | 4.4 to 4.7 |
 | `sheet-stress-reset` | Sets the stress counter back to zero. | 2.1 |
 | `sheet-tray-renderer` | Rolls the dice on the table, or draws them flat. It clears a permanent fall to flat dice. | 3.7 |
@@ -417,6 +417,10 @@ thirty-five.
   does, and the six types are a lightness ladder no two rungs of which sit closer than 8 CIE L*.
   Colour is therefore still never the only carrier, and the stress die is told apart by the same
   rule as every other type. Decision 15 records the choice.
+  **Amended again 2026-08-11.** The three axes are one axis. One theme id names the dice row, the
+  tray surface and the interface palette together, so the three no longer move apart and the word
+  independent no longer applies to them. Every colour is still a role and no rule in the stylesheet
+  reads a hue, which is the part of this bullet that does not change.
 - **The cost of the push is read from `previewPush`, never recomputed.** The cost row prints the
   re-throw count and the complication warning, and `push-button` prints the re-throw count and the
   stress. The drawn screen shows the third profile, where the price of a push is a stress rise.

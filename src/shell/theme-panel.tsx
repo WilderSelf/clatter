@@ -1,14 +1,15 @@
 // The theme picker and the colour builder's controls — Unit 4.8.
 //
-// Section 4 of `docs/design/0002-screen-design.md` gives `sheet-theme` one line:
-// three axes — surface, accent and dice material — plus the colour builder. The
-// three axes of `src/theme/themes.ts` are the same three under the names the
-// data half uses, and this panel is where a player chooses on each of them.
+// Section 4 of `docs/design/0002-screen-design.md` gave `sheet-theme` three
+// axes plus the colour builder. The theme is ONE choice now — the dice, the
+// table and the page all follow it — so the picker is one group of six rows.
+// That row of section 4, and the role bullet of section 7, both carry an
+// amendment dated 2026-08-11 that records the collapse.
 //
-// **Three groups, one control each.** A group of radio buttons is one tab stop
-// and its arrow keys move inside it, which is section 2 of the screen design and
-// the rule `sheet-ruleset` already follows. The name of the row is the label,
-// and the swatch beside it is `aria-hidden` decoration: a control that is only a
+// **One group, one control.** A group of radio buttons is one tab stop and its
+// arrow keys move inside it, which is section 2 of the screen design and the
+// rule `sheet-ruleset` already follows. The name of the row is the label, and
+// the swatch beside it is `aria-hidden` decoration: a control that is only a
 // colour swatch has no name a reader can say and no state a reader can hear.
 //
 // **The builder collects a colour as text.** The hex field is the control that
@@ -34,50 +35,26 @@ import {
 } from '../theme/builder';
 import type { AppliedTheme } from '../theme/css-vars';
 import type { DiceTheme, InterfacePalette, ThemeId } from '../theme/themes';
-import { DICE_THEMES, INTERFACE_PALETTES, THEME_IDS, TRAY_SURFACES } from '../theme/themes';
+import { INTERFACE_PALETTES, THEME_IDS } from '../theme/themes';
 
 /** What each shipped row is called on the screen. One name per row, six rows. */
 const ROW_WORDS: Readonly<Record<ThemeId, string>> = {
-  ember: 'Ember',
+  leather: 'Leather',
   ash: 'Ash',
-  verdigris: 'Verdigris',
+  moss: 'Moss',
   bone: 'Bone',
-  void: 'Void',
-  cobalt: 'Cobalt',
+  iron: 'Iron',
+  oxblood: 'Oxblood',
 };
 
-/** The colour a row is drawn with in its own swatch, by axis. */
-const SWATCHES: Readonly<Record<'interface' | 'surface' | 'dice', (id: ThemeId) => string>> = {
-  interface: (id) => INTERFACE_PALETTES[id].accent,
-  surface: (id) => TRAY_SURFACES[id],
-  dice: (id) => DICE_THEMES[id].gear,
-};
-
-/** The three axes, in the order the design names them. */
-export const THEME_AXES = [
-  {
-    axis: 'interface' as const,
-    element: 'theme-axis-interface',
-    legend: 'Page',
-    note: 'The colours of everything around the tray.',
-  },
-  {
-    axis: 'surface' as const,
-    element: 'theme-axis-surface',
-    legend: 'Table',
-    note: 'The surface the dice land on.',
-  },
-  {
-    axis: 'dice' as const,
-    element: 'theme-axis-dice',
-    legend: 'Dice',
-    note: 'The material of the dice themselves.',
-  },
-];
+/** The group of rows, and the words above and below it. */
+export const THEME_ROWS_ELEMENT = 'theme-rows';
+export const THEME_ROWS_LEGEND = 'Colour';
+export const THEME_ROWS_NOTE = 'One colour for the dice, the table and the page.';
 
 /** The words the report opens with when nothing failed. */
 export const THEME_APPLIED_TEXT = 'This theme is on the screen now.';
-export const THEME_CLEARED_TEXT = 'The three chosen rows are back on the screen.';
+export const THEME_CLEARED_TEXT = 'The chosen row is back on the screen.';
 export const THEME_BAD_SEED_TEXT =
   'A colour is six hexadecimal digits after a hash, like #4488FF. Both fields need one.';
 
@@ -90,42 +67,42 @@ export function refusalText(findings: readonly ContrastFinding[]): string {
   );
 }
 
-/** One axis of six rows, drawn as one group with a roving arrow walk. */
-function Axis({
-  axis,
-  element,
-  legend,
-  note,
-  chosen,
-  onChoose,
-}: {
-  axis: 'interface' | 'surface' | 'dice';
-  element: string;
-  legend: string;
-  note: string;
-  chosen: ThemeId;
-  onChoose: (id: ThemeId) => void;
-}) {
-  const swatch = SWATCHES[axis];
+/**
+ * The six rows, drawn as one group with a roving arrow walk.
+ *
+ * The swatch is the page of the row under its accent, split on the diagonal.
+ * The accent is what separates all six by eye, because five pages are dark and
+ * every table is dark. The page half is there for one row: `bone` is the light
+ * theme and its accent is dark, so an accent alone would say the opposite of
+ * what the row does.
+ */
+function Rows({ chosen, onChoose }: { chosen: ThemeId; onChoose: (id: ThemeId) => void }) {
   return (
-    <fieldset class="ovr-set thm-axis" data-el={element}>
-      <legend>{legend}</legend>
+    <fieldset class="ovr-set" data-el={THEME_ROWS_ELEMENT}>
+      <legend>{THEME_ROWS_LEGEND}</legend>
       <div class="thm-rows">
         {THEME_IDS.map((id) => (
           <label key={id} class="choice thm-row">
             <input
               type="radio"
-              name={`theme-${axis}`}
+              name="theme-row"
               value={id}
               checked={chosen === id}
               onChange={() => onChoose(id)}
             />
-            <i class="thm-sw" style={`background:${swatch(id)}`} aria-hidden="true" />
+            <i
+              class="thm-sw"
+              style={
+                `background:linear-gradient(135deg,${INTERFACE_PALETTES[id].accent} 0 50%,` +
+                `${INTERFACE_PALETTES[id].background} 50% 100%)`
+              }
+              aria-hidden="true"
+            />
             {ROW_WORDS[id]}
           </label>
         ))}
       </div>
-      <p class="sheet-note">{note}</p>
+      <p class="sheet-note">{THEME_ROWS_NOTE}</p>
     </fieldset>
   );
 }
@@ -175,11 +152,9 @@ function SeedField({
 
 export interface ThemePanelProps {
   readonly applied: AppliedTheme;
-  readonly diceThemeId: ThemeId;
-  readonly traySurfaceId: ThemeId;
-  readonly interfacePaletteId: ThemeId;
+  readonly themeId: ThemeId;
   readonly builtTheme: BuiltTheme | null;
-  readonly onChooseRow: (axis: 'interface' | 'surface' | 'dice', id: ThemeId) => void;
+  readonly onChooseRow: (id: ThemeId) => void;
   readonly onBuild: (built: BuiltTheme | null) => void;
 }
 
@@ -187,8 +162,9 @@ export interface ThemePanelProps {
  * Judge a theme a player built.
  *
  * The tray surface in force is passed to both checkers, because the two claims
- * that leave the interface axis — a readout over the tray, and a die body on the
- * tray — are the two the player can break by choosing a table under a page.
+ * that leave the palette — a readout over the tray, and a die body on the tray —
+ * are the two a built theme can break: it replaces the dice and the page and
+ * leaves the table the shipped row.
  */
 export function judgeBuilt(
   built: BuiltTheme,
@@ -211,9 +187,7 @@ export function judgeBuilt(
 
 export function ThemePanel({
   applied,
-  diceThemeId,
-  traySurfaceId,
-  interfacePaletteId,
+  themeId,
   builtTheme,
   onChooseRow,
   onBuild,
@@ -225,12 +199,6 @@ export function ThemePanel({
   const [mode, setMode] = useState<'dark' | 'light'>(builtTheme?.mode ?? 'dark');
   const [exactDice, setExactDice] = useState(builtTheme?.exactDice ?? false);
   const [report, setReport] = useState('');
-
-  const chosen: Readonly<Record<'interface' | 'surface' | 'dice', ThemeId>> = {
-    interface: interfacePaletteId,
-    surface: traySurfaceId,
-    dice: diceThemeId,
-  };
 
   const apply = (): void => {
     const dice = readSeed(diceSeed);
@@ -252,17 +220,7 @@ export function ThemePanel({
   return (
     <fieldset class="field" data-el="sheet-theme">
       <legend>Theme</legend>
-      {THEME_AXES.map((each) => (
-        <Axis
-          key={each.axis}
-          axis={each.axis}
-          element={each.element}
-          legend={each.legend}
-          note={each.note}
-          chosen={chosen[each.axis]}
-          onChoose={(id) => onChooseRow(each.axis, id)}
-        />
-      ))}
+      <Rows chosen={themeId} onChoose={onChooseRow} />
       <fieldset class="ovr-set" data-el="theme-builder">
         <legend>Build your own</legend>
         <SeedField
@@ -318,7 +276,7 @@ export function ThemePanel({
               setReport(THEME_CLEARED_TEXT);
             }}
           >
-            Use the rows above
+            Use the row above
           </button>
         </div>
         {/* The report. It is a live region, so a finding is spoken when it

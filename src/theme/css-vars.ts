@@ -24,18 +24,20 @@ import type { DiceTheme, InterfacePalette, ThemeId } from './themes';
 import { DICE_THEMES, INTERFACE_PALETTES, TRAY_SURFACES } from './themes';
 
 /**
- * The three axis choices plus the theme a player built, as the settings record
- * holds them. It is the shape `Settings` satisfies, so this module never
- * imports the settings record and the settings record never imports this one.
+ * The chosen theme plus the theme a player built, as the settings record holds
+ * them. It is the shape `Settings` satisfies, so this module never imports the
+ * settings record and the settings record never imports this one.
+ *
+ * ONE id, so the dice, the table and the page cannot be crossed. A second
+ * `ThemeId` field here would make a foreign pairing reachable again, and
+ * `css-vars.test.ts` reads this declaration to say there is not one.
  */
 export interface ThemeSettings {
-  readonly diceThemeId: ThemeId;
-  readonly traySurfaceId: ThemeId;
-  readonly interfacePaletteId: ThemeId;
+  readonly themeId: ThemeId;
   readonly builtTheme: BuiltTheme | null;
 }
 
-/** The colours in force: three shipped rows, or a built pair over one row. */
+/** The colours in force: one shipped row, or a built pair over its table. */
 export interface AppliedTheme {
   readonly diceColours: DiceTheme;
   readonly traySurfaceColour: string;
@@ -53,12 +55,12 @@ export interface AppliedTheme {
  * those six and against no other colour.
  */
 export function appliedTheme(settings: ThemeSettings): AppliedTheme {
-  const traySurfaceColour = TRAY_SURFACES[settings.traySurfaceId];
+  const traySurfaceColour = TRAY_SURFACES[settings.themeId];
   if (settings.builtTheme === null) {
     return {
-      diceColours: DICE_THEMES[settings.diceThemeId],
+      diceColours: DICE_THEMES[settings.themeId],
       traySurfaceColour,
-      palette: INTERFACE_PALETTES[settings.interfacePaletteId],
+      palette: INTERFACE_PALETTES[settings.themeId],
       built: false,
     };
   }
@@ -98,11 +100,11 @@ export const PALETTE_ROLES: Readonly<Record<string, keyof InterfacePalette>> = {
   '--on-tray': 'onTray',
 };
 
-/** The roles that come from the other two axes rather than from the palette. */
-export const AXIS_ROLES = ['--tray-surface', '--die-pip'] as const;
+/** The roles that come from the table and the dice rather than from the palette. */
+export const TRAY_ROLES = ['--tray-surface', '--die-pip'] as const;
 
 /** Every role the stylesheet may spend. */
-export const ROLE_NAMES: readonly string[] = [...Object.keys(PALETTE_ROLES), ...AXIS_ROLES];
+export const ROLE_NAMES: readonly string[] = [...Object.keys(PALETTE_ROLES), ...TRAY_ROLES];
 
 /**
  * The per-type role. It is written on the die and not on the root, because it

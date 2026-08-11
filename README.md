@@ -39,8 +39,9 @@ press releases it. No mark means the die goes back in the cup. Shape carries the
 **Hear the dice.** The tray synthesises every sound with the Web Audio API. This repository holds no
 audio file and fetches none. The player turns the sound on and sets the level.
 
-**Choose a theme.** Each of three axes takes one choice: the dice colours, the tray surface and the
-interface palette. A colour builder makes a dice colour and a page colour of the player's own.
+**Choose a theme.** One choice sets the dice colours, the tray surface and the interface palette
+together. Six themes ship: leather, ash, moss, bone, iron and oxblood. A colour builder makes a dice
+colour and a page colour of the player's own.
 
 **Keep a log.** Every roll and every push writes an entry to IndexedDB. The history holds three
 views: a summary, the record of each roll as a matrix of one row per die, and three statistics with

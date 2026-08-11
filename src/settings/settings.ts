@@ -41,12 +41,13 @@ export type { ArtifactCurveId };
  * Version 4 is the same record without the three theme axes. Version 5 is the
  * same record without the saved pool presets. Version 6 is the same record
  * without the push-profile override. Version 7 is the same record without the
- * theme a player built.
+ * theme a player built. Version 8 is the same record with three theme ids in
+ * place of the one.
  * No record below the current version ever reached a user, because nothing has
  * shipped — they exist so the migration chain has steps to run and steps to
  * prove.
  */
-export const SETTINGS_VERSION = 8;
+export const SETTINGS_VERSION = 9;
 
 /**
  * One saved pool, under a name the player wrote.
@@ -105,22 +106,18 @@ export interface Settings {
   /** How loud, from 0 to 1. Zero is silent and is not the same as off. */
   readonly soundVolume: number;
   /**
-   * The three theme axes. They are independent and a player mixes them freely,
-   * so they are three fields and not one. A retired id reads as the default,
-   * the same way a retired push profile does. `src/theme/themes.ts` holds the
-   * rows.
+   * The theme. ONE id: the dice, the table and the page all follow it. A
+   * retired id reads as the default, the same way a retired push profile does.
+   * `src/theme/themes.ts` holds the rows.
    */
-  readonly diceThemeId: ThemeId;
-  readonly traySurfaceId: ThemeId;
-  readonly interfacePaletteId: ThemeId;
+  readonly themeId: ThemeId;
   /**
-   * The theme the player built, or null while the three shipped rows are in
-   * force.
+   * The theme the player built, or null while the shipped row is in force.
    *
    * It holds the two seeds and the mode, never the colours they produce, so
    * the colours are derived on every read and cannot drift from the arithmetic
-   * that makes them. It sits beside the three axis fields rather than replacing
-   * them: a player who clears a built theme returns to the rows still chosen.
+   * that makes them. It sits beside `themeId` rather than replacing it: a
+   * player who clears a built theme returns to the row still chosen.
    */
   readonly builtTheme: BuiltTheme | null;
   /**
@@ -153,12 +150,8 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   flatFallback: false,
   soundEnabled: false,
   soundVolume: 0.5,
-  // The neutral row on every axis. `ash` dice are the Unit 3.3 table and the
-  // `ash` surface is the one Unit 3.2 shipped, so the defaults change nothing
-  // a player already sees.
-  diceThemeId: 'ash',
-  traySurfaceId: 'ash',
-  interfacePaletteId: 'ash',
+  // The warm brown row. It is the theme the screen opens in.
+  themeId: 'leather',
   builtTheme: null,
   poolPresets: Object.freeze([]),
   profileOverride: NO_OVERRIDE,
@@ -302,6 +295,23 @@ function shippingPreset(value: unknown): string {
 }
 
 /**
+ * What a version 8 theme id is called now.
+ *
+ * The three theme axes collapse to one, so one of the three stored ids has to
+ * win. `interfacePaletteId` wins, because it is the id the player saw on every
+ * pixel of the page. The other two are dropped. A stored id outside this table,
+ * and a record that held none, both read as the default.
+ */
+const RENAMED_THEMES: Readonly<Record<string, ThemeId>> = {
+  ember: 'leather',
+  ash: 'ash',
+  verdigris: 'moss',
+  bone: 'bone',
+  void: 'oxblood',
+  cobalt: 'iron',
+};
+
+/**
  * One step per older version, from that version to the next one. A step reads
  * an untrusted record and returns an untrusted record — the field validators
  * below run afterwards either way, so a step only has to raise the version and
@@ -316,16 +326,22 @@ const MIGRATIONS: Readonly<Record<number, (stored: StoredRecord) => StoredRecord
     soundEnabled: DEFAULT_SETTINGS.soundEnabled,
     soundVolume: DEFAULT_SETTINGS.soundVolume,
   }),
-  4: (stored) => ({
-    ...stored,
-    version: 5,
-    diceThemeId: DEFAULT_SETTINGS.diceThemeId,
-    traySurfaceId: DEFAULT_SETTINGS.traySurfaceId,
-    interfacePaletteId: DEFAULT_SETTINGS.interfacePaletteId,
-  }),
+  // Version 5 added three theme ids and version 9 took them away again, so
+  // this step supplies none of them. A record this old carries no theme the
+  // player ever chose, and step 8 therefore lands it on the default theme.
+  4: (stored) => ({ ...stored, version: 5 }),
   5: (stored) => ({ ...stored, version: 6, poolPresets: [] }),
   6: (stored) => ({ ...stored, version: 7, profileOverride: {} }),
   7: (stored) => ({ ...stored, version: 8, builtTheme: null }),
+  8: (stored) => {
+    const kept: Record<string, unknown> = { ...stored, version: 9 };
+    kept['themeId'] =
+      RENAMED_THEMES[stored['interfacePaletteId'] as string] ?? DEFAULT_SETTINGS.themeId;
+    delete kept['diceThemeId'];
+    delete kept['traySurfaceId'];
+    delete kept['interfacePaletteId'];
+    return kept;
+  },
 };
 
 /** Bounds the chain, so a step that forgets to raise the version cannot loop. */
@@ -359,13 +375,7 @@ export function migrate(stored: unknown): Settings {
     flatFallback: record['flatFallback'] === true,
     soundEnabled: record['soundEnabled'] === true,
     soundVolume: volumeLevel(record['soundVolume']),
-    diceThemeId: oneOf(record['diceThemeId'], THEME_IDS, DEFAULT_SETTINGS.diceThemeId),
-    traySurfaceId: oneOf(record['traySurfaceId'], THEME_IDS, DEFAULT_SETTINGS.traySurfaceId),
-    interfacePaletteId: oneOf(
-      record['interfacePaletteId'],
-      THEME_IDS,
-      DEFAULT_SETTINGS.interfacePaletteId,
-    ),
+    themeId: oneOf(record['themeId'], THEME_IDS, DEFAULT_SETTINGS.themeId),
     builtTheme: builtTheme(record['builtTheme']),
     poolPresets: poolPresetList(record['poolPresets']),
     // The override is read against the preset the same record names, because a

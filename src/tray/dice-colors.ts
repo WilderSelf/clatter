@@ -18,8 +18,9 @@
 // every one of those numbers from the hex values below rather than reading them
 // from here.
 //
-// Themes are three independent axes and they arrive at Unit 4.8. This is the
-// per-type axis only.
+// A theme is one choice and it arrives at Unit 4.8. The table below is the
+// `ash` row of that theme, and `src/theme/themes.ts` imports it rather than
+// copying it.
 
 import type { DieType } from '../rules/die';
 

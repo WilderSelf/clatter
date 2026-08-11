@@ -9720,15 +9720,11 @@ function asRgb(hex) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-/** Choose a row on one axis, through the real control. */
-async function chooseThemeRow(page, axis, id) {
-  await page.evaluate(
-    (element, value) => {
-      document.querySelector(`[data-el="${element}"] input[value="${value}"]`)?.click();
-    },
-    `theme-axis-${axis}`,
-    id,
-  );
+/** Choose a theme, through the real control. One id, one press. */
+async function chooseThemeRow(page, id) {
+  await page.evaluate((value) => {
+    document.querySelector(`[data-el="theme-rows"] input[value="${value}"]`)?.click();
+  }, id);
 }
 
 /** The colour the engine resolved for one element and one property. */
@@ -9805,22 +9801,23 @@ async function runTheme(page, options, checks) {
 
   const NAMES = [...themes.THEME_IDS];
 
-  // ---- 1. The interface axis and the tray axis reach their places. ----
+  // ---- 1. One id reaches the page AND the table. ----
   //
   // The builder is collapsed first, so the table is on the screen and both
-  // readings come off a rendered element rather than off the setting.
+  // readings come off a rendered element rather than off the setting. One press
+  // per theme, and both surfaces are read after it, so a press that moved only
+  // one of the two fails here.
   await page.click('[data-el="collapse-button"]');
   await openSheet(page);
   const pageReadings = [];
   const trayReadings = [];
   for (const id of NAMES) {
-    await chooseThemeRow(page, 'interface', id);
+    await chooseThemeRow(page, id);
     pageReadings.push({
       id,
       read: await paintOf(page, '.screen', 'backgroundColor'),
       wanted: asRgb(themes.INTERFACE_PALETTES[id].background),
     });
-    await chooseThemeRow(page, 'surface', id);
     trayReadings.push({
       id,
       read: await paintOf(page, '[data-el="dice-table"]', 'backgroundColor'),
@@ -9834,7 +9831,7 @@ async function runTheme(page, options, checks) {
       `tray_rows=${trayReadings.length} wrong=${trayWrong.length}`,
   );
   checks.push({
-    name: 'theme.the-interface-axis-reaches-the-stylesheet',
+    name: 'theme.one-id-reaches-the-stylesheet',
     ok: pageReadings.length === NAMES.length && pageWrong.length === 0,
     detail:
       `${pageReadings.length} of ${NAMES.length} rows were chosen through the real control, and ` +
@@ -9844,15 +9841,16 @@ async function runTheme(page, options, checks) {
       `A palette that resolves is not a palette that is spent, so nothing here reads resolveTheme.`,
   });
   checks.push({
-    name: 'theme.the-tray-axis-reaches-the-tray',
+    name: 'theme.one-id-reaches-the-tray',
     ok: trayReadings.length === NAMES.length && trayWrong.length === 0,
     detail:
-      `${trayReadings.length} of ${NAMES.length} rows were chosen and the surface was read off ` +
+      `${trayReadings.length} of ${NAMES.length} rows were chosen with ONE press each, and the ` +
+      `surface was read off ` +
       `the element the tray mounts into. ${trayWrong.length} disagreed: ` +
       `[${trayWrong.map((each) => `${each.id} drew ${each.read} against ${each.wanted}`).join('; ')}].`,
   });
 
-  // ---- 2. The dice axis reaches the flat dice. ----
+  // ---- 2. The same id reaches the flat dice. ----
   //
   // A die has to be on the table, so the pool is thrown first. Each body is
   // compared against the row for THAT die's type, so a renderer that painted
@@ -9876,7 +9874,7 @@ async function runTheme(page, options, checks) {
   await openSheet(page);
   const diceReadings = [];
   for (const id of NAMES) {
-    await chooseThemeRow(page, 'dice', id);
+    await chooseThemeRow(page, id);
     for (const [type, prefix] of [
       ['attribute', 'die-at'],
       ['gear', 'die-ge'],
@@ -9897,7 +9895,7 @@ async function runTheme(page, options, checks) {
       `distinct=${distinct}`,
   );
   checks.push({
-    name: 'theme.the-dice-axis-reaches-the-dice',
+    name: 'theme.one-id-reaches-the-dice',
     ok:
       diceReadings.length === NAMES.length * 3 &&
       diceWrong.length === 0 &&
@@ -9909,13 +9907,13 @@ async function runTheme(page, options, checks) {
       `The ${distinct} readings are all different, so one colour on every die could not pass.`,
   });
 
-  // ---- 3. The dice axis reaches the 3D dice, without throwing them again. ----
+  // ---- 3. The same id reaches the 3D dice, without throwing them again. ----
   //
   // The materials are read off the tray through the seam `src/shell/table.tsx`
   // publishes, and the throw counter is read with them: a repaint that threw the
   // pool again would move it, and the dice would land somewhere else under the
   // player's hand.
-  await chooseThemeRow(page, 'dice', 'ash');
+  await chooseThemeRow(page, 'ash');
   await page.evaluate(() => {
     const box = document.querySelector('[data-el="sheet-tray-renderer"] input');
     if (box !== null && !box.checked) box.click();
@@ -9931,7 +9929,7 @@ async function runTheme(page, options, checks) {
       'WebGL context at all.';
     console.log(`browser: theme table NOT JUDGED, ${why}`);
     checks.push({
-      name: 'theme.the-dice-axis-repaints-the-3d-dice',
+      name: 'theme.one-id-repaints-the-3d-dice',
       ok: true,
       skipped: true,
       detail: `NOT JUDGED: ${why}`,
@@ -9943,7 +9941,7 @@ async function runTheme(page, options, checks) {
     const painted = [];
     for (const id of NAMES) {
       await openSheet(page);
-      await chooseThemeRow(page, 'dice', id);
+      await chooseThemeRow(page, id);
       await closeSheet(page);
       const read = await page.evaluate(() => {
         const seam = window.__clatterTable;
@@ -9975,7 +9973,7 @@ async function runTheme(page, options, checks) {
         `throws=${threwAt} rethrew=${rethrew.length}`,
     );
     checks.push({
-      name: 'theme.the-dice-axis-repaints-the-3d-dice',
+      name: 'theme.one-id-repaints-the-3d-dice',
       ok: bodies >= NAMES.length && wrongPaint.length === 0 && rethrew.length === 0,
       detail:
         `${bodies} die materials were read off the tray through the seam, over ${NAMES.length} ` +
@@ -10002,14 +10000,12 @@ async function runTheme(page, options, checks) {
   // here through `table-note`, which is a child of the element the tray surface
   // paints.
   await openSheet(page);
-  await chooseThemeRow(page, 'dice', 'ash');
-  await chooseThemeRow(page, 'surface', 'ash');
   let measured = 0;
   let tightest = { ratio: Infinity, said: '' };
   const absent = [];
   const under = [];
   for (const id of NAMES) {
-    await chooseThemeRow(page, 'interface', id);
+    await chooseThemeRow(page, id);
     await closeSheet(page);
     const paints = await readPaints(page, ROLE_PROBES);
     for (const paint of paints) {
@@ -10049,7 +10045,7 @@ async function runTheme(page, options, checks) {
   });
 
   // ---- 5. Keyboard alone reaches every control, and changes the screen. ----
-  await chooseThemeRow(page, 'interface', 'ash');
+  await chooseThemeRow(page, 'ash');
   const walk = await page.evaluate(() => {
     const panel = document.querySelector('[data-el="sheet-theme"]');
     if (panel === null) return { stops: [], unnamed: [], groups: 0, stateless: [] };
@@ -10081,7 +10077,7 @@ async function runTheme(page, options, checks) {
   // A real key press on a real control, and the page has to answer it.
   const before = await paintOf(page, '.screen', 'backgroundColor');
   const from = await page.evaluate(() => {
-    const input = document.querySelector('[data-el="theme-axis-interface"] input:checked');
+    const input = document.querySelector('[data-el="theme-rows"] input:checked');
     input?.focus();
     return document.activeElement?.getAttribute('value') ?? null;
   });
@@ -10089,9 +10085,7 @@ async function runTheme(page, options, checks) {
   const after = await paintOf(page, '.screen', 'backgroundColor');
   const to = await page.evaluate(
     () =>
-      document
-        .querySelector('[data-el="theme-axis-interface"] input:checked')
-        ?.getAttribute('value') ?? null,
+      document.querySelector('[data-el="theme-rows"] input:checked')?.getAttribute('value') ?? null,
   );
   const short = await page.evaluate((floor) => {
     const panel = document.querySelector('[data-el="sheet-theme"]');
@@ -10111,7 +10105,7 @@ async function runTheme(page, options, checks) {
       walk.stops.length > 0 &&
       walk.unnamed.length === 0 &&
       walk.stateless === 0 &&
-      walk.groups >= 5 &&
+      walk.groups >= 3 &&
       from !== null &&
       to !== null &&
       to !== from &&
@@ -10120,7 +10114,7 @@ async function runTheme(page, options, checks) {
     detail:
       `${walk.stops.length} controls, ${walk.unnamed.length} of them without an accessible name ` +
       `[${walk.unnamed.join(', ')}], in ${walk.groups} groups, and ${walk.stateless} without a ` +
-      `state. One arrow key on the interface group moved the choice from ${from} to ${to} and ` +
+      `state. One arrow key on the theme group moved the choice from ${from} to ${to} and ` +
       `the page colour from ${before} to ${after}, so the keyboard alone changes the theme. ` +
       `${short.length} hit targets sit under the ${HIT_TARGET_FLOOR} px floor of WCAG 2.2 ` +
       `SC 2.5.8 [${short.join('; ')}].`,
@@ -10132,6 +10126,10 @@ async function runTheme(page, options, checks) {
   // report is compared against an answer the screen did not produce.
   const badPage = '#1B2431';
   const badDice = '#050505';
+  // The oracle judges against ONE tray surface, so the theme that owns that
+  // surface is chosen back first. One id moves the table as well as the page,
+  // and the keyboard walk above left the choice on another row.
+  await chooseThemeRow(page, 'ash');
   const surface = themes.TRAY_SURFACES.ash;
   await typeSeed(page, 'theme-page-seed', badPage);
   await typeSeed(page, 'theme-dice-seed', badDice);
@@ -10227,9 +10225,7 @@ async function runTheme(page, options, checks) {
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
     for (const id of NAMES) {
       await openSheet(page);
-      await chooseThemeRow(page, 'interface', id);
-      await chooseThemeRow(page, 'surface', id);
-      await chooseThemeRow(page, 'dice', id);
+      await chooseThemeRow(page, id);
       await closeSheet(page);
       await new Promise((done) => setTimeout(done, 200));
       writeFileSync(
@@ -10239,9 +10235,7 @@ async function runTheme(page, options, checks) {
     }
     // The panel itself, at both widths.
     await openSheet(page);
-    await chooseThemeRow(page, 'interface', 'ash');
-    await chooseThemeRow(page, 'surface', 'ash');
-    await chooseThemeRow(page, 'dice', 'ash');
+    await chooseThemeRow(page, 'ash');
     for (const width of [360, 1440]) {
       await page.setViewport({ width, height: width === 360 ? 760 : 900, deviceScaleFactor: 1 });
       await page.evaluate(() => {

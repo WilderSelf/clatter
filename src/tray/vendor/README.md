@@ -18,9 +18,12 @@ on, with the measurement behind each reason.
 ## What was removed
 
 - The published colour-set table. Every entry went. None was carried across under a new name,
-  because a reproduced dice colour convention is closer to trade dress than to rules. Six sets
-  this repository owns replace it: `ember`, `ash`, `verdigris`, `bone`, `void` and `cobalt`.
-  `bone` is the default and is the base a custom set copies.
+  because a reproduced dice colour convention is closer to trade dress than to rules. One set this
+  repository owns replaces it, `bone`, which is the library default and the base a custom set
+  copies. Six sets stood here until 2026-08-11. The application always passes
+  `theme_customColorset`, so five of the six were never read, and a dead set under a name the
+  application no longer uses is a second answer waiting to be believed. The colours a die really
+  takes live in `src/theme/themes.ts`.
 - Every dice-type definition that carried a forbidden term. The selection was made by the hashes
   in `scripts/forbidden-hashes.json`, so the term itself is written nowhere.
 - The sound files, 540,987 bytes of them. Unit 3.6 supplies its own, synthesised in code.

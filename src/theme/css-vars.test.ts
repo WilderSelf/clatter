@@ -13,6 +13,9 @@
 //   3. Which token fills which role. The claim is the ROLE and never the
 //      presence of a colour: a palette that swapped two tokens would still hold
 //      every colour it holds now.
+//   4. ONE id moves the dice, the table and the page together, and no surface
+//      can be left on a foreign row. The declaration of `ThemeSettings` is read
+//      as well, because behaviour cannot say that a second id is impossible.
 //
 // The floors and the token names are written out again in this file. Reading
 // them from the modules under test would let those modules answer their own
@@ -20,11 +23,12 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { appliedTheme, AXIS_ROLES, DIE_FACE_ROLE, PALETTE_ROLES, themeVariables } from './css-vars';
+import { appliedTheme, TRAY_ROLES, DIE_FACE_ROLE, PALETTE_ROLES, themeVariables } from './css-vars';
 import { contrastRatio } from './contrast';
 import type { InterfacePalette, ThemeId } from './themes';
-import { DICE_THEMES, INTERFACE_PALETTES, THEME_IDS, TRAY_SURFACES } from './themes';
+import { DICE_THEMES, INTERFACE_PALETTES, resolveTheme, TRAY_SURFACES } from './themes';
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/shell.css'), 'utf8');
 
@@ -32,7 +36,7 @@ const CSS = readFileSync(resolve(process.cwd(), 'src/shell.css'), 'utf8');
 const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, ' ');
 
 /** The six names, restated in the order the plan names them. */
-const NAMES: readonly ThemeId[] = ['ember', 'ash', 'verdigris', 'bone', 'void', 'cobalt'];
+const NAMES: readonly ThemeId[] = ['leather', 'ash', 'moss', 'bone', 'iron', 'oxblood'];
 
 /**
  * The three colour literals the stylesheet is allowed, and what each one is for.
@@ -125,7 +129,7 @@ describe('the roles', () => {
   const declared = new Set([...RULES.matchAll(/(--[a-z0-9-]+):/g)].map((match) => match[1] ?? ''));
 
   it('spends every role the theme module writes, and reads no other outside variable', () => {
-    const roles = new Set([...Object.keys(PALETTE_ROLES), ...AXIS_ROLES, DIE_FACE_ROLE]);
+    const roles = new Set([...Object.keys(PALETTE_ROLES), ...TRAY_ROLES, DIE_FACE_ROLE]);
     // Direction one: nothing the module writes goes unspent.
     const unspent = [...roles].filter((role) => !read.has(role));
     expect(unspent, 'these roles are written and nothing paints with them').toEqual([]);
@@ -136,7 +140,7 @@ describe('the roles', () => {
       [...roles].sort(),
     );
     expect(roles.size, 'the module writes fourteen palette roles and three more').toBe(
-      Object.keys(PALETTE_ROLES).length + AXIS_ROLES.length + 1,
+      Object.keys(PALETTE_ROLES).length + TRAY_ROLES.length + 1,
     );
   });
 });
@@ -177,14 +181,7 @@ describe('which token fills which role', () => {
     let checked = 0;
     for (const id of NAMES) {
       const palette = INTERFACE_PALETTES[id];
-      const written = themeVariables(
-        appliedTheme({
-          diceThemeId: 'ash',
-          traySurfaceId: 'ash',
-          interfacePaletteId: id,
-          builtTheme: null,
-        }),
-      );
+      const written = themeVariables(appliedTheme({ themeId: id, builtTheme: null }));
       for (const [role, token] of Object.entries(WANTED)) {
         expect(written[role], `${id}: ${role} takes ${token}`).toBe(palette[token]);
         // The role, not the presence. A palette that swapped two tokens holds
@@ -203,56 +200,117 @@ describe('which token fills which role', () => {
     );
   });
 
-  it('follows each axis on its own, and the other two do not move', () => {
-    const base = {
-      diceThemeId: 'ash' as ThemeId,
-      traySurfaceId: 'ash' as ThemeId,
-      interfacePaletteId: 'ash' as ThemeId,
-      builtTheme: null,
-    };
-    let moved = 0;
+  /**
+   * One id moves the dice, the table and the page together.
+   *
+   * This is the claim the collapse makes, and it replaces the two checks that
+   * measured the three axes moving apart. It can fail two ways, and both are
+   * the way a collapse really goes wrong: a surface that keeps reading a stale
+   * id, and a surface that stops moving at all.
+   *
+   * The second half is the one that matters. Asserting that each surface reads
+   * its own row would pass while a fourth surface still read `ash`, so every
+   * row is also asserted to differ from every OTHER row: 30 ordered pairs by
+   * three surfaces. A stale id shows up as `leather` painting the `ash` table.
+   */
+  it('moves all three surfaces on one id, and pairs no surface with a foreign row', () => {
+    let together = 0;
+    let apart = 0;
     for (const id of NAMES) {
-      const byDice = appliedTheme({ ...base, diceThemeId: id });
-      expect(byDice.diceColours, `the dice axis reads the ${id} row`).toBe(DICE_THEMES[id]);
-      expect(byDice.palette, 'the dice axis does not move the palette').toBe(
-        INTERFACE_PALETTES.ash,
-      );
-      expect(byDice.traySurfaceColour, 'the dice axis does not move the tray').toBe(
-        TRAY_SURFACES.ash,
-      );
+      const applied = appliedTheme({ themeId: id, builtTheme: null });
+      const written = themeVariables(applied);
+      const resolved = resolveTheme(id);
 
-      const bySurface = appliedTheme({ ...base, traySurfaceId: id });
-      expect(bySurface.traySurfaceColour, `the tray axis reads the ${id} row`).toBe(
+      // The three surfaces, read where the screen reads them: the dice off the
+      // applied theme, the table and the page off the variables on the root.
+      expect(applied.diceColours, `${id}: the dice are the ${id} row`).toBe(DICE_THEMES[id]);
+      expect(written['--tray-surface'], `${id}: the table is the ${id} row`).toBe(
         TRAY_SURFACES[id],
       );
-      expect(bySurface.diceColours, 'the tray axis does not move the dice').toBe(DICE_THEMES.ash);
-
-      const byPalette = appliedTheme({ ...base, interfacePaletteId: id });
-      expect(byPalette.palette, `the interface axis reads the ${id} row`).toBe(
+      expect(written['--page'], `${id}: the page is the ${id} row`).toBe(
+        INTERFACE_PALETTES[id].background,
+      );
+      // `resolveTheme` answers with the same three, from the same one id.
+      expect(resolved.diceColours, `${id}: resolveTheme agrees about the dice`).toBe(
+        DICE_THEMES[id],
+      );
+      expect(resolved.traySurfaceColour, `${id}: resolveTheme agrees about the table`).toBe(
+        TRAY_SURFACES[id],
+      );
+      expect(resolved.palette, `${id}: resolveTheme agrees about the page`).toBe(
         INTERFACE_PALETTES[id],
       );
-      expect(byPalette.traySurfaceColour, 'the interface axis does not move the tray').toBe(
-        TRAY_SURFACES.ash,
-      );
-      moved += 3;
+      together += 3;
+
+      // No surface is left on another row. This is what a stale id trips.
+      for (const other of NAMES) {
+        if (other === id) continue;
+        expect(applied.diceColours, `${id}: the dice are not the ${other} row`).not.toBe(
+          DICE_THEMES[other],
+        );
+        expect(written['--tray-surface'], `${id}: the table is not the ${other} row`).not.toBe(
+          TRAY_SURFACES[other],
+        );
+        expect(written['--page'], `${id}: the page is not the ${other} row`).not.toBe(
+          INTERFACE_PALETTES[other].background,
+        );
+        apart += 3;
+      }
     }
-    expect(moved, 'three axes by six rows were moved one at a time').toBe(NAMES.length * 3);
-    expect(THEME_IDS.length, 'six rows, counted a second way').toBe(NAMES.length);
+    // Both denominators are products, so a loop that ran short cannot pass.
+    expect(together, 'three surfaces over six themes were read').toBe(NAMES.length * 3);
+    expect(apart, 'three surfaces over every ordered pair of themes were read').toBe(
+      NAMES.length * (NAMES.length - 1) * 3,
+    );
+  });
+
+  /**
+   * A foreign pairing is unreachable through the settings type.
+   *
+   * The check above measures behaviour, and behaviour cannot say that a second
+   * id is impossible — only that the one in front of it is right. This reads
+   * the DECLARATION of `ThemeSettings` and counts the fields typed `ThemeId`.
+   * A second one would put a foreign pairing back within reach, and it would
+   * arrive without any measurement above turning red.
+   */
+  it('declares exactly one theme id in the settings the screen reads', () => {
+    const path = resolve(process.cwd(), 'src/theme/css-vars.ts');
+    const source = ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const fields: string[] = [];
+    source.forEachChild((node) => {
+      if (!ts.isInterfaceDeclaration(node) || node.name.text !== 'ThemeSettings') return;
+      for (const member of node.members) {
+        if (!ts.isPropertySignature(member) || member.type === undefined) continue;
+        fields.push(`${member.name.getText()}: ${member.type.getText()}`);
+      }
+    });
+    expect(fields, 'the declaration was read at all').not.toEqual([]);
+    expect(
+      fields.filter((each) => each.endsWith(': ThemeId')),
+      'one field names a theme',
+    ).toEqual(['themeId: ThemeId']);
+    expect(fields, 'the record holds the id and the theme a player built').toEqual([
+      'themeId: ThemeId',
+      'builtTheme: BuiltTheme | null',
+    ]);
   });
 
   it('puts a built theme on the dice and the page, and leaves the tray a shipped row', () => {
     const applied = appliedTheme({
-      diceThemeId: 'ember',
-      traySurfaceId: 'cobalt',
-      interfacePaletteId: 'bone',
+      themeId: 'iron',
       builtTheme: { diceSeed: '#3CBFA5', interfaceSeed: '#FF8B68', mode: 'dark', exactDice: false },
     });
     expect(applied.built, 'the built theme is the one on the screen').toBe(true);
-    expect(applied.diceColours, 'the dice row is not the chosen one').not.toBe(DICE_THEMES.ember);
+    expect(applied.diceColours, 'the dice row is not the chosen one').not.toBe(DICE_THEMES.iron);
     expect(applied.palette, 'the palette row is not the chosen one').not.toBe(
-      INTERFACE_PALETTES.bone,
+      INTERFACE_PALETTES.iron,
     );
-    expect(applied.traySurfaceColour, 'the tray stays the shipped row').toBe(TRAY_SURFACES.cobalt);
+    expect(applied.traySurfaceColour, 'the tray stays the shipped row').toBe(TRAY_SURFACES.iron);
     expect(applied.palette.accent, 'the colour the player chose is the accent, unchanged').toBe(
       '#FF8B68',
     );
@@ -306,14 +364,7 @@ describe('the contrast the roles carry', () => {
     let measured = 0;
     let tightest = { ratio: Number.POSITIVE_INFINITY, said: '' };
     for (const id of NAMES) {
-      const written = themeVariables(
-        appliedTheme({
-          diceThemeId: 'ash',
-          traySurfaceId: 'ash',
-          interfacePaletteId: id,
-          builtTheme: null,
-        }),
-      );
+      const written = themeVariables(appliedTheme({ themeId: id, builtTheme: null }));
       for (const [ink, ground, floor] of INK_ON_GROUND) {
         const inkHex = written[ink];
         const groundHex = written[ground];
@@ -337,14 +388,14 @@ describe('the contrast the roles carry', () => {
     let measured = 0;
     for (const palette of NAMES) {
       for (const surface of NAMES) {
-        const written = themeVariables(
-          appliedTheme({
-            diceThemeId: 'ash',
-            traySurfaceId: surface,
-            interfacePaletteId: palette,
-            builtTheme: null,
-          }),
-        );
+        // The picker cannot cross a palette with a foreign surface, so the
+        // crossing is made here by hand. It is not a built theme: it is a
+        // shipped palette over another row's table, kept because the six
+        // surfaces sit inside one CIE L*, which `theme.test.ts` measures.
+        const written: Record<string, string> = {
+          ...themeVariables(appliedTheme({ themeId: palette, builtTheme: null })),
+          '--tray-surface': TRAY_SURFACES[surface],
+        };
         const ratio = contrastRatio(written['--on-tray'] ?? '', written['--tray-surface'] ?? '');
         expect(
           ratio,

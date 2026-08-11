@@ -17055,33 +17055,6 @@ const j_ = {
     material: ""
   }
 }, fl = {
-  ember: {
-    name: "Ember",
-    category: "Clatter",
-    foreground: "#FFE3B0",
-    background: "#7A2410",
-    outline: "#2A0C05",
-    texture: "none",
-    description: "Ember"
-  },
-  ash: {
-    name: "Ash",
-    category: "Clatter",
-    foreground: "#F2F2F2",
-    background: "#3A3B3E",
-    outline: "#17181A",
-    texture: "none",
-    description: "Ash"
-  },
-  verdigris: {
-    name: "Verdigris",
-    category: "Clatter",
-    foreground: "#EAFBF2",
-    background: "#1D6B5A",
-    outline: "#082720",
-    texture: "none",
-    description: "Verdigris"
-  },
   bone: {
     name: "Bone",
     category: "Clatter",
@@ -17090,24 +17063,6 @@ const j_ = {
     outline: "#B9AA8C",
     texture: "none",
     description: "Bone"
-  },
-  void: {
-    name: "Void",
-    category: "Clatter",
-    foreground: "#C9C4FF",
-    background: "#14121F",
-    outline: "#05040A",
-    texture: "none",
-    description: "Void"
-  },
-  cobalt: {
-    name: "Cobalt",
-    category: "Clatter",
-    foreground: "#DDE8FF",
-    background: "#17387E",
-    outline: "#071431",
-    texture: "none",
-    description: "Cobalt"
   }
 };
 class K_ {
