@@ -947,6 +947,56 @@ body {
   color: var(--ink-dim);
 }
 
+/* ---------------- the five categories of the sheet ----------------
+ *
+ * Research on settings surfaces agrees on three things, and all three apply
+ * here: keep the top-level categories to four or five, group them by what the
+ * player thinks about rather than by what the code holds, and put the
+ * power-user fields behind a disclosure. The sheet holds five categories, and
+ * `src/app.test.tsx` counts them against every control it draws.
+ *
+ * A category that holds ONE group is that group. `sheet-presets` and
+ * `sheet-sound` are therefore cards of their own with no second heading
+ * inside them, which is the rule `src/shell/theme-panel.test.tsx` already
+ * states: a heading inside a heading of the same word says nothing. */
+
+.cat {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0;
+  padding: var(--s2) var(--s3) var(--s3);
+  display: grid;
+  gap: var(--s3);
+  align-content: start;
+}
+
+/* A group inside a category drops its box. The category is the card and the
+   groups are its parts, so a second border around each part would draw a
+   level of importance that is not there. A hairline separates them instead. */
+.cat > .field {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
+.cat > .field + .field {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s2);
+}
+
+/* One heading style for a category, wherever a category is: inside a `.cat`,
+   or on a single group that stands as one directly in the sheet. A category
+   is a heading and a group is a label, so the two read apart by case as well
+   as by size: `SAVED POOLS` beside `Rules` read as two different levels of
+   the same tree. A render caught that, and the suite could not. */
+.cat > legend,
+.sheet > .field > legend {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: var(--ink);
+}
+
 .choice {
   display: flex;
   align-items: center;
@@ -985,6 +1035,50 @@ body {
   color: var(--ink-dim);
   min-width: 6.5em;
   text-align: right;
+}
+
+/* ---------------- the sheet on a desktop ----------------
+ *
+ * A bottom sheet exists to reach a thumb, so it is a phone shape and this
+ * query leaves the phone alone. Above 760 px the same sheet is a centred
+ * dialog and the categories sit in two columns.
+ *
+ * Not a nav rail and not tabs, and the reason is the keyboard. A rail draws
+ * one pane at a time, so a walk from the table switch to the sound switch
+ * would need a pane change first, and `scripts/browser.mjs --sound-controls`
+ * presses exactly that walk. Two columns keep one linear tab order, hold no
+ * state and run no script.
+ *
+ * Rules holds four groups and is the tall category, so it takes the left
+ * column by itself and the other four stack on the right. Reading down the
+ * left column and then the right one is the document order, so the reading
+ * order and the tab order stay the same line.
+ *
+ * ponytail: the row span is the number of categories in the right column.
+ * `src/app.test.tsx` pins the sheet at five categories, so the two numbers
+ * move together. A sixth category needs a rail with panes, and it needs the
+ * `--sound-controls` press counts derived again. */
+@media (min-width: 760px) {
+  .scrim {
+    align-items: center;
+    padding: var(--s3);
+  }
+  .sheet {
+    width: min(880px, 92vw);
+    max-height: 86vh;
+    border-radius: var(--r);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .cat-rules {
+    grid-column: 1;
+    grid-row: 1 / span 4;
+  }
+  /* The way out spans both columns and stays the last child, so it is still
+     the last tab stop of the dialog. */
+  .sheet > .btn.go {
+    grid-column: 1 / -1;
+  }
 }
 
 /* ---------------- the performance overlay, Unit 3.8 ---------------- */

@@ -47,9 +47,8 @@ const ROW_WORDS: Readonly<Record<ThemeId, string>> = {
   oxblood: 'Oxblood',
 };
 
-/** The group of rows, and the words above and below it. */
+/** The rows, and the words under them. The panel above them is their name. */
 export const THEME_ROWS_ELEMENT = 'theme-rows';
-export const THEME_ROWS_LEGEND = 'Colour';
 export const THEME_ROWS_NOTE = 'One colour for the dice, the table and the page.';
 
 /** The words the report opens with when nothing failed. */
@@ -78,8 +77,12 @@ export function refusalText(findings: readonly ContrastFinding[]): string {
  */
 function Rows({ chosen, onChoose }: { chosen: ThemeId; onChoose: (id: ThemeId) => void }) {
   return (
-    <fieldset class="ovr-set" data-el={THEME_ROWS_ELEMENT}>
-      <legend>{THEME_ROWS_LEGEND}</legend>
+    // The rows carry no heading of their own. The panel around them is named
+    // "Theme" and holds nothing else at this level, so a second heading here
+    // put three labels over one set of six radios: the category, the panel and
+    // the rows. `src/app.test.tsx` measures that stack over every control of
+    // the sheet.
+    <div class="ovr-set" data-el={THEME_ROWS_ELEMENT}>
       <div class="thm-rows">
         {THEME_IDS.map((id) => (
           <label key={id} class="choice thm-row">
@@ -103,7 +106,7 @@ function Rows({ chosen, onChoose }: { chosen: ThemeId; onChoose: (id: ThemeId) =
         ))}
       </div>
       <p class="sheet-note">{THEME_ROWS_NOTE}</p>
-    </fieldset>
+    </div>
   );
 }
 
