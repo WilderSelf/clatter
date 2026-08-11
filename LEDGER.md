@@ -6691,6 +6691,352 @@ again anyway, because a claim that nothing moved is worth less than a reading.
 
 **Nothing of Unit 5.2.** It is complete.
 
+## Unit 5.3 — the tray timbre: wooden voice on a leather ground
+
+### What landed
+
+Pull request #25, commit `d84af9c`. The tray voice was tinny and lacked weight. The fix doubled the
+filtering depth and retuned every parameter toward a lower, resonant sound with body beneath each
+knock.
+
+### The old timbre
+
+One band-pass per voice. Die at 2400 Hz with Q 1.6 and 0.05 s decay. Surface at 780 Hz with Q 0.9
+and 0.13 s decay. No energy below approximately 500 Hz and no roll-off above.
+
+### The new timbre
+
+Two band-passes into one low-pass, feeding from a shared noise burst. Die knock at 950 Hz with
+Q 0.7, 0.045 s, and a body at 220 Hz with Q 1.1, totalling 0.075 s, the body at 45 per cent of
+level. Surface knock at 330 Hz with Q 0.8, 0.075 s, and a body at 120 Hz with Q 1.1, totalling
+0.17 s, the body at 75 per cent of level.
+
+`DAMPING_HZ = 1800`, `DAMPING_Q = -3.01`. Web Audio reads Q in decibels for a low-pass and linearly
+for a band-pass. A value of 0.707 there adds a resonant peak at the corner.
+
+A band-pass over white noise passes energy in proportion to `hz / q`, so each band's gain scales by
+`sqrt(BAND_WIDTH_REFERENCE * q / hz)`. `VOICE_GAIN = 3`.
+
+### The gap this closed
+
+`scripts/browser.mjs --sound` measured peak amplitude against `> 0` only. It passed at 1.041782 on
+the tinny sound. The repository held no spectrum measure and no decay profile.
+
+New check: band energy under 1000 Hz against energy over 3000 Hz. Old sound ratio 0.6, new 42.4,
+floor 8. With the low-pass removed entirely the ratio falls to 5.4. Removing the single largest cure
+element turns this check red.
+
+Proven red on the restored old timbre: `FAIL sound.the-low-band-carries-the-sound ... a ratio of 0.6
+against a floor of 8`, `checks=11 failures=1`. Every other check stayed green, peak included.
+
+### Two defects
+
+**Defect 1, found in review.** Swapping the two envelope durations inverted the weight. The test fake
+discarded both ramp arguments and the pure record never caught it. All 467 tests and all 11 browser
+checks stayed green. Fixed by recording each ramp end and finding each band by its centre frequency.
+Build order would still pass the swap because exchanging two durations leaves the same two lengths in
+the same graph.
+
+**Defect 2, caught by the spectrum check.** The check proved red on the restored old timbre and could
+not have been written without remeasuring the decay.
+
+### Reported, not fixed
+
+The sound itself stays owner judgement. A band-energy floor proves the timbre is not tinny. It does
+not prove the sound is good.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npm test` | 467 vitest tests, exit 0 |
+| `npm run build` | exit 0 |
+| Branding gate | `files_scanned=160 hits=0` exit 0 |
+| `--sound` | `checks=11 failures=0` |
+
+### What is open
+
+Nothing of Unit 5.3. It is complete.
+
+## Unit 5.4 — marks timing: hold the readout until the tray settles
+
+### What landed
+
+Pull request #26, commit `3d9c1d6`. Bane and success marks appeared before the dice stopped rolling
+on a push, because every mark surface read `state.result`, which the reducer set in the same call
+that started the throw.
+
+### The root cause
+
+The first roll had the identical defect and was merely invisible because the table stayed hidden
+behind the pool builder. The fix went in the shared path, not the push path.
+
+### The fix
+
+Added `AppState.settledOrdinal`, a `withSettled` action carrying the ordinal, and a `stillTumbling`
+predicate. The flat renderer waits zero frames because the predicate reads the renderer state.
+
+### First wall-clock readings the project holds
+
+Cold profile, three runs each:
+
+| Measurement | Hardware | Software |
+|---|---|---|
+| Press to mounted tray | 565 / 596 / 638 ms | 582 / 790 / 960 ms |
+| Press to rest | 3903 / 3985 / 4083 ms | 4206 / 4269 / 5508 ms |
+
+These numbers are not in `budgets.json` and nothing gates them. The original five-second bound
+started at the press and fired before the dice stopped on the slowest run. The fix changed what the
+bound covers rather than the number. A mounted tray reports rest on every path, so the bound now
+covers the mount alone and clears when the tray mounts.
+
+A second guard was needed and the ordinal alone did not supply it. A table that has left the document
+now reports nothing.
+
+### The six red-proofs
+
+Each injection landed and every file was restored by editing the injection back. The SHA-256 of each
+restored file matches the reading taken before its injection.
+
+1. Settle dispatch deleted — `expected 0 to be 1`
+2. Result arm deleted — marks appeared at press
+3. Live guard deleted — marks appeared at press on a push
+4. Mount gate deleted — marks appeared before mount
+5. Ordinal ignored — marks appeared at press
+6. Label gate deleted — marks appeared at press
+
+The `--a11y` harness reads the live region two frames after the press. The harness moved to rest. The
+announcement did not move, so the eye and the screen reader receive the result in the same render.
+
+### Reported, not fixed
+
+The roll-log write still fires at commit. A log is a record rather than a live readout. The share
+card can still print a final result over a frame of tumbling dice. That belongs to the card's own
+unit.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npm test` | exit 0 |
+| `npm run build` | exit 0 |
+| Branding gate | `files_scanned=160 hits=0` exit 0 |
+| `--a11y` | `checks=14 failures=0` |
+
+### What is open
+
+Nothing of Unit 5.4. It is complete.
+
+## Unit 5.5 — theme consolidation: one colour, weathered mood
+
+### What landed
+
+Pull request #27, commit `7daebd1`. The owner asked to simplify themes from three independent axes
+to one colour choice that drives the dice, the tray and the interface together.
+
+### The palette
+
+Three axes and 216 combinations collapsed to one id. Six ids: `leather` (default), `ash`, `moss`,
+`bone`, `iron`, `oxblood`. Every row retuned toward a weathered, low-fantasy mood with muted
+saturation and limited lightness spread.
+
+Rows were generated offline through the existing colour builder from one seed pair each, then pasted
+as literals. This keeps the file's own rule that every colour is a literal.
+
+`SETTINGS_VERSION` 8 to 9. The stored interface palette id wins because it is the id the player saw
+on every pixel of the page.
+
+### Two tests deleted rather than rewritten
+
+"Text contrast does not move when the dice or tray axis moves" and "follows each axis on its own".
+One axis makes both true by construction. Neither can fail again. A rewritten shell would be worse
+than nothing.
+
+### Contrast floor check
+
+No contrast floor moved. Measured margins on the new rows: tightest text pair 5.01 against 4.5,
+tightest die on tray 3.42 against 3, tightest ink 4.52 against 4, tightest ladder step 8.59 against 8.
+
+### Two defects caught by rendering
+
+The panel printed the legend "Theme" twice. The row swatch showed the accent alone, so the one light
+theme read dark. Both now carry checks proven red.
+
+### The tray surface band
+
+Measured, not stated: the six surfaces span 0.55 CIE L\*, from 12.71 to 13.26.
+
+### Governing decisions
+
+The approved plan at `~/.claude/plans/clatter.md` and the repository `CLAUDE.md` both carry a dated
+amendment. `docs/design/0002-screen-design.md` carries one too.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npm test` | exit 0 |
+| `npm run build` | exit 0 |
+| Branding gate | `files_scanned=160 hits=0` exit 0 |
+| `--theme` | `checks=10 failures=0` |
+
+### What is open
+
+Nothing of Unit 5.5. It is complete.
+
+## Unit 5.6 — options sheet layout: five categories, desktop width
+
+### What landed
+
+Pull request #28, commit `7ed7493`. The desktop options menu was too narrow and its controls were
+badly grouped. The redesign splits them into five logical categories and opens the dialog to desktop
+width.
+
+### Before and after
+
+Before: `width: min(520px, 100%)` with no media query, holding twelve top-level children including
+three ungrouped controls.
+
+After: five categories — Rules, Saved pools, Look, Sound, Session and data. At 760 px and up, a
+centred dialog at `min(880px, 92vw)` in a two-column grid. The phone bottom sheet is unchanged.
+
+### The nav rail case
+
+A nav rail was rejected for a measured reason. The browser harness pins the tab traversal between
+the renderer switch and the sound controls. Separate panes make that traversal impossible. Tab-stop
+counts are unchanged at 1 press each and no bound was widened.
+
+### The scroll trap
+
+The sheet opened scrolled to its own bottom because focusing the close button scrolled it into view.
+Measured at 969 px of scroll at 1440 and 2824 px at 360, with the first category at -889 px. Fixed
+with `preventScroll`.
+
+### Two correct fixes composed into a defect
+
+Pull request #27 renamed an inner legend so "Theme" would not sit inside "Theme". This unit then
+wrapped that panel in a category called "Look". Three headings stacked over one set of six radios.
+The existing check could not see it because it only compared an inner legend against its outer one.
+
+The replacement rule carries no depth number: a group earns its heading by holding a control of its
+own. Only the five categories may hold nothing but groups. The redundant level is exactly the level
+with no member.
+
+### Four checks replaced
+
+Four checks could not fail and were replaced before merge: a positive-count arm that stayed green
+while a category jumped column and broke reading order, an inert arm comparing 1440 against 360, a
+failure message whose conclusion contradicted its own numbers, and two floors of 13 and 20 against
+real counts of 46 and 19.
+
+The equality that replaced those floors went red on its own first run because a heading count had
+been retyped from a red-proof run. A floor of `> 10` would have passed it.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npm test` | exit 0 |
+| `npm run build` | exit 0 |
+| Branding gate | `files_scanned=160 hits=0` exit 0 |
+| `--sheet` | `checks=11 failures=0` |
+
+### What is open
+
+Nothing of Unit 5.6. It is complete.
+
+## Unit 5.7 — material grain: light texture everywhere
+
+### What landed
+
+Pull request #29, commit `f900464`. The owner asked for no flat colours. A light texture now sits on
+every surface, slight but noticeable.
+
+### The implementation
+
+One SVG turbulence noise as a data URI, varied per surface by tile size, blended with `soft-light`.
+The 3D dice take the wood material and a procedurally generated grain composited into the face canvas
+the library already builds. No patch to the vendored library.
+
+### Budget impact
+
+The twelve-die texture counter did not move. Initial JavaScript rose by approximately 400 gzip bytes.
+Both measurements sit under their ceilings in `budgets.json`.
+
+### The tray surface is not a 3D material
+
+This is load-bearing for later readers: the tray surface is the CSS background of the container
+element. The three.js desk is a shadow catcher that paints no colour.
+
+### A drift gate that failed
+
+An invented gate said average brightness must not move. It failed on 16 of 18 readings because
+`soft-light` is not symmetric and lifts a dark ground 7 to 9 levels out of 255. The gate was
+abandoned rather than loosened. It was replaced by a rendered-pixel ink contrast claim: tightest
+9.97 against 4.5.
+
+### Two probe defects
+
+**Defect 1.** A first dice probe sampled a 24 px window against a 36 px coarse octave and read 8
+levels of a promised 44. The probe was smaller than the feature it measured. Widened, then
+re-derived rather than nudged.
+
+**Defect 2.** The probe was smaller than the feature it measured. This is the same defect named
+twice. It belongs under one heading.
+
+### Marker colour binding
+
+The lock markers now follow the theme. The success and bane pair read 1.00 to 1 against each other in
+every row. Hue carries their whole separation and they must stay fixed. The lock pair read 2.69 to 1,
+separated by lightness. Their hue was free. `rule` takes `line`, `choice` takes `onTray`. Worst over
+36 marker and surface pairings: rule 3.53 to 1, choice 12.91 to 1, pair 3.63.
+
+### A gate widened by director instruction
+
+A gate widened by director instruction was reverted before merge. A reviewer proved the original check
+passed against the new stylesheet. The widening bought nothing and would have admitted a
+near-opaque white wash over every palette.
+
+### The noise data URI
+
+The noise data URI could carry a hue the literal gate could not read. Closed by percent-decoding
+before the scan.
+
+### Two findings that remain open
+
+Both live on branch `feat/grain-covers-every-ground`, in progress.
+
+**Finding 1: The grain coverage check counts its own fixture.** The stylesheet grains 18 selectors.
+The check named three. Thirteen grained selectors can be deleted while it still reports success. Of
+48 ground-painting selectors, 31 stay flat today.
+
+**Finding 2: The 90 rendered contrast claims resolve their ground through computed style**, which no
+longer equals the painted pixels. One reading needs confirming: a filled control in one row measured
+2.797 on its worst pixel against a floor of 3, with a mean of 3.456.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npm test` | exit 0 |
+| `npm run build` | exit 0 |
+| Branding gate | `files_scanned=160 hits=0` exit 0 |
+| `--theme` | `checks=10 failures=0` |
+
+### What is open
+
+Two findings remain open on a follow-up branch. Unit 5.7 is otherwise complete.
+
 ## What the owner still owes, across the whole project
 
 Every unit an agent can close is closed. Six items remain and no agent can take one.
