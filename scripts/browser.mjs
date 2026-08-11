@@ -10075,6 +10075,183 @@ async function typeSeed(page, element, seed) {
 }
 
 /** Read every role probe, each against the first ancestor that paints a ground. */
+/**
+ * The luminance of the pixels each role really paints, off two frames.
+ *
+ * **The grain moved what a ground IS.** Before Unit 4.12 the computed
+ * `background-color` of an ancestor was the colour under the ink at every
+ * pixel, so one reading answered the whole claim. A grained ground is a
+ * distribution instead, and the tightest pixel of it is not the average. A
+ * check that kept reading the computed value would be blind to exactly the
+ * dimension the grain added.
+ *
+ * One frame is the screen as a player sees it. The second paints every element
+ * a claim depends on in a colour of its own, with the grain off, so a pixel
+ * says which element owns it. A child covers its parent in that frame exactly
+ * as it does on the screen, so a ground's own pixels are the ones a player can
+ * still see. An edge pixel blends two markers, matches neither, and is dropped,
+ * which is right: a blended pixel measures the antialiasing.
+ *
+ * Every marked element answers with the darkest, the lightest and the mean
+ * luminance of its own pixels, so the caller can pair the two extremes that
+ * make the worst case rather than the two averages.
+ */
+async function readPaintedSpans(page, selectors) {
+  // Seven colours, and no more: a marker is a full-strength primary or a mix of
+  // them, so no two are nearer than 255 levels on some channel and a blended
+  // edge cannot land on a third. A longer list is marked in several passes.
+  const chunks = [];
+  for (let at = 0; at < selectors.length; at += 7) chunks.push(selectors.slice(at, at + 7));
+  const plain = await page.screenshot({ type: 'png', encoding: 'base64' });
+  const answer = [];
+  for (const chunk of chunks) {
+    answer.push(...((await readOneMarkerPass(page, chunk, plain)) ?? []));
+  }
+  return answer.length === selectors.length ? answer : null;
+}
+
+async function readOneMarkerPass(page, selectors, plain) {
+  const marks = selectors.map((selector, at) => ({
+    selector,
+    colour: [((at + 1) & 1) * 255, (((at + 1) >> 1) & 1) * 255, (((at + 1) >> 2) & 1) * 255],
+  }));
+  await page.evaluate((list) => {
+    document.getElementById('clatter-mark-grounds')?.remove();
+    const style = document.createElement('style');
+    style.id = 'clatter-mark-grounds';
+    // The caller has already put `data-grain-role` on every element a claim
+    // depends on, so nothing is resolved twice and the marker lands on exactly
+    // the element the reading belongs to.
+    style.textContent = list
+      .map(
+        (one) =>
+          `[data-grain-role='${one.selector}'] { background-image: none !important; ` +
+          `background-color: rgb(${one.colour.join(' ')}) !important; }`,
+      )
+      .join('\n');
+    document.head.append(style);
+  }, marks);
+  const marked = await page.screenshot({ type: 'png', encoding: 'base64' });
+  await page.evaluate(() => document.getElementById('clatter-mark-grounds')?.remove());
+
+  return page.evaluate(
+    async ({ plain, marked, marks }) => {
+      const pixels = async (encoded) => {
+        const blob = await (await fetch(`data:image/png;base64,${encoded}`)).blob();
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext('2d');
+        context.drawImage(bitmap, 0, 0);
+        return context.getImageData(0, 0, canvas.width, canvas.height).data;
+      };
+      const seen = await pixels(plain);
+      const owner = await pixels(marked);
+      if (seen.length !== owner.length || seen.length === 0) return null;
+      const toLinear = (byte) => {
+        const value = byte / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      };
+      const answer = marks.map((one) => ({
+        selector: one.selector,
+        own: 0,
+        min: Infinity,
+        max: -Infinity,
+        total: 0,
+      }));
+      for (let at = 0; at < seen.length; at += 4) {
+        const found = marks.findIndex(
+          (one) =>
+            Math.abs(owner[at] - one.colour[0]) <= 2 &&
+            Math.abs(owner[at + 1] - one.colour[1]) <= 2 &&
+            Math.abs(owner[at + 2] - one.colour[2]) <= 2,
+        );
+        if (found === -1) continue;
+        const y =
+          0.2126 * toLinear(seen[at]) +
+          0.7152 * toLinear(seen[at + 1]) +
+          0.0722 * toLinear(seen[at + 2]);
+        const row = answer[found];
+        row.own += 1;
+        row.total += y;
+        if (y < row.min) row.min = y;
+        if (y > row.max) row.max = y;
+      }
+      return answer.map((row) =>
+        row.own === 0
+          ? { ...row, min: null, max: null, mean: null }
+          : { ...row, mean: row.total / row.own },
+      );
+    },
+    { plain, marked, marks },
+  );
+}
+
+/**
+ * The worst contrast between two painted things, in relative luminance.
+ *
+ * A span is `{ min, max }` and a flat colour is a span with one value. The
+ * worst pair is the two ends that face each other, so an ink lighter than its
+ * ground is measured at its own darkest against the ground at its lightest. Two
+ * spans that overlap answer 1, because some pixel of one equals some pixel of
+ * the other and there is nothing between them at all.
+ */
+function worstSpanRatio(ink, ground) {
+  if (ink.min === null || ground.min === null) return null;
+  const ratio = (one, two) => (Math.max(one, two) + 0.05) / (Math.min(one, two) + 0.05);
+  if (ink.min > ground.max) return ratio(ink.min, ground.max);
+  if (ink.max < ground.min) return ratio(ink.max, ground.min);
+  return 1;
+}
+
+/**
+ * Tag every element a contrast claim depends on, and say which were tagged.
+ *
+ * The ground of a probe is the first ancestor that really paints one, resolved
+ * exactly as `readPaints` resolves it, so the two readings name one element.
+ * The INK is tagged as well wherever the ink is itself a painted ground — a
+ * mark, a filled button — because the grain landed on those too and their own
+ * pixels are a span rather than a colour. A text ink and a border keep their
+ * computed colour: a glyph edge and a one-pixel border are antialiased, so a
+ * pixel read there would measure the blend rather than the ink.
+ */
+async function tagRoleSurfaces(page, probes) {
+  return page.evaluate((list) => {
+    const groundOf = (each, self) => {
+      const start = self ? each : each.parentElement;
+      for (let at = start; at !== null; at = at.parentElement) {
+        const paint = getComputedStyle(at).backgroundColor;
+        if (paint !== 'transparent' && !/,\s*0\)$/.test(paint)) return at;
+      }
+      return document.body;
+    };
+    const names = [];
+    // **One element takes one name.** A filled button is the ground of its own
+    // label and the ink of its own claim, so two probes meet on it. A second
+    // attribute would overwrite the first and lose a reading, so the element
+    // keeps the name it already has and both probes point at that name.
+    const nameOf = (element) => {
+      const held = element.getAttribute('data-grain-role');
+      if (held !== null) return held;
+      const fresh = `s${names.length}`;
+      element.setAttribute('data-grain-role', fresh);
+      names.push(fresh);
+      return fresh;
+    };
+    const mapped = list.map((probe) => {
+      const found = document.querySelector(probe.selector);
+      if (found === null) return { ground: null, ink: null };
+      const ground = groundOf(found, probe.self === true && probe.prop !== 'backgroundColor');
+      return {
+        ground: ground === null ? null : nameOf(ground),
+        ink: probe.prop === 'backgroundColor' ? nameOf(found) : null,
+      };
+    });
+    return { names, probes: mapped };
+  }, probes);
+}
+
 async function readPaints(page, probes) {
   return page.evaluate((list) => {
     const groundOf = (each, self) => {
@@ -10493,7 +10670,7 @@ async function probeGrain(page, selectors) {
  * because the surface a player judges is the surface when it is shown and not
  * when it is empty. A ground no state produced is named and fails.
  */
-async function runGroundCoverage(page, checks) {
+async function runGroundCoverage(page, checks, options = { captureShell: null }) {
   const css = styleSheetText();
   const population = groundSelectors(css);
   const rules = grainRules(css);
@@ -10568,6 +10745,45 @@ async function runGroundCoverage(page, checks) {
   await page.click('[data-el="statistics-button"]');
   await settleScreen(page);
   await sweep('the statistics');
+
+  // The captures. The newly grained surfaces are small controls — notches,
+  // slots, bars, glyphs and a dot — and a green gate says nothing about whether
+  // a grain on one of those reads as material or as damage. The two rows are
+  // the dark default and the one light row, because a soft-light grain is not
+  // symmetric and a light ground is the case a dark one does not cover.
+  if (options.captureShell !== null) {
+    // Back out of the statistics and then out of the history, so the loop below
+    // starts on the dice screen, which is where the one disclosure lives.
+    const backToDice = async () => {
+      for (let step = 0; step < 3; step += 1) {
+        if ((await page.$('[data-el="history"]')) === null) return;
+        await page.click('[data-el="back-button"]');
+        await settleScreen(page);
+      }
+    };
+    await backToDice();
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+    for (const id of ['leather', 'bone']) {
+      await openSheet(page);
+      await chooseThemeRow(page, id);
+      await closeSheet(page);
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0024-grain-dice-${id}-1440.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+      await openHistory(page);
+      await page.click('[data-el="statistics-button"]');
+      await settleScreen(page);
+      await new Promise((done) => setTimeout(done, 200));
+      writeFileSync(
+        join(options.captureShell, `0024-grain-statistics-${id}-1440.png`),
+        await page.screenshot({ type: 'png' }),
+      );
+      await backToDice();
+    }
+    console.log(`browser: theme grounds captures written to ${options.captureShell}`);
+  }
 
   // The grain on the grounds no state drew, from the cascade rather than from a
   // drawn element. The box of those stays unknown on purpose.
@@ -11004,35 +11220,87 @@ async function runTheme(page, options, checks) {
   await openSheet(page);
   let measured = 0;
   let tightest = { ratio: Infinity, said: '' };
+  let tightestMean = { ratio: Infinity, said: '' };
   const absent = [];
   const under = [];
+  const underPixel = [];
+  let pixelUnmeasured = 0;
+  const worstPerRole = new Map();
   for (const id of NAMES) {
     await chooseThemeRow(page, id);
     await closeSheet(page);
     const paints = await readPaints(page, ROLE_PROBES);
-    for (const paint of paints) {
+    // Every element a claim of this theme depends on, tagged once and read off
+    // the pixels the browser drew. The ink is a span as well wherever the ink
+    // IS a ground — a mark, a filled button — because the grain moved those too.
+    const tagged = await tagRoleSurfaces(page, ROLE_PROBES);
+    const spans = tagged.names.length === 0 ? [] : await readPaintedSpans(page, tagged.names);
+    const spanOf = new Map((spans ?? []).map((one) => [one.selector, one]));
+    for (const [at, paint] of paints.entries()) {
       if (paint.missing) {
         absent.push(`${id}: ${paint.name}`);
         continue;
       }
-      const ratio = ratioOfRgb(paint.ink, paint.ground);
-      if (ratio === null || ratio < paint.floor) {
+      const groundSpan = spanOf.get(tagged.probes[at]?.ground ?? '');
+      const inkSpan = spanOf.get(tagged.probes[at]?.ink ?? '') ?? null;
+      const inkY = luminanceOfRgb(paint.ink);
+      const ink = inkSpan ?? { min: inkY, max: inkY };
+      const ground = groundSpan ?? { min: null, max: null };
+      const ratio = worstSpanRatio(ink, ground);
+      const mean = ratioOfRgb(paint.ink, paint.ground);
+      // **The GATE stays the claim WCAG states.** SC 1.4.3 and SC 1.4.11 pair
+      // one foreground colour with one background colour, and the resolved
+      // ground is that colour. The worst pixel of a grained ground is a
+      // different quantity and WCAG names no floor for it, so it is measured
+      // and reported here and it gates nothing. Inventing a floor for it would
+      // be this file choosing a number the owner never set.
+      if (mean === null || mean < paint.floor) {
         under.push(
-          `${id}: ${paint.name} reads ${ratio === null ? 'nothing' : ratio.toFixed(2)} to 1 ` +
+          `${id}: ${paint.name} reads ${mean === null ? 'nothing' : mean.toFixed(3)} to 1 ` +
             `against ${paint.ground} and must reach ${paint.floor}`,
         );
+      }
+      if (ratio === null) pixelUnmeasured += 1;
+      else if (ratio < paint.floor) {
+        underPixel.push(
+          `${id}: ${paint.name} reads ${ratio.toFixed(3)} to 1 on its worst pixel pair ` +
+            `against a floor of ${paint.floor}, where the resolved pair reads ` +
+            `${mean === null ? 'nothing' : mean.toFixed(3)}`,
+        );
+      }
+      const held = worstPerRole.get(paint.name);
+      if (ratio !== null && (held === undefined || ratio < held.ratio)) {
+        worstPerRole.set(paint.name, { ratio, id, floor: paint.floor, mean });
       }
       if (ratio !== null && ratio < tightest.ratio) {
         tightest = { ratio, said: `${id} ${paint.name}` };
       }
+      if (mean !== null && mean < tightestMean.ratio) {
+        tightestMean = { ratio: mean, said: `${id} ${paint.name}` };
+      }
       measured += 1;
     }
+    await page.evaluate(() => {
+      for (const one of document.querySelectorAll('[data-grain-role]')) {
+        one.removeAttribute('data-grain-role');
+      }
+    });
     await openSheet(page);
   }
   console.log(
     `browser: theme contrast measured=${measured} absent=${absent.length} ` +
-      `under=${under.length} tightest=${tightest.ratio.toFixed(2)} (${tightest.said})`,
+      `under=${under.length} tightest_resolved=${tightestMean.ratio.toFixed(3)} ` +
+      `(${tightestMean.said}) tightest_pixel=${tightest.ratio.toFixed(3)} (${tightest.said}) ` +
+      `under_on_worst_pixel=${underPixel.length} pixel_unmeasured=${pixelUnmeasured} ` +
+      `REPORTED AND NOT GATED`,
   );
+  for (const [role, held] of [...worstPerRole].sort((one, two) => one[1].ratio - two[1].ratio)) {
+    console.log(
+      `browser: theme contrast worst-pixel ${role}: ${held.ratio.toFixed(3)} to 1 on ${held.id}, ` +
+        `floor ${held.floor}, resolved pair ${held.mean === null ? 'none' : held.mean.toFixed(3)}` +
+        `${held.ratio < held.floor ? ' UNDER THE FLOOR' : ''}`,
+    );
+  }
   checks.push({
     name: 'theme.every-contrast-claim-holds-on-the-rendered-screen',
     ok: measured === NAMES.length * ROLE_PROBES.length && absent.length === 0 && under.length === 0,
@@ -11041,9 +11309,16 @@ async function runTheme(page, options, checks) {
       `${ROLE_PROBES.length} roles the screen paints. Every ink came off the rendered element ` +
       `and every ground off the first ancestor that really paints one. ${absent.length} roles ` +
       `were not on the screen [${absent.join('; ')}] and ${under.length} missed a floor ` +
-      `[${under.join('; ')}]. The tightest reading is ${tightest.ratio.toFixed(2)} to 1 on ` +
-      `${tightest.said}, against 4.5 for text and 3 for a graphical object, which are WCAG 2.2 ` +
-      `SC 1.4.3 and SC 1.4.11.`,
+      `[${under.join('; ')}]. The tightest reading is ${tightestMean.ratio.toFixed(3)} to 1 on ` +
+      `${tightestMean.said}, against 4.5 for text and 3 for a graphical object, which are WCAG ` +
+      `2.2 SC 1.4.3 and SC 1.4.11. ` +
+      `**The grain made every ground a distribution, and that is measured beside this.** Each ` +
+      `claim is read a second time off the pixels the browser drew, pairing the two ends that ` +
+      `face each other, and ${underPixel.length} of the ${measured} fall under their floor that ` +
+      `way while ${pixelUnmeasured} paint no pixel to read. That reading is REPORTED AND NOT ` +
+      `GATED: WCAG pairs one foreground colour with one background colour and names no floor ` +
+      `for the worst pixel of a texture, so a gate on it would be a number this file chose. ` +
+      `The worst per role is printed above. [${underPixel.join('; ')}]`,
   });
 
   // ---- 5. Keyboard alone reaches every control, and changes the screen. ----
@@ -11208,7 +11483,7 @@ async function runTheme(page, options, checks) {
   });
 
   // ---- 9. Every ground the stylesheet paints is covered, or says why. ----
-  await runGroundCoverage(page, checks);
+  await runGroundCoverage(page, checks, options);
 
   // ---- The captures. A green suite is blind to a screen that looks wrong. ----
   if (options.captureShell !== null) {
