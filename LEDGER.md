@@ -7042,6 +7042,94 @@ longer equals the painted pixels. One reading needs confirming: a filled control
 
 Two findings remain open on a follow-up branch. Unit 6.5 is otherwise complete.
 
+## Unit 6.6 — ground coverage gate: every painted surface holds its grain
+
+### What landed
+
+Pull request #31, commit `TBD`. Unit 6.5 left the grain coverage check naming only three selectors out of 48 that paint a ground. Deleting a grained selector left the check green. A denominator drawn from the set under test cannot find a missing member.
+
+This unit replaces that check with a gate that reads 48 named selectors, classifies each one on three arms, and fails when any go uncovered.
+
+### The population and the arms
+
+The stylesheet holds 48 rules in `src/shell.css` that paint a background colour. The gate examines every one.
+
+Each rule passes on one of three arms. The rule is grained. The painted box is under the feature size of the grain that would apply to it, so the grain cannot be seen. The rule marks meaning, such as a success or bane mark, and texture there would obscure shape.
+
+One declared exception exists: `.die`. Final reading across all 48: 42 grained, 1 excused by size, 4 meaning marks, 1 declared exception, 0 uncovered.
+
+### The octave arithmetic and the size arm
+
+`baseFrequency 0.16` gives a wavelength of 6.25 user units over a 180 unit tile. Each rule's own `background-size` stretches it.
+
+On the page it reads 10.42 px. On a panel it reads 3.13 px. On the table it reads 15.97 by 3.19 px. Both numbers come out of the `--texture-noise` declaration and neither is retyped. The wavelength is `(zoom * baseFrequency * tile) / baseFrequency`, which simplifies to `zoom * tile`. A tile of 180 gives a wavelength of 180 * zoom.
+
+`GRAIN_OCTAVES` describes the die grain in a different generator. This gate does not read it. That choice stays declared.
+
+### Five injections proved red
+
+Each landed and every file was restored by editing the injection back. The SHA-256 of each restored file matches the reading taken before its injection.
+
+1. A grained selector loses its grain — cut `.chart`, the population stays 48, the gate names `.chart`, exit 1
+2. A new ground matches no arm — the population rises 48 to 49, the gate names it, exit 1
+3. The exception goes stale — grain `.die`, all 48 are covered, the gate fires on staleness alone with `uncovered=0`, exit 1
+4. A second exception appears — the count arm fires at `exceptions=2 of 1`, exit 1
+5. A zero box no longer excuses a member — delete the grain from `.table` and the gate reads `uncovered=1 [.table at 0.0x0.0 px]`, exit 1
+
+Red proof 5 closed a live hole. The size arm decided "was this drawn" by asking whether any state produced a reading, rather than whether the box had a size. Zero is under every feature size. `.table` lays out at 0 by 0 whenever a run refuses WebGL. This is how the gate runs in CI. The largest surface in the product could lose its grain while the gate stayed green. A reviewer found it and measured it twice.
+
+### A fourth arm was built, measured and deleted
+
+An arm would have excused an element already carrying its own background image. The measurement returned `own_image=0`. No member claimed it. An arm nothing claims reads as coverage it does not give.
+
+### The size arm is declared, not derived
+
+The gate samples states after a throw. The pool draws from `crypto.getRandomValues` under Constraint 7. A tray seed cannot pin it. The arm therefore names its one member, `.st-rule`, one pixel wide in the status line, and asserts both directions. Five runs of the CI command read identically.
+
+### Source and built stylesheets now agree as a subset
+
+The built file holds 54 rules to the source's 48. The minifier drops attribute-selector quotes and rewrites `transparent`. A count would have raised a false alarm forever. The gate reads by name and stays immune.
+
+### A new browser mode and a CI step
+
+`--grounds` runs the gate with no graphics card. It judges no renderer and skips nothing. It asserts that its own refusal of WebGL landed. CI gained one step beside the accessibility walk. Before this, CI ran the accessibility walk and nothing else from the harness, so `--theme` had never gated a merge. CI has since run the gate green on a hosted runner. Cutting one grained selector under the exact CI command gives exit 1.
+
+### A probe constant re-derived across three units
+
+The keyboard walk required the theme panel to hold at least three inner groups. Unit 4.8 set it at 5. The theme collapse re-derived it to 3. The options sheet then removed a legend so the panel holds 2. It is now a named list of the two groups it requires. A group that disappears is named in the failure rather than turning a number by one.
+
+### Twenty-nine more grounds carry the grain
+
+`.die` does not. Graining it deleted every pip because the six face rules own `background-image` and `.pips` sizes every layer. The render caught it and the change was reverted. The reason already sat in a `ponytail:` comment above that rule.
+
+### Reported, not fixed
+
+**Six of the ninety rendered contrast claims paint no pixel at all.** A readout drawn inside a table that carries `hidden` still answers `getComputedStyle`. A check that shipped earlier reports 13.0 to 1 in all six themes for something no player sees. The pixel reading exposed it. This is a defect in that earlier check.
+
+**Eleven of the ninety fall under their floor on the worst pixel.** Four roles account for all eleven: the edge of a die, the edge of a card, the filled button itself, and the edge of a button. Worst reading 2.212 to 1 against a floor of 3. Every resolved colour pair clears its floor. The gate reports and does not judge because the accessibility standard pairs two colours and names no floor for the worst pixel of a texture. Inventing one would be a number this repository chose.
+
+**An owner decision is open.** A filled control in one row measures 2.761 on its worst pixel against a floor of 3, with a resolved pair of 3.890. Three options are priced: accept and state the number, lift that row's accent by about five points of CIE lightness, or exempt filled controls from the grain. The third contradicts the owner's own instruction that no colour stays flat. Do not pick one.
+
+**A flake now has a name.** `shell.the-keyboard-order-after-the-throw` fails about twice in twelve runs. A browser gives a scrollable region its own tab stop. The check classifies zero such stops so it counts one as an authored visit. The middle region only overflows on a large pool. It predates this unit and two agents independently confirmed this unit cannot reach it.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npm test` | exit 0 over 44 files and 487 tests, branding gate at `hits=0` |
+| `npm run build` | exit 0 |
+| Branding gate | `files_scanned=160 hits=0` exit 0 |
+| `--grounds --no-webgl` | `checks=4 failures=0 skipped=0`, stable over five runs |
+| `--theme --hardware` | `checks=12 failures=0` |
+| `--table --hardware` | `checks=10 failures=0` |
+| `--shell --hardware` | exit 1 on the named pre-existing flake |
+
+### What is open
+
+Nothing of Unit 6.6. It is complete.
+
 ## What the owner still owes, across the whole project
 
 Every unit an agent can close is closed. Six items remain and no agent can take one.
