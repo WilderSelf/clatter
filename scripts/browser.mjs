@@ -10535,9 +10535,14 @@ async function runSheet(page, options, checks) {
   // be a number copied out of the stylesheet, so it is a proportion of the
   // window the dialog was given.
   const wideShare = wide.width / wide.viewportWidth;
+  // Centred, said as a measurement rather than as a word: the room above the
+  // dialog equals the room below it. A bottom sheet has room above and none
+  // below, so it cannot pass this by standing tall enough to reach the top.
+  const wideOffCentre = Math.abs(wide.top - (wide.viewportHeight - wide.bottom));
   console.log(
     `browser: sheet layout 1440=[width=${wide.width} share=${wideShare.toFixed(2)} ` +
-      `top=${wide.top} groups=${wide.groups.length} columns=${wideColumns} ` +
+      `top=${wide.top} off_centre=${wideOffCentre} groups=${wide.groups.length} ` +
+      `columns=${wideColumns} ` +
       `side_by_side=${widePairs}] 360=[width=${narrow.width} top=${narrow.top} ` +
       `bottom=${narrow.bottom} of ${narrow.viewportHeight} groups=${narrow.groups.length} ` +
       `columns=${narrowColumns} side_by_side=${narrowPairs}]`,
@@ -10554,15 +10559,16 @@ async function runSheet(page, options, checks) {
       widePairs > 0 &&
       wide.width > narrow.width &&
       wideShare >= 0.5 &&
-      wide.top > 0 &&
+      wideOffCentre <= 2 &&
       narrowColumns === 1 &&
       narrowPairs === 0 &&
       narrow.bottom >= narrow.viewportHeight - 1,
     detail:
       `at 1440 the dialog measures ${wide.width} px, which is ${(wideShare * 100).toFixed(0)} ` +
       `per cent of the window, and its ${wide.groups.length} categories stand at ` +
-      `${wideColumns} different left edges with ${widePairs} pairs of them side by side. Its ` +
-      `top edge is at ${wide.top} px, so it is centred and not sitting on the bottom edge. At ` +
+      `${wideColumns} different left edges with ${widePairs} pairs of them side by side. It ` +
+      `leaves ${wide.top} px above it and ${wide.viewportHeight - wide.bottom} px below it, ` +
+      `so it is ${wideOffCentre} px off centre against a bound of 2. At ` +
       `360 the same ${narrow.groups.length} categories measure ${narrow.width} px at ` +
       `${narrowColumns} left edge with ${narrowPairs} pairs side by side, and the sheet bottom ` +
       `is at ${narrow.bottom} of ${narrow.viewportHeight} px, so the phone still meets a bottom ` +
