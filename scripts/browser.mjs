@@ -10556,29 +10556,42 @@ async function runSheet(page, options, checks) {
   for (const group of wide.groups) {
     console.log(`browser: sheet layout 1440 ${group.name} left=${group.left} top=${group.top}`);
   }
+  // One category stands in the left column and every other one stacks in the
+  // right, so the tall one is beside each of the rest and nothing else is
+  // beside anything. That is one pair per category less the tall one, and it
+  // is the arrangement the tab order depends on: reading down the left column
+  // and then the right is the document order only while the split is that one.
+  // A positive count is not enough. A row span of two leaves three pairs, puts
+  // a category from the foot of the document at the head of the left column,
+  // and parts the reading order from the tab order while still reading
+  // "some pairs are side by side".
+  const wantedPairs = wide.groups.length - 1;
+  // Said in words that follow the numbers, because a failure is read under
+  // pressure and a fixed sentence would report the layout it was written for.
+  const phoneHolds =
+    narrowColumns === 1 && narrowPairs === 0 && narrow.bottom >= narrow.viewportHeight - 1;
   checks.push({
     name: 'sheet.the-desktop-dialog-lays-its-categories-in-columns-and-the-phone-does-not',
     ok:
       wide.groups.length >= 4 &&
       wide.groups.length === narrow.groups.length &&
       wideColumns === 2 &&
-      widePairs > 0 &&
-      wide.width > narrow.width &&
+      widePairs === wantedPairs &&
       wideShare >= 0.5 &&
       wideOffCentre <= 2 &&
-      narrowColumns === 1 &&
-      narrowPairs === 0 &&
-      narrow.bottom >= narrow.viewportHeight - 1,
+      phoneHolds,
     detail:
       `at 1440 the dialog measures ${wide.width} px, which is ${(wideShare * 100).toFixed(0)} ` +
-      `per cent of the window, and its ${wide.groups.length} categories stand at ` +
-      `${wideColumns} different left edges with ${widePairs} pairs of them side by side. It ` +
+      `per cent of the window against a floor of 50, and its ${wide.groups.length} categories ` +
+      `stand at ${wideColumns} different left edges with ${widePairs} pairs of them side by ` +
+      `side against the ${wantedPairs} one column beside a stack of the rest makes. It ` +
       `leaves ${wide.top} px above it and ${wide.viewportHeight - wide.bottom} px below it, ` +
       `so it is ${wideOffCentre} px off centre against a bound of 2. At ` +
       `360 the same ${narrow.groups.length} categories measure ${narrow.width} px at ` +
       `${narrowColumns} left edge with ${narrowPairs} pairs side by side, and the sheet bottom ` +
-      `is at ${narrow.bottom} of ${narrow.viewportHeight} px, so the phone still meets a bottom ` +
-      `sheet in one column. Every number is a laid-out rectangle and none is read off the CSS.`,
+      `is at ${narrow.bottom} of ${narrow.viewportHeight} px, so ` +
+      `${phoneHolds ? 'the phone still meets a bottom sheet in one column' : 'THE PHONE NO LONGER MEETS A BOTTOM SHEET IN ONE COLUMN'}` +
+      `. Every number is a laid-out rectangle and none is read off the CSS.`,
   });
 
   // ---- 5c. The sheet opens at its own top, at both widths. ----

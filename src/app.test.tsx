@@ -4005,6 +4005,19 @@ describe('the disclosure sheet', () => {
     return (group.querySelector(':scope > legend')?.textContent ?? '').trim();
   }
 
+  /**
+   * What the sheet draws at rest, counted rather than bounded.
+   *
+   * Both numbers were measured off the document on 2026-08-10, and both are
+   * asserted as equalities below. A floor set safely under them would let a
+   * regression drop half the sheet and stay green over the half that lived,
+   * so a control or a heading added or removed updates these deliberately.
+   * They are the denominators the two checks below divide by, and no prose
+   * anywhere restates them.
+   */
+  const SHEET_CONTROLS = 46;
+  const SHEET_HEADINGS = 18;
+
   it('draws five named categories and nothing loose beside them', () => {
     mount();
     click(element('disclosure-toggle'));
@@ -4038,21 +4051,11 @@ describe('the disclosure sheet', () => {
     const controls = [
       ...sheet.querySelectorAll<HTMLElement>('input, button, select, textarea'),
     ].filter((control) => control.dataset['el'] !== 'sheet-close');
-    // The floor is the design's own list of the sheet's controls, read from
-    // that document rather than written here, so the bound cannot be the
-    // number it bounds.
-    const section = DESIGN.slice(
-      DESIGN.indexOf('## 4. Behind the one disclosure'),
-      DESIGN.indexOf('## 5.'),
-    );
-    const listed = [...section.matchAll(/^\| `(sheet-[a-z-]+)` \|/gm)];
-    expect(listed.length, 'the design lists the controls of the sheet').toBeGreaterThanOrEqual(12);
-    expect(
-      controls.length,
-      `the sheet draws ${String(controls.length)} controls against the ${String(
-        listed.length,
-      )} the design lists`,
-    ).toBeGreaterThanOrEqual(listed.length);
+    // The denominator is the count itself, and not a floor under it. A floor
+    // set low enough to be safe is not a denominator: a regression that
+    // dropped half the sheet would clear it and leave the line below green
+    // over the half that survived.
+    expect(controls.length, 'every control the sheet draws is counted').toBe(SHEET_CONTROLS);
 
     const ungrouped = controls.filter((control) => {
       const group = control.closest('fieldset');
@@ -4099,9 +4102,10 @@ describe('the disclosure sheet', () => {
     const categories = new Set([...sheet.children].filter((child) => child.tagName === 'FIELDSET'));
 
     // Both denominators, each counted off the document and neither read from
-    // the other. A run that found no group would pass every line under it.
-    expect(controls.length, 'the sheet draws controls to place').toBeGreaterThan(20);
-    expect(groups.length, 'the sheet draws headings to judge').toBeGreaterThan(10);
+    // the other, and each an equality rather than a floor. A floor under the
+    // real count leaves a sheet that lost half its headings green.
+    expect(controls.length, 'every control the sheet draws is counted').toBe(SHEET_CONTROLS);
+    expect(groups.length, 'every heading the sheet draws is counted').toBe(SHEET_HEADINGS);
 
     // A control belongs to the nearest heading above it, and that heading is
     // the one it is a member of. Every other heading over it is a level.

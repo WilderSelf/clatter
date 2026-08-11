@@ -210,9 +210,10 @@ keep one linear tab order and run no script. The phone keeps the bottom sheet an
 which already carried "Theme" outside them and "Colour" inside them. The rows now carry no heading
 of their own and `sheet-theme` names them. The rule this states is not a depth: a group earns its
 heading by holding a control of its own, and only the five categories may hold nothing but groups.
-The sheet draws 46 controls under 19 headings at depths of one to four, and the deep ones are
-correct — the blockers of the push profile are a named set inside "The rules in force", and the page
-mode is a named set inside "Build your own". `src/app.test.tsx` counts both denominators.
+A depth alone would refuse groups that are correct — the blockers of the push profile are a named set
+inside "The rules in force", and the page mode is a named set inside "Build your own", and both stand
+deeper than the heading this rule removed. `src/app.test.tsx` counts the controls and the headings
+off the open sheet and holds each count as an equality. Read the numbers there.
 
 The mode switch sits here on purpose. It destroys the built pool, so it must not sit one tap away
 from the throw. `sheet-ruleset`, `sheet-overrides` and `sheet-artifact-curve` sit here for the same
