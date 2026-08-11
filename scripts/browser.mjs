@@ -7311,21 +7311,7 @@ async function runShell(page, options, checks) {
   // next block puts back. Measured on this host on 2026-08-09: without this
   // wait the walk of rest B started at the footer and reached one stop. A run
   // on flat dice holds no seam and the wait returns at once.
-  await withTimeout(
-    page.evaluate(async () => {
-      const frame = () =>
-        new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
-      let quiet = 0;
-      for (let step = 0; step < 2000 && quiet < 3; step += 1) {
-        const seam = window.__clatterTable;
-        if (seam === undefined) return;
-        quiet = seam.busy ? 0 : quiet + 1;
-        await frame();
-      }
-    }),
-    120000,
-    'the table never came to rest',
-  );
+  await waitForRest(page);
 
   // Put the sequential focus navigation starting point back at the top of the
   // screen. The walk of rest A left it on the roll button, and neither `blur()`
@@ -7520,6 +7506,33 @@ async function liveRegion(page) {
       text: (copy.textContent || '').replace(/\s+/g, ' ').trim(),
     };
   });
+}
+
+/**
+ * Wait for the 3D table to come to rest, where one is running.
+ *
+ * **A reading of the result is taken after this and never before it.** The
+ * successes, the banes and the spoken sentence are held back until the dice
+ * stop, because a result printed over dice that are still moving is a result
+ * the player has not been shown yet. `src/shell/state.ts` holds the gate. A run
+ * on flat dice reads no seam and returns at once.
+ */
+async function waitForRest(page) {
+  await withTimeout(
+    page.evaluate(async () => {
+      const frame = () =>
+        new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
+      let quiet = 0;
+      for (let step = 0; step < 2000 && quiet < 3; step += 1) {
+        const seam = window.__clatterTable;
+        if (seam === undefined) return;
+        quiet = seam.busy ? 0 : quiet + 1;
+        await frame();
+      }
+    }),
+    120000,
+    'the table never came to rest',
+  );
 }
 
 /**
@@ -7722,6 +7735,9 @@ async function a11yJourney(page, size, design, checks, options) {
       return button !== null && !button.disabled;
     });
   }
+  // The dice stop first. The screen holds the result back until they do, so a
+  // reading taken here is the reading the player reads.
+  await waitForRest(held);
   const rolled = await liveRegion(held);
   const afterRoll = await sumOfTheDice(held);
   const clicks = await held.evaluate(() => window.__clatterClicks || []);
@@ -7759,21 +7775,7 @@ async function a11yJourney(page, size, design, checks, options) {
   });
 
   // ---- Rest B, walked with real presses ----
-  await withTimeout(
-    held.evaluate(async () => {
-      const frame = () =>
-        new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle)));
-      let quiet = 0;
-      for (let step = 0; step < 2000 && quiet < 3; step += 1) {
-        const seam = window.__clatterTable;
-        if (seam === undefined) return;
-        quiet = seam.busy ? 0 : quiet + 1;
-        await frame();
-      }
-    }),
-    120000,
-    'the table never came to rest',
-  );
+  await waitForRest(held);
   await resetFocus(held);
   const walkB = await walkShell(held, after.stated + 6, after.stated);
   const namedB = walkB.filter((visit) => !visit.implicit);
@@ -7815,6 +7817,7 @@ async function a11yJourney(page, size, design, checks, options) {
   await held.evaluate(
     () => new Promise((settle) => requestAnimationFrame(() => requestAnimationFrame(settle))),
   );
+  await waitForRest(held);
   const afterPush = await sumOfTheDice(held);
   const pushed = await liveRegion(held);
   console.log(
