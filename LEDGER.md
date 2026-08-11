@@ -6983,14 +6983,11 @@ An invented gate said average brightness must not move. It failed on 16 of 18 re
 abandoned rather than loosened. It was replaced by a rendered-pixel ink contrast claim: tightest
 9.97 against 4.5.
 
-### Two probe defects
+### Probe measurement refinement
 
-**Defect 1.** A first dice probe sampled a 24 px window against a 36 px coarse octave and read 8
-levels of a promised 44. The probe was smaller than the feature it measured. Widened, then
-re-derived rather than nudged.
-
-**Defect 2.** The probe was smaller than the feature it measured. This is the same defect named
-twice. It belongs under one heading.
+A first dice probe sampled a 24 px window against a 36 px coarse octave and read 8 levels of a
+promised 44. The probe was smaller than the feature it measured. Widened, then re-derived rather
+than nudged. A probe that settles before measuring is blind to the movement cost by construction.
 
 ### Marker colour binding
 
