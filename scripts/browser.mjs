@@ -9482,6 +9482,12 @@ async function readSheetLayout(page) {
       bottom: Math.round(box.bottom),
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
+      // Where the sheet stands in its own scroll, and whether it has one at
+      // all. A sheet that fits its box cannot prove anything about opening at
+      // the top, so both numbers are reported and the check reads both.
+      scrollTop: Math.round(sheet.scrollTop),
+      scrollHeight: Math.round(sheet.scrollHeight),
+      clientHeight: Math.round(sheet.clientHeight),
       // The way out of the dialog is not a category.
       groups: [...sheet.children]
         .filter((child) => child.getAttribute('data-el') !== 'sheet-close')
@@ -10573,6 +10579,44 @@ async function runSheet(page, options, checks) {
       `${narrowColumns} left edge with ${narrowPairs} pairs side by side, and the sheet bottom ` +
       `is at ${narrow.bottom} of ${narrow.viewportHeight} px, so the phone still meets a bottom ` +
       `sheet in one column. Every number is a laid-out rectangle and none is read off the CSS.`,
+  });
+
+  // ---- 5c. The sheet opens at its own top, at both widths. ----
+  //
+  // The way out is the last child of the sheet, and the sheet takes the focus
+  // when it opens. A browser asked to focus an element scrolls it into view,
+  // so the player met the foot of the dialog before its first setting. Both
+  // readings above were taken straight after `openSheet` and before anything
+  // scrolled, so each one is the offset a player opens on.
+  //
+  // The denominator is the scroll itself: a sheet whose content fits its box
+  // reads zero whatever the focus does, so a run that could not scroll proves
+  // nothing and fails here instead.
+  const scrolls = (layout) => layout.scrollHeight > layout.clientHeight;
+  console.log(
+    `browser: sheet opening_scroll 1440=[scroll_top=${wide.scrollTop} ` +
+      `content=${wide.scrollHeight} box=${wide.clientHeight}] 360=[scroll_top=${narrow.scrollTop} ` +
+      `content=${narrow.scrollHeight} box=${narrow.clientHeight}]`,
+  );
+  checks.push({
+    name: 'sheet.opens-at-its-own-top-and-not-at-the-way-out',
+    ok:
+      scrolls(wide) &&
+      scrolls(narrow) &&
+      wide.scrollTop === 0 &&
+      narrow.scrollTop === 0 &&
+      // The first category has to start inside the box, or the sheet opened
+      // somewhere else by a route the offset above cannot see.
+      wide.groups[0].top >= wide.top &&
+      narrow.groups[0].top >= narrow.top,
+    detail:
+      `the sheet opened at ${wide.scrollTop} px of its own scroll at 1440 and at ` +
+      `${narrow.scrollTop} px at 360. It holds ${wide.scrollHeight} px of content in a ` +
+      `${wide.clientHeight} px box at 1440 and ${narrow.scrollHeight} in ${narrow.clientHeight} ` +
+      `at 360, so it scrolls at both widths and a reading of zero is a fact about the opening ` +
+      `and not about a sheet that fits. The first category starts at ${wide.groups[0].top} px ` +
+      `against a sheet top of ${wide.top} at 1440, and at ${narrow.groups[0].top} against ` +
+      `${narrow.top} at 360.`,
   });
 
   // ---- 6. A saved pool goes in, comes back, and crosses a reload. ----

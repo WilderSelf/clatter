@@ -972,7 +972,13 @@ function Sheet({
 }) {
   const close = useRef<HTMLButtonElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
-  useEffect(() => close.current?.focus(), []);
+  // The sheet takes the focus when it opens, or the first Tab would land
+  // behind it. `preventScroll` is what keeps the sheet at its own top: the way
+  // out is the last child, so a browser asked to focus it scrolls it into
+  // view, and the player met the foot of the dialog before its first setting.
+  // `node scripts/browser.mjs --sheet` measures the scroll offset at both
+  // widths.
+  useEffect(() => close.current?.focus({ preventScroll: true }), []);
   return (
     <div class="scrim" onClick={onClose}>
       <div
