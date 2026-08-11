@@ -1002,56 +1002,84 @@ function Sheet({
           next.focus();
         }}
       >
-        {/* The rule set, and every field of it.
+        {/* ---- Rules ----------------------------------------------------
+            Everything that decides what a throw MEANS. Each of the four
+            groups clears the table, which is why they sit together: Decision
+            10 of `docs/design/0012-settled-decisions.md` holds the reason,
+            which is that a roll on the table was committed to at one price. */}
+        <fieldset class="cat cat-rules" data-el="sheet-cat-rules">
+          <legend>Rules</legend>
+          {/* The rule set, and every field of it.
 
             `sheet-ruleset` picks one of the four presets the rules core ships
-            and `sheet-overrides` changes any field of the record on top of it.
-            Both clear the table: Decision 10 of
-            `docs/design/0012-settled-decisions.md` holds the reason, which is
-            that a roll on the table was committed to at one price. */}
-        <fieldset class="field" data-el="sheet-ruleset">
-          <legend>Rule set</legend>
-          {PUSH_PROFILES.map((profile) => (
-            <label key={profile.id} class="choice">
-              <input
-                type="radio"
-                name="ruleset"
-                value={profile.id}
-                checked={state.profileId === profile.id}
-                onChange={() => setState((previous) => withPreset(previous, profile.id))}
-              />
-              {profile.label}
-            </label>
-          ))}
-          <p class="sheet-note">{profileOf(state).description}</p>
+            and `sheet-overrides` changes any field of the record on top of
+            it. */}
+          <fieldset class="field" data-el="sheet-ruleset">
+            <legend>Rule set</legend>
+            {PUSH_PROFILES.map((profile) => (
+              <label key={profile.id} class="choice">
+                <input
+                  type="radio"
+                  name="ruleset"
+                  value={profile.id}
+                  checked={state.profileId === profile.id}
+                  onChange={() => setState((previous) => withPreset(previous, profile.id))}
+                />
+                {profile.label}
+              </label>
+            ))}
+            <p class="sheet-note">{profileOf(state).description}</p>
+          </fieldset>
+          <OverridePanel
+            base={presetOf(state)}
+            override={state.override}
+            onChange={(next) => setState((previous) => withOverride(previous, next))}
+            onReset={() => setState(withoutOverride)}
+          />
+          <fieldset class="field" data-el="sheet-mode">
+            <legend>Dice</legend>
+            {(['pool', 'step'] as const).map((mode) => (
+              <label key={mode} class="choice">
+                <input
+                  type="radio"
+                  name="mode"
+                  value={mode}
+                  checked={state.mode === mode}
+                  onChange={() => setState((previous) => withMode(previous, mode))}
+                />
+                {mode === 'pool' ? 'Pool dice' : 'Step dice'}
+              </label>
+            ))}
+            <p class="sheet-note">A change of mode clears the pool.</p>
+          </fieldset>
+          {/* Both artifact curves ship. On a d12 the escalating curve is worth
+            more than the flat one, so this is a real setting and not a
+            preference. `specs/0001-rules-model.md` holds both thresholds and
+            the rules core scores from them. */}
+          <fieldset class="field" data-el="sheet-artifact-curve">
+            <legend>Artifact dice</legend>
+            {ARTIFACT_CURVE_IDS.map((curve) => (
+              <label key={curve} class="choice">
+                <input
+                  type="radio"
+                  name="artifact-curve"
+                  value={curve}
+                  checked={state.artifactCurve === curve}
+                  onChange={() => setState((previous) => withArtifactCurve(previous, curve))}
+                />
+                {curve === 'artifactEscalating' ? 'Escalating' : 'Flat'}
+              </label>
+            ))}
+            <p class="sheet-note">{ARTIFACT_CURVE_NOTE[state.artifactCurve]}</p>
+          </fieldset>
         </fieldset>
-        <OverridePanel
-          base={presetOf(state)}
-          override={state.override}
-          onChange={(next) => setState((previous) => withOverride(previous, next))}
-          onReset={() => setState(withoutOverride)}
-        />
-        <fieldset class="field" data-el="sheet-mode">
-          <legend>Dice</legend>
-          {(['pool', 'step'] as const).map((mode) => (
-            <label key={mode} class="choice">
-              <input
-                type="radio"
-                name="mode"
-                value={mode}
-                checked={state.mode === mode}
-                onChange={() => setState((previous) => withMode(previous, mode))}
-              />
-              {mode === 'pool' ? 'Pool dice' : 'Step dice'}
-            </label>
-          ))}
-          <p class="sheet-note">A change of mode clears the pool.</p>
-        </fieldset>
-        {/* The saved pools.
+        {/* ---- Pools ----------------------------------------------------
+            The saved pools, which are one group and therefore their own
+            category.
 
             A recall writes over every tile of the built pool, which is the
-            hazard the mode switch sits here for, so the list sits here beside
-            it. Decision 11 of `docs/design/0012-settled-decisions.md` records
+            hazard the mode switch sits beside, so the list sits next to it.
+            Decision 11 of `docs/design/0012-settled-decisions.md` records
             the choice and prices it: the sheet is a second surface, so section
             3 still spends five controls at each rest state. */}
         <PresetPanel
@@ -1065,58 +1093,26 @@ function Sheet({
           onMove={onMovePreset}
           onDelete={onDeletePreset}
         />
-        {/* Both artifact curves ship. On a d12 the escalating curve is worth
-            more than the flat one, so this is a real setting and not a
-            preference. `specs/0001-rules-model.md` holds both thresholds and
-            the rules core scores from them. */}
-        <fieldset class="field" data-el="sheet-artifact-curve">
-          <legend>Artifact dice</legend>
-          {ARTIFACT_CURVE_IDS.map((curve) => (
-            <label key={curve} class="choice">
-              <input
-                type="radio"
-                name="artifact-curve"
-                value={curve}
-                checked={state.artifactCurve === curve}
-                onChange={() => setState((previous) => withArtifactCurve(previous, curve))}
-              />
-              {curve === 'artifactEscalating' ? 'Escalating' : 'Flat'}
-            </label>
-          ))}
-          <p class="sheet-note">{ARTIFACT_CURVE_NOTE[state.artifactCurve]}</p>
-        </fieldset>
-        {/* The theme, one choice, plus the colour builder.
+        {/* ---- Look -----------------------------------------------------
+            What the dice and the page are made of, and where they are thrown.
+            The theme comes first and the table switch last, so the walk from
+            the table switch to the sound switch stays one press. */}
+        <fieldset class="cat" data-el="sheet-cat-look">
+          <legend>Look</legend>
+          {/* The theme, one choice, plus the colour builder.
 
             Section 4 of `docs/design/0002-screen-design.md` names it against
             Unit 4.8. The sheet is a second surface and carries no share of the
             control budget of section 3, and the group holds no tab stop of the
             main screen, so both keyboard walks of section 6 are unchanged. */}
-        <ThemePanel
-          applied={applied}
-          themeId={renderer.settings.themeId}
-          builtTheme={renderer.settings.builtTheme}
-          onChooseRow={onChooseRow}
-          onBuild={onBuildTheme}
-        />
-        {/* The history, and what it costs the browser to keep.
-
-            `sheet-history` opens the history destination. Section 4 of
-            `docs/design/0002-screen-design.md` names it against Units 4.4 to
-            4.7, and section 3 puts the log, its statistics and its export
-            there and not here.
-
-            The storage reading beside it is `estimateStorage` from
-            `src/log/store.ts`, which the plan asks this unit to show in
-            settings. It carries no tab stop, so it is one of the read-only
-            parts of section 3, and it is a live region because the number
-            arrives after the sheet is drawn. */}
-        <button class="btn" type="button" data-el="sheet-history" onClick={onOpenHistory}>
-          Open the history
-        </button>
-        <p class="sheet-note" data-el="sheet-storage-estimate" role="status">
-          {storageLine(storage)}
-        </p>
-        {/* The way back from a permanent fall to flat dice, which the plan asks
+          <ThemePanel
+            applied={applied}
+            themeId={renderer.settings.themeId}
+            builtTheme={renderer.settings.builtTheme}
+            onChooseRow={onChooseRow}
+            onBuild={onBuildTheme}
+          />
+          {/* The way back from a permanent fall to flat dice, which the plan asks
             Unit 3.7 for. The sheet is a second surface and carries no share of
             the control budget of section 3, so this control costs the screen
             nothing. Decision 8 of `docs/design/0012-settled-decisions.md`
@@ -1126,21 +1122,26 @@ function Sheet({
             says, so the control is dead there and the note names every reading
             that failed. Every other fall is clearable, and the same switch
             takes the player back to flat dice. */}
-        <label class="choice" data-el="sheet-tray-renderer">
-          <input
-            type="checkbox"
-            checked={renderer.choice.renderer === 'tray'}
-            disabled={renderer.choice.cause === 'belowTheBar'}
-            onChange={(event) => onAskForTray(event.currentTarget.checked)}
-          />
-          Roll the dice on the table
-        </label>
-        <p class="sheet-note" data-el="sheet-tray-note">
-          {trayNote(renderer.choice)}
-        </p>
-        {/* The sound — Unit 3.6.
+          <fieldset class="field" data-el="sheet-renderer">
+            <legend>The table</legend>
+            <label class="choice" data-el="sheet-tray-renderer">
+              <input
+                type="checkbox"
+                checked={renderer.choice.renderer === 'tray'}
+                disabled={renderer.choice.cause === 'belowTheBar'}
+                onChange={(event) => onAskForTray(event.currentTarget.checked)}
+              />
+              Roll the dice on the table
+            </label>
+            <p class="sheet-note" data-el="sheet-tray-note">
+              {trayNote(renderer.choice)}
+            </p>
+          </fieldset>
+        </fieldset>
+        {/* ---- Sound ----------------------------------------------------
+            One group, and therefore its own category — Unit 3.6.
 
-            It sits under the renderer toggle because the sound is made by the
+            It follows the table switch because the sound is made by the
             collisions of the table, and the flat dice make none. Decision 17
             of `docs/design/0012-settled-decisions.md` records the choice, and
             section 4 of `docs/design/0002-screen-design.md` lists both
@@ -1153,58 +1154,91 @@ function Sheet({
           onEnabled={sound.onEnabled}
           onVolume={sound.onVolume}
         />
-        {/* The share card — Unit 4.9.
+        {/* ---- Session and data -----------------------------------------
+            The roll history, what it costs the browser to keep, the card that
+            leaves the application, the stress counter and the readings. None
+            of them changes a rule or a colour. */}
+        <fieldset class="cat" data-el="sheet-cat-data">
+          <legend>Session and data</legend>
+          {/* The history, and what it costs the browser to keep.
+
+            `sheet-history` opens the history destination. Section 4 of
+            `docs/design/0002-screen-design.md` names it against Units 4.4 to
+            4.7, and section 3 puts the log, its statistics and its export
+            there and not here.
+
+            The storage reading beside it is `estimateStorage` from
+            `src/log/store.ts`, which the plan asks this unit to show in
+            settings. It carries no tab stop, so it is one of the read-only
+            parts of section 3, and it is a live region because the number
+            arrives after the sheet is drawn. */}
+          <fieldset class="field" data-el="sheet-history-group">
+            <legend>The roll history</legend>
+            <button class="btn" type="button" data-el="sheet-history" onClick={onOpenHistory}>
+              Open the history
+            </button>
+            <p class="sheet-note" data-el="sheet-storage-estimate" role="status">
+              {storageLine(storage)}
+            </p>
+          </fieldset>
+          {/* The share card — Unit 4.9.
 
             Decision 16 of `docs/design/0012-settled-decisions.md` puts it here
             and section 4 of `docs/design/0002-screen-design.md` lists it. The
             sheet is a second surface, so the control budget of section 3 and
             both keyboard walks of section 6 are untouched.
 
-            It sits under the renderer toggle on purpose: a card is a picture
-            of the table, and the refusal a player meets on the flat dice
-            points at the control just above it. */}
-        <SharePanel
-          made={share.made}
-          canSend={share.canSend}
-          note={share.note}
-          busy={share.busy}
-          onMake={share.onMake}
-          onDownload={share.onDownload}
-          onSend={share.onSend}
-        />
-        <button
-          class="btn"
-          type="button"
-          data-el="sheet-stress-reset"
-          onClick={() =>
-            setState((previous) => ({
-              ...previous,
-              counts: { ...previous.counts, stress: 0 },
-            }))
-          }
-        >
-          Set stress to zero
-        </button>
-        {/* The performance overlay — Unit 3.8, the overlay half.
+            The card is a picture of the table, and the refusal a player meets
+            on the flat dice points at the table switch under Look. */}
+          <SharePanel
+            made={share.made}
+            canSend={share.canSend}
+            note={share.note}
+            busy={share.busy}
+            onMake={share.onMake}
+            onDownload={share.onDownload}
+            onSend={share.onSend}
+          />
+          <fieldset class="field" data-el="sheet-stress">
+            <legend>Stress</legend>
+            <button
+              class="btn"
+              type="button"
+              data-el="sheet-stress-reset"
+              onClick={() =>
+                setState((previous) => ({
+                  ...previous,
+                  counts: { ...previous.counts, stress: 0 },
+                }))
+              }
+            >
+              Set stress to zero
+            </button>
+          </fieldset>
+          {/* The performance overlay — Unit 3.8, the overlay half.
 
-            It is the last row of the sheet because it is a reading and not a
+            It is the last group of the sheet because it is a reading and not a
             choice: it changes nothing about the dice, the rules or the look.
             Decision 18 of `docs/design/0012-settled-decisions.md` records why
             the switch lives here, why the reading is not stored, and why the
             overlay reports rather than gates. The panel it draws holds no tab
             stop, so both keyboard walks of section 6 are unchanged. */}
-        <label class="choice" data-el="sheet-overlay">
-          <input
-            type="checkbox"
-            data-el="sheet-overlay-toggle"
-            checked={overlayOn}
-            onChange={(event) => onShowOverlay(event.currentTarget.checked)}
-          />
-          Show the performance readings
-        </label>
-        <p class="sheet-note" data-el="sheet-overlay-note">
-          The readings measure this device. They are reported and never judged.
-        </p>
+          <fieldset class="field" data-el="sheet-readings">
+            <legend>Performance</legend>
+            <label class="choice" data-el="sheet-overlay">
+              <input
+                type="checkbox"
+                data-el="sheet-overlay-toggle"
+                checked={overlayOn}
+                onChange={(event) => onShowOverlay(event.currentTarget.checked)}
+              />
+              Show the performance readings
+            </label>
+            <p class="sheet-note" data-el="sheet-overlay-note">
+              The readings measure this device. They are reported and never judged.
+            </p>
+          </fieldset>
+        </fieldset>
         <button class="btn go" type="button" data-el="sheet-close" ref={close} onClick={onClose}>
           Close
         </button>

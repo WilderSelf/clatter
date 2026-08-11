@@ -3985,4 +3985,82 @@ describe('the disclosure sheet', () => {
     const missing = listed.filter((control) => !named.has(control));
     expect(missing, 'every control the design lists is reachable inside the trap').toEqual([]);
   });
+
+  // -------------------------------------------------------------------------
+  // Five categories, and nothing loose beside them.
+  //
+  // The sheet drew twelve children in one column before this check, three of
+  // them bare controls under no heading at all: the table switch, the stress
+  // reset and the readings switch. Research on settings surfaces asks for four
+  // or five top-level categories, grouped by what the player thinks about.
+  //
+  // The two checks below hold that shape. The second one counts the controls
+  // off the document by TAG NAME, so it never reads the grouping markup it
+  // judges: a control that falls out of every category is in the denominator
+  // first and fails second, rather than going unseen.
+  // -------------------------------------------------------------------------
+
+  /** The words a group carries as its own heading, or the empty string. */
+  function heading(group: Element): string {
+    return (group.querySelector(':scope > legend')?.textContent ?? '').trim();
+  }
+
+  it('draws five named categories and nothing loose beside them', () => {
+    mount();
+    click(element('disclosure-toggle'));
+    const sheet = element('disclosure-sheet');
+    const categories = [...sheet.children].filter(
+      (child) => child.getAttribute('data-el') !== 'sheet-close',
+    );
+    const loose = categories.filter(
+      (group) => group.tagName !== 'FIELDSET' || heading(group) === '',
+    );
+    expect(
+      loose.map((group) => group.getAttribute('data-el') ?? group.tagName),
+      'every top-level child of the sheet is a group carrying a legend',
+    ).toEqual([]);
+    // Five, and the number is the one `src/shell.css` lays out: the desktop
+    // query gives the tall category the left column and stacks the other four
+    // on the right. A sixth would need a rail with panes.
+    expect(categories.length, 'a settings surface holds four or five categories').toBe(5);
+    expect(new Set(categories.map(heading)).size, 'each category is named once').toBe(
+      categories.length,
+    );
+  });
+
+  it('puts every control it draws inside a named group, counted', () => {
+    mount();
+    click(element('disclosure-toggle'));
+    const sheet = element('disclosure-sheet');
+    // The denominator. It is read off the document by tag name, so it holds
+    // every control the sheet draws whether or not any group claims it. The
+    // way out of the dialog is not a setting and is not counted.
+    const controls = [
+      ...sheet.querySelectorAll<HTMLElement>('input, button, select, textarea'),
+    ].filter((control) => control.dataset['el'] !== 'sheet-close');
+    // The floor is the design's own list of the sheet's controls, read from
+    // that document rather than written here, so the bound cannot be the
+    // number it bounds.
+    const section = DESIGN.slice(
+      DESIGN.indexOf('## 4. Behind the one disclosure'),
+      DESIGN.indexOf('## 5.'),
+    );
+    const listed = [...section.matchAll(/^\| `(sheet-[a-z-]+)` \|/gm)];
+    expect(listed.length, 'the design lists the controls of the sheet').toBeGreaterThanOrEqual(12);
+    expect(
+      controls.length,
+      `the sheet draws ${String(controls.length)} controls against the ${String(
+        listed.length,
+      )} the design lists`,
+    ).toBeGreaterThanOrEqual(listed.length);
+
+    const ungrouped = controls.filter((control) => {
+      const group = control.closest('fieldset');
+      return group === null || !sheet.contains(group) || heading(group) === '';
+    });
+    expect(
+      ungrouped.map((control) => control.dataset['el'] ?? (control.textContent ?? '').trim()),
+      `every one of the ${String(controls.length)} controls sits inside a group with a legend`,
+    ).toEqual([]);
+  });
 });
