@@ -526,17 +526,27 @@ describe('the charts and the log', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The declarations of one rule, found by its exact selector.
+ * The declarations of the rule whose whole head is one selector.
  *
- * The selector must appear exactly once in the file. Two rules of one selector
- * would let this reader answer with the wrong half of a colour claim.
+ * That rule must be written exactly once, because two of them would let this
+ * reader answer with the wrong half of a colour claim.
+ *
+ * A selector may also be one name in a LONGER head, and such a rule is not this
+ * one. Unit 4.13 grains every ground the stylesheet paints from a single rule
+ * with forty-odd names in it, and the last name of that list ends in the same
+ * three characters a rule of its own does. Those rules are skipped here by
+ * their comma, so the colour claims below still read the block that states the
+ * colour.
  */
 function cssBlock(selector: string): string {
   const head = `\n${selector} {`;
-  const at = CSS.indexOf(head);
-  expect(at, `the stylesheet holds a rule for ${selector}`).toBeGreaterThan(-1);
-  expect(CSS.indexOf(head, at + 1), `${selector} is written once`).toBe(-1);
-  const open = CSS.indexOf('{', at);
+  const ownRule = (at: number): boolean => at > 0 && CSS[at - 1] !== ',';
+  const found: number[] = [];
+  for (let at = CSS.indexOf(head); at !== -1; at = CSS.indexOf(head, at + 1)) {
+    if (ownRule(at)) found.push(at);
+  }
+  expect(found.length, `the stylesheet holds one rule whose head is ${selector}`).toBe(1);
+  const open = CSS.indexOf('{', found[0] ?? 0);
   const close = CSS.indexOf('}', open);
   return CSS.slice(open + 1, close);
 }
