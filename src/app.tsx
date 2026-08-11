@@ -102,6 +102,7 @@ import {
   settingsFromState,
   signedDifficulty,
   stateFromSettings,
+  stillTumbling,
   throwDice,
   tilesFor,
   toggleDie,
@@ -112,6 +113,7 @@ import {
   withOverride,
   withoutOverride,
   withPreset,
+  withSettled,
   zonesOf,
 } from './shell/state';
 import type { BuiltTheme } from './theme/builder';
@@ -185,6 +187,20 @@ function moveWithin(length: number, from: number, delta: number): number {
 }
 
 /**
+ * What the live region says while the dice are still tumbling.
+ *
+ * The sentence names the throw and no part of its result, so the reader and
+ * the eye reach the successes and the banes in the same render.
+ */
+export const ROLLING_TEXT = 'The dice are rolling.';
+
+/**
+ * How long the marks wait for a tray that has stopped reporting, in
+ * milliseconds. The effect that reads it states why the bound exists.
+ */
+export const REST_BOUND_MS = 5000;
+
+/**
  * The header. It carries status and it never navigates. Decision 2.
  *
  * It is also the live region, so what it says is spoken on every change. The
@@ -192,8 +208,22 @@ function moveWithin(length: number, from: number, delta: number): number {
  * aloud is a stream of digits, so the row is hidden from the reader and one
  * sentence carries the same facts. Both come from the same values in the same
  * render, so the two cannot disagree.
+ *
+ * **The marks wait for the dice.** `tumbling` is `stillTumbling` in
+ * `src/shell/state.ts`, and while it holds, the two marks and the sentence are
+ * both absent: a result printed over dice the player can still see moving is a
+ * result the table has not shown yet. The row and the sentence are hidden by
+ * the same value in the same render, so the eye and the reader wait together.
  */
-function StatusLine({ state, dice }: { state: AppState; dice: readonly Die[] }) {
+function StatusLine({
+  state,
+  dice,
+  tumbling,
+}: {
+  state: AppState;
+  dice: readonly Die[];
+  tumbling: boolean;
+}) {
   const { successes, banes, stress, pushes } = readout(state);
   // Before a throw the line names what the next throw takes. After one it names
   // what landed, so the result reaches the live region on the roll and on the
@@ -203,20 +233,28 @@ function StatusLine({ state, dice }: { state: AppState; dice: readonly Die[] }) 
       ? composition(dice)
       : `The table holds ${state.result.dice.length} ` +
         `${state.result.dice.length === 1 ? 'die' : 'dice'}. Stress ${stress}.`;
-  const spoken = `${successes} ${successes === 1 ? 'success' : 'successes'}. ${banes} ${banes === 1 ? 'bane' : 'banes'}. Push ${pushes}. ${table}`;
+  const spoken = tumbling
+    ? ROLLING_TEXT
+    : `${successes} ${successes === 1 ? 'success' : 'successes'}. ${banes} ${banes === 1 ? 'bane' : 'banes'}. Push ${pushes}. ${table}`;
   return (
     <header class="shell-h" data-el="shell-header">
       <div class="statusline" data-el="status-line" role="status" aria-live="polite">
         <span class="st-row" aria-hidden="true">
-          <span class="st-item">
-            <i class="mark s" />
-            {successes}
-          </span>
-          <span class="st-item">
-            <i class="mark b" />
-            {banes}
-          </span>
-          <i class="st-rule" />
+          {tumbling ? null : (
+            <>
+              <span class="st-item">
+                <i class="mark s" />
+                {successes}
+              </span>
+              <span class="st-item">
+                <i class="mark b" />
+                {banes}
+              </span>
+              {/* The rule divides the marks from the dim readings, so it goes
+                  with them and the row never opens with a line. */}
+              <i class="st-rule" />
+            </>
+          )}
           <span class="st-item st-dim">
             {state.result === null ? dice.length : state.result.dice.length} dice
           </span>
@@ -1308,6 +1346,10 @@ export function App({
   const applied = appliedTheme(renderer.settings);
   const onTheTable = renderer.choice.renderer === 'tray';
   const layout: TrayLayout = onTheTable ? 'over' : 'flat';
+  // The dice are still moving through the throw the screen holds, so the marks
+  // wait for them. The renderer is part of the reading, so the flat dice show
+  // the marks in the render that draws them and never wait a frame.
+  const tumbling = stillTumbling(state, onTheTable);
   const toggle = useRef<HTMLButtonElement>(null);
   const closeSheet = (): void => {
     setState((previous) => ({ ...previous, sheetOpen: false }));
@@ -1621,6 +1663,25 @@ export function App({
     });
   }, [state.throwOrdinal]);
 
+  // The bound on the wait for rest.
+  //
+  // The tray reports rest through `onSettled` and it reports it once per drain
+  // loop, so a throw the tray coalesced away still ends in a report. A tray
+  // that never mounts at all reports nothing, and the marks would then be held
+  // back for as long as the player looked at the screen. This is the floor
+  // under that: the marks arrive late rather than never.
+  //
+  // ponytail: one fixed bound, and it is a safety net rather than a schedule.
+  // Five seconds is longer than any throw this tray has taken and short enough
+  // that a player reads it as slow rather than as broken. A tray that really
+  // needs longer would report rest itself and clear the timer. Measure a throw
+  // that runs past it and the number is wrong, not the shape.
+  useEffect(() => {
+    if (!tumbling) return;
+    const timer = setTimeout(() => setState(withSettled), REST_BOUND_MS);
+    return () => clearTimeout(timer);
+  }, [tumbling, state.throwOrdinal]);
+
   /**
    * Open the history.
    *
@@ -1745,7 +1806,7 @@ export function App({
       data-renderer={renderer.choice.renderer}
       data-tray-decision={renderer.decision === null ? 'pending' : String(renderer.decision.tray)}
     >
-      <StatusLine state={state} dice={dice} />
+      <StatusLine state={state} dice={dice} tumbling={tumbling} />
 
       <main
         class={onTheTable && !state.builderOpen ? 'shell-m stretch' : 'shell-m'}
@@ -1785,7 +1846,13 @@ export function App({
               onToggle={(id) => setState((previous) => toggleDie(previous, id))}
               onImpact={(impact) => sound.current?.impact(impact)}
               onMotion={(at, evidence) => perf.current?.motion(at, evidence)}
-              onSettled={(at) => perf.current?.settled(at)}
+              // Rest closes the overlay's measurement window AND releases the
+              // marks. Both readings are the same event, so they are taken
+              // from the same report and cannot fall out of step.
+              onSettled={(at) => {
+                perf.current?.settled(at);
+                setState(withSettled);
+              }}
             />
             {state.result === null ? null : (
               <DiceTray
