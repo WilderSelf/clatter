@@ -16,12 +16,13 @@
  * whichever of the six interface palettes is in force, and no rule below had to
  * change to make that true.
  *
- * `src/theme/shell-css.test.ts` enumerates every colour literal left in this
- * file and asserts the list against the three the file is allowed. All three
- * are the same kind of thing: black at a fraction of one, spent as a shadow or
- * as a dimming layer. A shadow is the absence of light rather than a colour of
- * the theme, and a scrim has to darken every palette including the light one.
- * Add a fourth literal and that check goes red.
+ * `src/theme/css-vars.test.ts` enumerates every colour literal left in this
+ * file and measures each one. Every one must be black or white at a fraction of
+ * one, which is a shade and not a hue: a shadow is the absence of light rather
+ * than a colour of the theme, a scrim has to darken every palette including the
+ * light one, and a highlight has to lift every palette including the dark ones.
+ * The count is held under a ceiling written in that file, so a fourth literal
+ * is a decision a reviewer sees rather than a line that slips in.
  *
  * The dice material is not in this block either. A flat die takes the body
  * colour of its own type through `--die-face`, written on the die by the
@@ -37,6 +38,32 @@
   --r: 10px;
   /* The footer reads this one value, so its buttons clear a phone gesture bar. */
   --safe-b: env(safe-area-inset-bottom, 0px);
+
+  /* ---------------- the grain — Unit 4.12 ----------------
+   *
+   * ONE noise, drawn by the browser's own SVG filter and carried as a data URI.
+   * No file enters the repository, no network call is made, and the tray costs
+   * no GPU texture, because this paints an HTML element and not a material.
+   *
+   * **It holds no colour.** `feTurbulence` makes coloured noise and the
+   * `saturate` matrix takes every hue back out of it, so what is left is a grey
+   * cloud. The three surfaces below tell one material from another by the SIZE
+   * they stretch it to and by nothing else, which is why one noise is enough:
+   * a square tile reads as plaster or as fine leather grain by scale alone, and
+   * a tile stretched flat along one axis reads as the grain of a board.
+   *
+   * `background-blend-mode: soft-light` keeps the hue of the ground and moves
+   * only its lightness, which a layer laid on at a flat opacity does not: that
+   * one drags every surface toward grey.
+   *
+   * **It is not symmetric, and the browser check says by how much.** Measured
+   * on 2026-08-11 over all six rows: a dark ground comes out 7 to 9 levels
+   * lighter out of 255 and a light one 1 to 2. That is a fact about the blend
+   * and no choice of noise removes it. So the claim this stylesheet makes is
+   * not that the average holds still. It is that the ink on the GRAINED ground
+   * still clears its floor, and `theme.every-surface-carries-a-grain` in
+   * `scripts/browser.mjs` measures that on the pixels the browser drew. */
+  --texture-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.16' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.6'/%3E%3C/svg%3E");
 }
 
 * {
@@ -1731,6 +1758,63 @@ body {
   font-weight: 400;
   line-height: 1.45;
   color: var(--ink-dim);
+}
+
+/* ---------------- the materials — Unit 4.12 ----------------
+ *
+ * The owner asked for no flat colour anywhere. Three surfaces, one noise, and
+ * the size each one stretches that noise to is the whole difference between
+ * them. `--texture-noise` at the top of this file says why one is enough.
+ *
+ * **These rules come last on purpose.** Every block above paints its ground
+ * with the `background` shorthand, and a shorthand resets `background-image` to
+ * none. A later rule of the same weight therefore wins the image and leaves the
+ * colour alone. Two rules above hold a higher weight and are meant to win:
+ * `.zones.over .shelf` and `.slot.over` both set `background: none`, because
+ * over the 3D table those elements draw nothing at all.
+ *
+ * Nothing here is a hue. The noise is grey and `soft-light` lifts and lowers a
+ * ground either side of the middle, so the average of every surface is still
+ * the colour the palette named. */
+
+/* The page: a coarse mottle, the way a plastered or a papered wall reads. */
+.screen {
+  background-image: var(--texture-noise);
+  background-size: 300px 300px;
+  background-blend-mode: soft-light;
+}
+
+/* Every panel a player reads against: a fine grain, the way tanned leather and
+   woven cloth read. The list is long because "everything" is what was asked
+   for, and one rule is cheaper than a declaration in each block. */
+.shell-h,
+.shell-f,
+.card,
+.cell,
+.sheet,
+.field,
+.btn,
+.btn.go,
+.icon-btn,
+.pre-btn,
+.hist-row,
+.hist-mx-scroll,
+.shelf,
+.costrow,
+.fault,
+.hist-warn {
+  background-image: var(--texture-noise);
+  background-size: 90px 90px;
+  background-blend-mode: soft-light;
+}
+
+/* The table: the same noise pulled flat along one axis, which is what turns a
+   mottle into the directional grain of a board. The colour under it stays the
+   inline `--tray-surface` that `src/tray/scene.ts` writes. */
+.table {
+  background-image: var(--texture-noise);
+  background-size: 460px 92px;
+  background-blend-mode: soft-light;
 }
 
 /* ---------------- wider screens ---------------- */

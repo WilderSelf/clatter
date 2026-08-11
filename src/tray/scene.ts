@@ -14,6 +14,7 @@
 import { TRAY_SURFACES } from '../theme/themes';
 import { TRAY_BASE_COLOR_SET } from './dice-colors';
 export { TRAY_BASE_COLOR_SET };
+import { diceGrain } from './dice-grain';
 import { loadTray } from './index';
 import type { DiceBox, DiceConfig } from './vendor/dice-tray.js';
 
@@ -117,7 +118,12 @@ export async function mountTray(
   // `--tray-surface` on the root element, so the inline value below follows a
   // change of the axis without a remount. The literal after the comma is what a
   // caller outside the application gets, and it is the row Unit 3.2 shipped.
-  container.style.background = `var(--tray-surface, ${TRAY_SURFACE_COLOR})`;
+  //
+  // The COLOUR alone, never the `background` shorthand. Unit 4.12 puts the wood
+  // grain of the table in `src/shell.css`, as a `background-image` on the same
+  // element, and the shorthand would reset that image to none from an inline
+  // style no rule can beat.
+  container.style.backgroundColor = `var(--tray-surface, ${TRAY_SURFACE_COLOR})`;
 
   // A custom colour set, not one of the six named sets. Every die face is drawn
   // on this neutral base and `throwPool` multiplies the colour of the type into
@@ -130,6 +136,13 @@ export async function mountTray(
     ...options.config,
   });
   await box.initialize();
+
+  // The grain on a die body — Unit 4.12. It goes on AFTER `initialize`, because
+  // `initialize` is the call that loads the colour set, and BEFORE any die is
+  // built, because the factory reads the set when it builds one. Nothing is
+  // fetched: `applyColorSet` takes the resolved texture entry, so the deleted
+  // texture files of Unit 3.1 are never asked for. See `dice-grain.ts`.
+  box.DiceFactory.applyColorSet({ ...TRAY_BASE_COLOR_SET, texture: diceGrain() });
 
   // After `initialize`, because it is the call that builds the renderer.
   // three.js keeps the ratio across every later `setSize`, so the resize path

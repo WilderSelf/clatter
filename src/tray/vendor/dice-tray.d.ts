@@ -145,6 +145,34 @@ export interface DiceResults {
   total: number;
 }
 
+/**
+ * The colour set the factory paints a die from.
+ *
+ * `texture` is the entry `createTextMaterial` composites into the face canvas.
+ * The published build fetches it through an image loader; Clatter hands the
+ * resolved entry over instead, because the texture files went at Unit 3.1.
+ * `material` on that entry names a row of the factory's own material table and
+ * is what decides whether a die takes the standard branch or the Phong one.
+ */
+export interface TrayColorSet {
+  name: string;
+  background: string;
+  foreground: string;
+  outline: string;
+  texture: string | { name: string; composite: string; texture?: unknown; material?: string };
+}
+
+/**
+ * The dice factory. Only the two members Clatter reads are declared.
+ *
+ * `applyColorSet` is the seam Unit 4.12 puts the grain through, and
+ * `dice_material` is the field `createMaterials` branches on.
+ */
+export interface TrayDiceFactory {
+  applyColorSet(set: TrayColorSet): void;
+  dice_material: string;
+}
+
 export declare class DiceBox {
   constructor(element_container: string | HTMLElement, options?: Partial<DiceConfig>);
 
@@ -162,6 +190,8 @@ export declare class DiceBox {
   renderer: ThreeRenderer;
   /** The library's own raycaster. Unit 3.5 hit-tests a click through it. */
   raycaster: ThreeRaycaster;
+  /** The factory that builds a die. Unit 4.12 puts the grain on through it. */
+  DiceFactory: TrayDiceFactory;
   /** Every die on the tray, in spawn order. `roll` clears it and refills it. */
   diceList: TrayDie[];
   /** The collision report. It is read at the moment of the collision, so a caller may swap it between throws. */

@@ -801,6 +801,69 @@ async function readRenderCounters(page) {
 }
 
 /**
+ * The material every die face really took, and the grain on the face canvas.
+ *
+ * Both halves are read off the LIVE objects the renderer draws with, and never
+ * off a constant in a file. The material is the instance three.js built, so a
+ * branch that fell back to the flat-shaded Phong default is visible here. The
+ * grain is read out of the canvas that became `map.image` — the very bitmap the
+ * texture uploads — by sampling a band across the top of it. The library draws
+ * the numeral in the middle, so a band that varies varies because of the grain
+ * and because of nothing else, and a face with no grain is filled one flat
+ * colour and its band holds exactly one level.
+ *
+ * **The band has to be wider than the grain is coarse.** A first draft read a
+ * 24 pixel corner and saw 8 levels of a promised 44, because the coarse octave
+ * is 36 pixels across on a 512 pixel face and one corner sits inside a single
+ * cell of it. A window smaller than the feature it measures reads the slope and
+ * never the range. The band is a fifth of the canvas, which is about three
+ * cells down and fourteen across.
+ */
+async function readDiceGrain(page, share) {
+  return page.evaluate((share) => {
+    const box = window.__clatterTray;
+    const readings = [];
+    const faults = [];
+    for (const [at, die] of box.diceList.entries()) {
+      for (const [face, material] of die.material.entries()) {
+        const name = `die ${at} face ${face}`;
+        if (material.isMeshStandardMaterial !== true) {
+          faults.push(`${name} is a ${material.type} and not a MeshStandardMaterial`);
+          continue;
+        }
+        const image = material.map?.image;
+        if (!(image instanceof HTMLCanvasElement)) {
+          faults.push(`${name} carries no canvas on its map`);
+          continue;
+        }
+        const context = image.getContext('2d', { willReadFrequently: true });
+        const band = Math.max(8, Math.round(image.height / share));
+        const data = context.getImageData(0, 0, image.width, band).data;
+        let low = 255;
+        let high = 0;
+        const levels = new Set();
+        for (let step = 0; step < data.length; step += 4) {
+          const level = (data[step] + data[step + 1] + data[step + 2]) / 3;
+          if (level < low) low = level;
+          if (level > high) high = level;
+          levels.add(Math.round(level));
+        }
+        readings.push({
+          name,
+          roughness: material.roughness,
+          metalness: material.metalness,
+          canvas: image.width,
+          low,
+          high,
+          levels: levels.size,
+        });
+      }
+    }
+    return { material: box.DiceFactory.dice_material, readings, faults };
+  }, share);
+}
+
+/**
  * Where every die came to rest, against the tray the camera shows.
  *
  * The camera frames exactly `containerWidth` by `containerHeight` world units,
@@ -937,6 +1000,53 @@ async function runTrayScene(page, options, checks) {
     detail: `the scene holds ${counters.dice} dice against the ${TWELVE_DIE_COUNT} the notation names`,
   });
   judgeCounters(options.budgets, counters, checks);
+
+  // ---- The grain on a die — Unit 4.12. ----
+  //
+  // The bounds come out of `src/tray/dice-grain.ts`, so they move when the
+  // octaves move and nothing here has to be retyped. The floor is a quarter of
+  // the depth the module promises, which a face that took no grain cannot
+  // reach, and the ceiling is that depth itself, which a grain that darkened a
+  // die further than it claims would break.
+  register('./ts-resolve.mjs', import.meta.url);
+  const grainModule = await import('../src/tray/dice-grain.ts');
+  const darkest = grainModule.GRAIN_FLOOR * 255;
+  const reach = (255 - darkest) / 4;
+  const dice = await readDiceGrain(page, 5);
+  const flat = dice.readings.filter((each) => each.high - each.low < reach);
+  const overdone = dice.readings.filter((each) => each.low < darkest - 1);
+  const wrongMaterial = dice.readings.filter(
+    (each) => each.roughness !== 0.9 || each.metalness !== 0,
+  );
+  const span = dice.readings.map((each) => each.high - each.low);
+  console.log(
+    `browser: tray dice material=${dice.material} faces=${dice.readings.length} ` +
+      `canvas=${dice.readings[0]?.canvas ?? 0} ` +
+      `span=${Math.min(...span).toFixed(1)}..${Math.max(...span).toFixed(1)} of a promised ` +
+      `${(255 - darkest).toFixed(1)} levels, floor=${reach.toFixed(1)} ` +
+      `darkest=${Math.min(...dice.readings.map((each) => each.low)).toFixed(1)} ` +
+      `against ${darkest.toFixed(1)} flat=${flat.length} overdone=${overdone.length}`,
+  );
+  checks.push({
+    name: 'tray.the-grain-reached-every-die-face',
+    ok:
+      dice.material === grainModule.GRAIN_MATERIAL &&
+      dice.faults.length === 0 &&
+      dice.readings.length > TWELVE_DIE_COUNT &&
+      flat.length === 0 &&
+      overdone.length === 0 &&
+      wrongMaterial.length === 0,
+    detail:
+      `the factory is on the ${dice.material} material against the ` +
+      `${grainModule.GRAIN_MATERIAL} the module names, and ${dice.readings.length} face ` +
+      `materials over ${counters.dice} dice were read off the live objects the renderer draws ` +
+      `with. ${wrongMaterial.length} were not at roughness 0.9 and metalness 0. Each grain is ` +
+      `read out of the canvas that became map.image, in a band across the top a fifth of the ` +
+      `canvas deep, which the numeral never reaches. ${flat.length} spanned under ${reach.toFixed(1)} levels, which is a quarter of ` +
+      `the ${(255 - darkest).toFixed(1)} the octaves promise, and a face with no grain spans ` +
+      `zero. ${overdone.length} went below ${darkest.toFixed(1)}, which is the darkest the ` +
+      `octaves allow. ${dice.faults.length} faults [${dice.faults.join('; ')}]`,
+  });
 
   const rest = await readTrayRest(page);
   checks.push({
@@ -9779,6 +9889,173 @@ async function readPaints(page, probes) {
   }, probes);
 }
 
+// ---------------------------------------------------------------------------
+// The grain on a surface — Unit 4.12
+//
+// The owner asked for a texture that is "slight, but noticeable". Both halves
+// of that are measured here, and both are measured on PIXELS the browser really
+// drew. A check that read `background-image` off a rule, or off a computed
+// style, would say the declaration is present and nothing at all about whether
+// a player sees it: an element under an opaque child, or a blend mode the
+// browser refused, would pass such a check while the surface stayed flat.
+//
+// The instrument is a difference of two screenshots of the SAME rectangle. One
+// rule is switched off between them — the one that puts the grain on the
+// surface under test and on no other — so every pixel that moves belongs to
+// that surface. A child that carries its own grain keeps it in both frames and
+// contributes nothing, which is what makes one surface measurable inside
+// another.
+//
+// Three bounds, and each one fails a different way of being wrong.
+//
+//   * `share` — the part of the surface that moved at all. A grain nobody can
+//     find has failed, and a rule that never reached the element moves nothing.
+//     This is the floor, and it is what goes red when the stylesheet loses the
+//     rule.
+//   * `worst` — the strongest pixel. This is the ceiling that holds "slight".
+//     A grain that shouts reads as noise rather than as a material.
+//   * the contrast the grained ground really carries. This is the half that
+//     says the texture does not fight the reading. **It is measured and not
+//     assumed.** A first draft of this check asserted that the average of a
+//     surface does not move, and the measurement refused it: `soft-light` is
+//     not symmetric on a dark ground, and every dark row came out 7 to 8 levels
+//     lighter. That is a fact about the blend and no choice of noise removes
+//     it, so the claim was rewritten to the one that matters. The ink of each
+//     surface is read off the rendered element, the ground is the AVERAGE of
+//     the pixels that surface really painted, grain and all, and the WCAG floor
+//     is measured between the two. The drift is reported beside it.
+// ---------------------------------------------------------------------------
+
+/** The floor for text, restated. WCAG 2.2 SC 1.4.3. */
+const GRAIN_TEXT_FLOOR = 4.5;
+
+/**
+ * The three surfaces, the rule that grains each one, and the ink it carries.
+ *
+ * `ink` is a custom property where the text on that surface takes one, and the
+ * word `color` where the text is whatever the element inherited.
+ */
+const GRAIN_SURFACES = [
+  { name: 'the page', selector: '.screen', ink: 'color' },
+  { name: 'a panel', selector: '.shell-f', ink: 'color' },
+  { name: 'the table', selector: '[data-el="dice-table"]', ink: '--on-tray' },
+];
+
+/** The part of a surface that must move. Under this the grain is not there. */
+const GRAIN_SHARE_FLOOR = 0.25;
+/** The most any one pixel may move, out of 255. Over this it is not slight. */
+const GRAIN_WORST_CEILING = 24;
+/** The side of the patch read on each surface, in CSS pixels. */
+const GRAIN_PATCH = 300;
+
+/**
+ * Read one surface three times: grained, flat, and flat under a marker colour.
+ *
+ * The third frame is what gives the reading an honest DENOMINATOR. A patch of
+ * the page is mostly covered by the header and the table, so the share of the
+ * PATCH that moved would say almost nothing. The marker frame paints the
+ * surface under test one colour nothing else uses, and the pixels that differ
+ * between it and the flat frame are exactly the pixels that surface paints and
+ * a player sees. The share, the strongest move and the average move are all
+ * measured over that set and over no other pixel.
+ *
+ * A surface that is not on the screen, or that paints no pixel a player can
+ * see, answers null, so neither can pass as a measured one.
+ */
+async function readGrain(page, selector) {
+  const clip = await page.evaluate(
+    ({ selector, side }) => {
+      const found = document.querySelector(selector);
+      if (found === null) return null;
+      const box = found.getBoundingClientRect();
+      const width = Math.min(Math.round(box.width), side);
+      const height = Math.min(Math.round(box.height), side);
+      if (width < 16 || height < 16) return null;
+      return { x: Math.round(box.x), y: Math.round(box.y), width, height };
+    },
+    { selector, side: GRAIN_PATCH },
+  );
+  if (clip === null) return null;
+
+  const grained = await page.screenshot({ clip, type: 'png', encoding: 'base64' });
+  // One rule, added last, so it beats the rule under test on weight and order
+  // and touches nothing else. `!important` in a stylesheet beats the inline
+  // colour `src/tray/scene.ts` writes on the table, which is what lets the
+  // marker frame below reach that surface too.
+  const overrule = async (body) =>
+    page.evaluate(
+      ({ selector, body }) => {
+        document.getElementById('clatter-grain-off')?.remove();
+        if (body === null) return;
+        const off = document.createElement('style');
+        off.id = 'clatter-grain-off';
+        off.textContent = `${selector} { ${body} }`;
+        document.head.appendChild(off);
+      },
+      { selector, body },
+    );
+  await overrule('background-image: none !important;');
+  const flat = await page.screenshot({ clip, type: 'png', encoding: 'base64' });
+  await overrule('background-image: none !important; background-color: rgb(0 255 0) !important;');
+  const marked = await page.screenshot({ clip, type: 'png', encoding: 'base64' });
+  await overrule(null);
+
+  return page.evaluate(
+    async ({ grained, flat, marked }) => {
+      const pixels = async (encoded) => {
+        const blob = await (await fetch(`data:image/png;base64,${encoded}`)).blob();
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext('2d');
+        context.drawImage(bitmap, 0, 0);
+        return context.getImageData(0, 0, canvas.width, canvas.height).data;
+      };
+      const one = await pixels(grained);
+      const two = await pixels(flat);
+      const three = await pixels(marked);
+      if (one.length !== two.length || one.length !== three.length || one.length === 0) return null;
+      let own = 0;
+      let moved = 0;
+      let worst = 0;
+      let total = 0;
+      const ground = [0, 0, 0];
+      for (let at = 0; at < one.length; at += 4) {
+        // The denominator: this surface paints here, because the marker moved
+        // the pixel. Every reading below is taken over these pixels alone.
+        const marker =
+          Math.abs(three[at] - two[at]) +
+          Math.abs(three[at + 1] - two[at + 1]) +
+          Math.abs(three[at + 2] - two[at + 2]);
+        if (marker < 3) continue;
+        own += 1;
+        ground[0] += one[at];
+        ground[1] += one[at + 1];
+        ground[2] += one[at + 2];
+        const delta =
+          (one[at] - two[at] + (one[at + 1] - two[at + 1]) + (one[at + 2] - two[at + 2])) / 3;
+        if (Math.abs(delta) >= 1) moved += 1;
+        if (Math.abs(delta) > Math.abs(worst)) worst = delta;
+        total += delta;
+      }
+      if (own === 0) return null;
+      return {
+        pixels: one.length / 4,
+        own,
+        share: moved / own,
+        worst: Math.abs(worst),
+        drift: total / own,
+        // The ground a player's eye averages, taken off the grained frame. It
+        // is written in the shape `getComputedStyle` answers with, so the one
+        // contrast helper reads both ends of the pair.
+        ground: `rgb(${ground.map((sum) => Math.round(sum / own)).join(', ')})`,
+      };
+    },
+    { grained, flat, marked },
+  );
+}
+
 async function runTheme(page, options, checks) {
   // The oracle is the application's own theme modules, imported here as source.
   // `scripts/ts-resolve.mjs` supplies the extension Vite would have supplied,
@@ -9849,6 +10126,102 @@ async function runTheme(page, options, checks) {
       `the element the tray mounts into. ${trayWrong.length} disagreed: ` +
       `[${trayWrong.map((each) => `${each.id} drew ${each.read} against ${each.wanted}`).join('; ')}].`,
   });
+
+  // ---- 1a. Every surface really carries a grain — Unit 4.12. ----
+  //
+  // Read here, while the table is still on the screen and before a die is on
+  // it, so the patch on the table is bare surface. The sheet is closed first,
+  // because the sheet lies over the page and the footer. Every one of the six
+  // rows is read, so a grain that survived on one palette and vanished on
+  // another cannot pass, and the denominator is a product.
+  await closeSheet(page);
+  const grainReadings = [];
+  const grainFaults = [];
+  for (const id of NAMES) {
+    await openSheet(page);
+    await chooseThemeRow(page, id);
+    await closeSheet(page);
+    for (const surface of GRAIN_SURFACES) {
+      const read = await readGrain(page, surface.selector);
+      if (read === null) {
+        grainFaults.push(`${id}: ${surface.name} paints no pixel of the patch a player can see`);
+        continue;
+      }
+      grainReadings.push({ id, ...surface, ...read });
+      if (read.share < GRAIN_SHARE_FLOOR) {
+        grainFaults.push(
+          `${id}: ${surface.name} moved ${(read.share * 100).toFixed(1)} per cent of the ` +
+            `${read.own} pixels it paints, under the ${GRAIN_SHARE_FLOOR * 100} per cent a grain ` +
+            `a player can find has to move`,
+        );
+      }
+      if (read.worst > GRAIN_WORST_CEILING) {
+        grainFaults.push(
+          `${id}: ${surface.name} moved a pixel by ${read.worst.toFixed(1)} levels, over the ` +
+            `${GRAIN_WORST_CEILING} that keeps it slight`,
+        );
+      }
+      // The grain may not fight the reading. The ground is the one the browser
+      // drew and not the one the palette named, so a grain that dragged a
+      // surface toward its ink turns this red.
+      const ink = await page.evaluate(
+        ({ selector, ink }) => {
+          const found = document.querySelector(selector);
+          if (found === null) return null;
+          if (ink === 'color') return getComputedStyle(found).color;
+          const hex = getComputedStyle(document.documentElement).getPropertyValue(ink).trim();
+          const parts = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+          return parts === null
+            ? null
+            : `rgb(${parseInt(parts[1], 16)}, ${parseInt(parts[2], 16)}, ${parseInt(parts[3], 16)})`;
+        },
+        { selector: surface.selector, ink: surface.ink },
+      );
+      const ratio = ink === null ? null : ratioOfRgb(ink, read.ground);
+      grainReadings[grainReadings.length - 1].ratio = ratio;
+      if (ratio === null || ratio < GRAIN_TEXT_FLOOR) {
+        grainFaults.push(
+          `${id}: ink ${String(ink)} on ${surface.name} reads ` +
+            `${ratio === null ? 'nothing' : ratio.toFixed(2)} to 1 against the grained ground ` +
+            `${read.ground}, under the ${GRAIN_TEXT_FLOOR} of WCAG 2.2 SC 1.4.3`,
+        );
+      }
+    }
+  }
+  const grainWanted = NAMES.length * GRAIN_SURFACES.length;
+  const strongest = grainReadings.reduce(
+    (held, each) => (each.worst > held.worst ? each : held),
+    grainReadings[0] ?? { worst: 0, share: 0, id: 'none', name: 'nothing' },
+  );
+  const tightestGrain = grainReadings.reduce(
+    (held, each) => ((each.ratio ?? 0) < (held.ratio ?? 0) ? each : held),
+    grainReadings[0] ?? { ratio: 0, id: 'none', name: 'nothing' },
+  );
+  const drifts = grainReadings.map((each) => each.drift);
+  console.log(
+    `browser: theme grain readings=${grainReadings.length} of ${grainWanted} ` +
+      `faults=${grainFaults.length} strongest=${strongest.worst.toFixed(1)} levels ` +
+      `(${strongest.id} ${strongest.name}) ` +
+      `drift=${Math.min(...drifts).toFixed(2)}..${Math.max(...drifts).toFixed(2)} levels ` +
+      `tightest=${(tightestGrain.ratio ?? 0).toFixed(2)} (${tightestGrain.id} ${tightestGrain.name}) ` +
+      `share=${grainReadings.map((each) => (each.share * 100).toFixed(0)).join(',')}`,
+  );
+  checks.push({
+    name: 'theme.every-surface-carries-a-grain',
+    ok: grainReadings.length === grainWanted && grainFaults.length === 0,
+    detail:
+      `${grainReadings.length} readings against a product of ${NAMES.length} rows by ` +
+      `${GRAIN_SURFACES.length} surfaces. Each one is the difference between two screenshots of ` +
+      `the same rectangle, taken with the grain rule on and with it off, over the pixels a third ` +
+      `frame proves that surface really paints. So every pixel counted is one the browser drew ` +
+      `and one this surface owns. A grain must move ${GRAIN_SHARE_FLOOR * 100} per cent of them, ` +
+      `no pixel by more than ${GRAIN_WORST_CEILING} levels, and the ink on the grained ground ` +
+      `must still clear ${GRAIN_TEXT_FLOOR} to 1. The strongest reading of this run is ` +
+      `${strongest.worst.toFixed(1)} levels on ${strongest.id} ${strongest.name}, and the ` +
+      `tightest contrast is ${(tightestGrain.ratio ?? 0).toFixed(2)} to 1 on ${tightestGrain.id} ` +
+      `${tightestGrain.name}. ${grainFaults.length} faults [${grainFaults.join('; ')}]`,
+  });
+  await openSheet(page);
 
   // ---- 2. The same id reaches the flat dice. ----
   //

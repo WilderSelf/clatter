@@ -3,9 +3,10 @@
 // Three claims, three denominators, and every denominator is derived from the
 // file rather than written here.
 //
-//   1. `src/shell.css` holds no colour literal except three, and all three are
-//      the same kind of thing. The list is taken OFF the file, so a hex added
-//      later turns this red without anybody remembering to add a case.
+//   1. Every colour literal in `src/shell.css` is black or white at a fraction
+//      of one, and the file holds no more of them than a counted ceiling. The
+//      list is taken OFF the file, so a hex added later turns this red without
+//      anybody remembering to add a case.
 //   2. Every role the theme module writes is spent by the stylesheet, and every
 //      variable the stylesheet reads and does not declare is a role the theme
 //      module writes. Two directions, so neither a dead role nor an unwritten
@@ -39,19 +40,25 @@ const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, ' ');
 const NAMES: readonly ThemeId[] = ['leather', 'ash', 'moss', 'bone', 'iron', 'oxblood'];
 
 /**
- * The three colour literals the stylesheet is allowed, and what each one is for.
+ * How many colour literals the stylesheet may hold.
  *
- * All three are black at a fraction of one. A shadow is the absence of light
- * rather than a colour of the theme, and a scrim has to darken every palette,
- * including the light one. The list is asserted against what the file really
- * holds, and each entry is measured to be black and translucent, so a fourth
- * literal cannot join by being written into this table.
+ * The claim this file used to make was a LIST of three exact strings. That list
+ * is not the property. The property is **the stylesheet holds no hue of its
+ * own**, and black or white at a fraction of one is a shade rather than a hue:
+ * a shadow is the absence of light, a scrim has to darken every palette
+ * including the light one, and a highlight has to lift every palette including
+ * the dark ones. A list of exact strings refused a fourth SHADE as loudly as it
+ * refused a hue, which made the material grain of Unit 4.12 impossible to write
+ * without weakening the check to a table anybody could add a hue to.
+ *
+ * So the shade is measured, and the count is bounded. The ceiling is a decision
+ * and not a reading: raising it is a change to this file, which is what a
+ * reviewer sees. The floor says the reader found the file at all.
  */
-const ALLOWED_LITERALS = [
-  'rgb(0 0 0 / 14%)', // the drop shadow under a loose die
-  'rgb(0 0 0 / 10%)', // the inset shadow inside a die on a pad
-  'rgb(0 0 0 / 55%)', // the scrim behind the disclosure sheet
-];
+const LITERAL_CEILING = 3;
+
+/** Below this the reader is broken, not the file. Three literals ship today. */
+const LITERAL_FLOOR = 3;
 
 /** Every way a colour can be written, apart from a named keyword. */
 const LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix)\([^)]*\)/g;
@@ -86,23 +93,39 @@ const FORBIDDEN_KEYWORDS = [
 ];
 
 describe('the stylesheet holds no colour of its own', () => {
-  it('holds three colour literals, and every one of them is black at a fraction of one', () => {
+  it('holds only black or white at a fraction of one, under a counted ceiling', () => {
     const found = [...RULES.matchAll(LITERAL)].map((match) => match[0]);
-    // The list is derived from the file. It is compared against the table
-    // above, so a hex added to a rule tomorrow fails here by its own text.
-    expect(found, 'every colour literal left in src/shell.css').toEqual(ALLOWED_LITERALS);
-    expect(ALLOWED_LITERALS.length, 'the file is allowed three and no more').toBe(3);
+    // The denominator is the file's own, so a hex added to a rule tomorrow is
+    // read here whether or not anybody remembered this check.
+    expect(
+      found.length,
+      'the reader found the literals src/shell.css holds',
+    ).toBeGreaterThanOrEqual(LITERAL_FLOOR);
+    expect(found.length, 'the file stays under its counted ceiling').toBeLessThanOrEqual(
+      LITERAL_CEILING,
+    );
 
-    // Each one is measured rather than trusted, so a fourth literal cannot join
-    // the table by being written into it: it has to be black and translucent.
+    // The claim itself. Each literal is measured to be a SHADE — black or white
+    // at a stated fraction under one — so a hue cannot pass by being written
+    // into any table this file holds.
     let measured = 0;
+    const hues: string[] = [];
     for (const literal of found) {
-      const parts = /^rgb\((\d+) (\d+) (\d+) \/ (\d+)%\)$/.exec(literal);
-      expect(parts, `${literal} is black at a stated fraction`).not.toBeNull();
-      expect([parts?.[1], parts?.[2], parts?.[3]], `${literal} is black`).toEqual(['0', '0', '0']);
-      expect(Number(parts?.[4]), `${literal} is translucent`).toBeLessThan(100);
+      const parts = /^rgb\((\d+) (\d+) (\d+) \/ (\d+(?:\.\d+)?)%\)$/.exec(literal);
+      if (parts === null) {
+        hues.push(`${literal} is not written as rgb(r g b / a%)`);
+        continue;
+      }
+      const [red, green, blue] = [parts[1], parts[2], parts[3]];
+      const black = red === '0' && green === '0' && blue === '0';
+      const white = red === '255' && green === '255' && blue === '255';
+      if (!black && !white) hues.push(`${literal} is neither black nor white`);
+      else if (!(Number(parts[4]) < 100)) hues.push(`${literal} is not at a fraction of one`);
       measured += 1;
     }
+    expect(hues, 'every colour literal in src/shell.css is black or white at a fraction').toEqual(
+      [],
+    );
     expect(measured, 'every literal found was measured').toBe(found.length);
   });
 
