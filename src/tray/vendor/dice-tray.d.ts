@@ -149,7 +149,7 @@ export interface DiceResults {
  * The colour set the factory paints a die from.
  *
  * `texture` is the entry `createTextMaterial` composites into the face canvas.
- * The published build fetches it through an image loader; Clatter hands the
+ * The published build fetches it through an image loader. Clatter hands the
  * resolved entry over instead, because the texture files went at Unit 3.1.
  * `material` on that entry names a row of the factory's own material table and
  * is what decides whether a die takes the standard branch or the Phong one.
