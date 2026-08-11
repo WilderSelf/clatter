@@ -28,9 +28,14 @@ function impact(kind: TrayImpact['kind'], speed: number, self = 1, other = 2): T
 
 interface FakeGain {
   gain: { value: number; setValueAtTime(value: number, at: number): void };
+  /** Where each fall to silence ends, on the clock the engine was given. */
+  ends: number[];
 }
 interface FakeFilter {
+  type: string;
   frequency: { value: number };
+  /** The node this filter feeds. It names which gain belongs to which band. */
+  to: unknown;
 }
 
 /**
@@ -67,11 +72,19 @@ function fakeContext(): {
       stop: (): void => {},
     }),
     createBiquadFilter: () => {
-      const filter = {
+      const filter: FakeFilter & { Q: { value: number }; connect(next: unknown): unknown } = {
         type: '',
         frequency: { value: 0 },
         Q: { value: 0 },
-        connect: (next: unknown) => next,
+        to: null,
+        connect: (next: unknown) => {
+          // Which gain a filter feeds is the only thing that says which band
+          // an envelope belongs to. Reading the two gains in the order they
+          // were built would pass a graph that gave each band the other one's
+          // envelope, because the two lengths are then simply swapped.
+          filter.to = next;
+          return next;
+        },
       };
       filters.push(filter);
       return filter;
@@ -83,8 +96,14 @@ function fakeContext(): {
           setValueAtTime: (value: number): void => {
             levels.push(value);
           },
-          exponentialRampToValueAtTime: (): void => {},
+          // The engine writes one fall per gain. The time it ends is the
+          // length of that band, and it is discarded by a fake that takes no
+          // arguments here.
+          exponentialRampToValueAtTime: (_value: number, at: number): void => {
+            gain.ends.push(at);
+          },
         },
+        ends: [] as number[],
         connect: (next: unknown) => next,
       };
       gains.push(gain);
@@ -150,9 +169,67 @@ describe('voiceOf', () => {
     const high = voiceOf(impact('die', LOUDEST_AT), 0.999);
     expect(high?.hz).toBeGreaterThan(low?.hz ?? Infinity);
     expect(high?.seconds).toBeGreaterThan(low?.seconds ?? Infinity);
+    // Both bands move, or a voice changes shape as it changes pitch.
+    expect(high?.bodyHz).toBeGreaterThan(low?.bodyHz ?? Infinity);
+    expect(high?.knockSeconds).toBeGreaterThan(low?.knockSeconds ?? Infinity);
     // The same collision, so the loudness may not move with the spread.
     expect(high?.level).toBe(low?.level);
   });
+});
+
+describe('the graph one voice builds', () => {
+  /**
+   * The band-pass tuned to a named centre, and the gain it feeds.
+   *
+   * A check that read the two gains in the order they were built would pass a
+   * graph that handed each band the other band's envelope, because that swap
+   * leaves the same two lengths in the same graph. The centre frequency is what
+   * says which band a gain belongs to.
+   */
+  function bandOf(
+    fake: ReturnType<typeof fakeContext>,
+    hz: number,
+  ): { filter: FakeFilter; gain: FakeGain } {
+    const filter = fake.filters.find(
+      (each) => each.type === 'bandpass' && Math.abs(each.frequency.value - hz) < 1e-6,
+    );
+    if (!filter) throw new Error(`no band-pass at ${hz} Hz`);
+    return { filter, gain: filter.to as FakeGain };
+  }
+
+  it.each(['die', 'surface'] as const)(
+    'gives the body of a %s voice a longer fall than its knock',
+    (kind) => {
+      const fake = fakeContext();
+      const engine = createSoundEngine({ createContext: () => fake.ctx, spread: () => 0.5 });
+      engine.enable();
+      // The default ids read as a first report, which is the one a die-on-die
+      // contact is heard on. A second report starts no voice at all.
+      engine.impact(impact(kind, LOUDEST_AT));
+      expect(engine.counts.triggers, 'the collision started one voice').toBe(1);
+
+      const voice = voiceOf(impact(kind, LOUDEST_AT), 0.5);
+      if (!voice) throw new Error('the loudest collision made no voice');
+      const knock = bandOf(fake, voice.hz);
+      const body = bandOf(fake, voice.bodyHz);
+
+      // Read off the graph, not off the record that fed it. Weight is a
+      // property of what the player hears, and `voiceOf` can hold it while
+      // `playVoice` hands the two lengths to the wrong bands.
+      expect(knock.gain.ends, 'the knock falls once').toHaveLength(1);
+      expect(body.gain.ends, 'the body falls once').toHaveLength(1);
+      expect(body.gain.ends[0], 'the body of the sound outlasts the knock').toBeGreaterThan(
+        knock.gain.ends[0] ?? Infinity,
+      );
+      // And each band ends where the voice says it does, so a graph that made
+      // the body longer by any other amount than the design fails here too.
+      expect(knock.gain.ends[0], 'the knock ends where the voice says').toBeCloseTo(
+        voice.knockSeconds,
+        6,
+      );
+      expect(body.gain.ends[0], 'the body ends where the voice says').toBeCloseTo(voice.seconds, 6);
+    },
+  );
 });
 
 describe('clampVolume', () => {

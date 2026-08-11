@@ -3273,7 +3273,7 @@ async function runSoundScene(page, options, checks) {
       skip: off.dispatches,
     },
   );
-  const bandRatio = rendered.high > 0 ? rendered.low / rendered.high : Infinity;
+  const bandRatio = rendered.low / rendered.high;
   console.log(
     `browser: sound render peak_at_${SOUND_TEST_VOLUME}=${rendered.loud.peak.toFixed(6)} ` +
       `peak_at_0=${rendered.shut.peak.toFixed(6)} rendered_triggers=${rendered.loud.triggers} ` +
@@ -3287,7 +3287,9 @@ async function runSoundScene(page, options, checks) {
 
   checks.push({
     name: 'sound.the-low-band-carries-the-sound',
-    ok: bandRatio >= LOW_OVER_HIGH_FLOOR && rendered.low > 0 && rendered.high > 0,
+    // A high band of 0 would make the ratio infinite, so it is named. A low
+    // band of 0 cannot decide anything the ratio does not decide already.
+    ok: bandRatio >= LOW_OVER_HIGH_FLOOR && rendered.high > 0,
     detail:
       `the rendered throw carries ${rendered.low.toExponential(3)} of energy under ` +
       `${LOW_BAND_HZ} Hz against ${rendered.high.toExponential(3)} over ${HIGH_BAND_HZ} Hz, a ` +

@@ -170,9 +170,16 @@ const DAMPING_Q = -3.01;
 const BAND_WIDTH_REFERENCE = 1200;
 
 /**
- * The trim that holds the tray at the loudness it had before the timbres
- * changed. Measured: at this value the loudest single voice of either timbre
- * peaks at 0.42 to 0.46, against the 0.47 the old single-band voice reached.
+ * The trim that sets how loud one voice is.
+ *
+ * At this value the loudest die voice peaks near the 0.47 the old single-band
+ * voice reached. The surface voice is louder than the old one, by about three
+ * quarters at the middle of the spread, because the thud it now carries is a
+ * long low band rather than one short mid band. That is the intended sound and
+ * not a slip: the limiter in `build` holds the sum.
+ *
+ * The tray peak of a whole throw is measured, and never stated here. Read it
+ * off `peak_at_...` in the `--sound` mode of `scripts/browser.mjs`.
  */
 const VOICE_GAIN = 3;
 
