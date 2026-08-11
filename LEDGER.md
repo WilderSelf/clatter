@@ -6691,7 +6691,12 @@ again anyway, because a claim that nothing moved is worth less than a reading.
 
 **Nothing of Unit 5.2.** It is complete.
 
-## Unit 5.3 — the tray timbre: wooden voice on a leather ground
+## Phase 6 — the owner round of 2026-08-10
+
+The approved plan runs through Unit 5.4. Phase 6 holds the five pull requests the owner reviewed
+after release, outside the original unit list.
+
+## Unit 6.1 — the tray timbre: wooden voice on a leather ground
 
 ### What landed
 
@@ -6729,6 +6734,8 @@ element turns this check red.
 Proven red on the restored old timbre: `FAIL sound.the-low-band-carries-the-sound ... a ratio of 0.6
 against a floor of 8`, `checks=11 failures=1`. Every other check stayed green, peak included.
 
+This finding is about the measurement only. The sound itself stays owner judgement.
+
 ### Two defects
 
 **Defect 1, found in review.** Swapping the two envelope durations inverted the weight. The test fake
@@ -6758,9 +6765,9 @@ not prove the sound is good.
 
 ### What is open
 
-Nothing of Unit 5.3. It is complete.
+Nothing of Unit 6.1. It is complete.
 
-## Unit 5.4 — marks timing: hold the readout until the tray settles
+## Unit 6.2 — marks timing: hold the readout until the tray settles
 
 ### What landed
 
@@ -6829,9 +6836,9 @@ unit.
 
 ### What is open
 
-Nothing of Unit 5.4. It is complete.
+Nothing of Unit 6.2. It is complete.
 
-## Unit 5.5 — theme consolidation: one colour, weathered mood
+## Unit 6.3 — theme consolidation: one colour, weathered mood
 
 ### What landed
 
@@ -6863,8 +6870,9 @@ tightest die on tray 3.42 against 3, tightest ink 4.52 against 4, tightest ladde
 
 ### Two defects caught by rendering
 
-The panel printed the legend "Theme" twice. The row swatch showed the accent alone, so the one light
-theme read dark. Both now carry checks proven red.
+The panel printed the legend "Theme" twice. Each row swatch drew the accent colour alone, so the one
+light theme read as dark. The fix splits page and accent on the diagonal. Both now carry checks proven
+red.
 
 ### The tray surface band
 
@@ -6888,9 +6896,9 @@ amendment. `docs/design/0002-screen-design.md` carries one too.
 
 ### What is open
 
-Nothing of Unit 5.5. It is complete.
+Nothing of Unit 6.3. It is complete.
 
-## Unit 5.6 — options sheet layout: five categories, desktop width
+## Unit 6.4 — options sheet layout: five categories, desktop width
 
 ### What landed
 
@@ -6951,9 +6959,9 @@ been retyped from a red-proof run. A floor of `> 10` would have passed it.
 
 ### What is open
 
-Nothing of Unit 5.6. It is complete.
+Nothing of Unit 6.4. It is complete.
 
-## Unit 5.7 — material grain: light texture everywhere
+## Unit 6.5 — material grain: light texture everywhere
 
 ### What landed
 
@@ -7011,9 +7019,9 @@ before the scan.
 
 Both live on branch `feat/grain-covers-every-ground`, in progress.
 
-**Finding 1: The grain coverage check counts its own fixture.** The stylesheet grains 18 selectors.
-The check named three. Thirteen grained selectors can be deleted while it still reports success. Of
-48 ground-painting selectors, 31 stay flat today.
+**Finding 1: The grain coverage check counts its own fixture.** The stylesheet holds 48 selectors
+that paint a ground. The check named three. Of those 48, the grain covers 18 and 31 stay flat. The
+check stays green while a selector that grains is deleted.
 
 **Finding 2: The 90 rendered contrast claims resolve their ground through computed style**, which no
 longer equals the painted pixels. One reading needs confirming: a filled control in one row measured
@@ -7032,7 +7040,7 @@ longer equals the painted pixels. One reading needs confirming: a filled control
 
 ### What is open
 
-Two findings remain open on a follow-up branch. Unit 5.7 is otherwise complete.
+Two findings remain open on a follow-up branch. Unit 6.5 is otherwise complete.
 
 ## What the owner still owes, across the whole project
 
