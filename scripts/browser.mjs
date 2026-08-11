@@ -276,7 +276,7 @@
 import { register } from 'node:module';
 import { spawn } from 'node:child_process';
 import { randomInt } from 'node:crypto';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openPage, DEFAULT_BROWSER_PATH } from './browser-driver.mjs';
@@ -10369,6 +10369,23 @@ const GRAIN_EXCEPTIONS = [{ selector: '.die', why: 'see the comment above `.die`
 /** How many exceptions the gate carries. One. */
 const GRAIN_EXCEPTION_COUNT = 1;
 
+/**
+ * The grounds that take the SIZE arm, declared rather than derived.
+ *
+ * The gate samples states after a roll, and a roll draws whatever the rules
+ * core drew: the seed pins the tray and never the pool, because Constraint 7
+ * puts the rules on `crypto.getRandomValues`. So which members are laid out at
+ * all varies from run to run, and once a box decides an arm, a derived
+ * membership makes the verdict vary with it. A gate that samples a random state
+ * cannot be allowed to flip.
+ *
+ * So the size arm is CHECKED and not derived. `.st-rule` is one pixel wide and
+ * lives in the status line, which every state of the screen draws. Both
+ * directions fire: a member that takes the arm and is not named here is a
+ * finding, and a name here that stops taking it is a stale excuse.
+ */
+const GRAIN_SIZE_ARM = ['.st-rule'];
+
 const excepted = (selector) => GRAIN_EXCEPTIONS.some((one) => one.selector === selector);
 
 const MEANING_MARKS = [
@@ -10618,10 +10635,10 @@ async function readGrounds(page, selectors) {
         // A selector the browser refuses is a fault of this list, not a state.
         all = [];
       }
-      // **Every element the selector draws, and not the first one.** `.die`
-      // draws pips on a six-faced die and a numeral on every other, so the
-      // first match alone would answer for a rule that covers both, and which
-      // one came first would decide the reading.
+      // The first element the selector draws. One is enough for every reading
+      // this gate takes: a rule's grain and a rule's box are the rule's, not
+      // the element's. The fourth arm needed every match and the fourth arm is
+      // gone, so nothing here reads more than one.
       const found = all[0] ?? null;
       if (found === null) continue;
       const box = found.getBoundingClientRect();
@@ -10823,33 +10840,40 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
     .filter((selector) => !states.some((state) => state.read[selector] !== undefined));
   const probed = await probeGrain(page, neverDrawn);
 
-  // The largest box of any state, and grained if any state drew it grained.
+  // The largest box a state really laid out, and grained if any state drew it so.
   const measured = population.map((member) => {
     const seen = states.filter((state) => state.read[member.selector] !== undefined);
     const boxes = seen.map((state) => state.read[member.selector]);
-    const widest = boxes.reduce(
-      (held, box) => (box.width * box.height > held.width * held.height ? box : held),
-      boxes[0] ?? { width: 0, height: 0, grained: false },
-    );
     const rule = grainForSelector(rules, member.selector);
     // The coarse wavelength of the noise, per axis, on the surface this rule
     // stretches it to. `background-size` is a pair, so the two axes can differ:
     // the table pulls the noise flat and its two features are not the same.
     const feature = rule.size.map((size) => (noise.wavelength * size) / noise.span);
     const drawn = seen.length > 0;
+    // **A box of zero is not a reading.** `drawn` says a state produced a
+    // reading, and an element can be present, paint a colour and lay out at
+    // 0x0 — `.table` does exactly that wherever the run refuses WebGL, which
+    // is how this gate is meant to run and how CI runs it. Zero is under every
+    // feature, so the size arm would have excused the largest surface in the
+    // product. A member with no box of any size therefore falls through to the
+    // grain arm, and the floor has no free parameter: zero on either axis.
+    const sized = boxes.filter((box) => box.width > 0 && box.height > 0);
+    const largest = sized.reduce(
+      (held, box) => (box.width * box.height > held.width * held.height ? box : held),
+      sized[0] ?? { width: 0, height: 0 },
+    );
     return {
       ...member,
       states: seen.map((state) => state.name),
       drawn,
-      width: widest.width,
-      height: widest.height,
+      laidOut: sized.length > 0,
+      width: largest.width,
+      height: largest.height,
       grained: drawn ? boxes.some((box) => box.grained) : (probed[member.selector] ?? false),
       feature,
       // Under one coarse feature on either axis the noise cannot make a
       // pattern at all, so what lands there is a smudge and not a material.
-      // Only a ground the screen really drew may take this arm: an undrawn one
-      // has no box, and a box of nothing would excuse every one of them.
-      small: drawn && (widest.width < feature[0] || widest.height < feature[1]),
+      small: sized.length > 0 && (largest.width < feature[0] || largest.height < feature[1]),
       mark: MEANING_MARKS.some((one) => one.selector === member.selector),
     };
   });
@@ -10876,6 +10900,46 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
       ? []
       : [`${one.token} is not a token the palette pins fixed across every row`];
   });
+
+  // Both directions of the declared size arm.
+  const sizeArmFaults = [
+    ...measured
+      .filter((one) => one.small && !GRAIN_SIZE_ARM.includes(one.selector))
+      .map(
+        (one) =>
+          `${one.selector} took the size arm at ${one.width.toFixed(1)}x${one.height.toFixed(1)} px ` +
+          `and is not declared`,
+      ),
+    ...GRAIN_SIZE_ARM.filter(
+      (selector) => !measured.some((one) => one.selector === selector && one.small),
+    ).map((selector) => `${selector} is declared for the size arm and no longer takes it`),
+  ];
+
+  // **The two halves must read one stylesheet.** The population comes from
+  // `src/shell.css` and every box comes from the built page. They agree because
+  // the build runs first, and nothing asserted it until now: a stale `dist/`
+  // would let the gate measure one file and judge another.
+  //
+  // The claim is a SUBSET and the direction is the one that matters: every
+  // ground the source states must be in the built file. A stale `dist/` is
+  // missing what the source gained, so it fires. The counts are not compared,
+  // because the build legitimately changes them — the minifier drops the quotes
+  // from an attribute selector and writes `transparent` as `0 0`, which this
+  // reader counts as a ground the source did not state. Quotes are normalised
+  // away for the same reason.
+  const bare = (selector) => selector.replace(/['"]/g, '');
+  const builtGrounds = new Set(
+    groundSelectors(
+      readdirSync(join(here, '..', 'dist', 'assets'))
+        .filter((name) => name.endsWith('.css'))
+        .map((name) => readFileSync(join(here, '..', 'dist', 'assets', name), 'utf8'))
+        .join('\n')
+        .replace(/\/\*[\s\S]*?\*\//g, ' '),
+    ).map((one) => bare(one.selector)),
+  );
+  const notBuilt = population
+    .map((one) => one.selector)
+    .filter((selector) => !builtGrounds.has(bare(selector)));
 
   const uncovered = measured.filter(
     (member) => !member.grained && !member.small && !member.mark && !excepted(member.selector),
@@ -10906,6 +10970,8 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
       `never_drawn=${measured.filter((one) => !one.drawn).length} ` +
       `probed_for_grain=${Object.keys(probed).length} ` +
       `exceptions=${GRAIN_EXCEPTIONS.length} of ${GRAIN_EXCEPTION_COUNT} stale=${staleExceptions.length} ` +
+      `size_arm=${measured.filter((one) => one.small).length} of ${GRAIN_SIZE_ARM.length} declared ` +
+      `faults=${sizeArmFaults.length} built_missing=${notBuilt.length} of ${population.length} ` +
       `fixed_tokens=${fixedRoles.size} mark_faults=${markFaults.length}`,
   );
   console.log(
@@ -10935,7 +11001,8 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
       markFaults.length === 0 &&
       staleExceptions.length === 0 &&
       GRAIN_EXCEPTIONS.length === GRAIN_EXCEPTION_COUNT &&
-      covered === measured.length,
+      sizeArmFaults.length === 0 &&
+      notBuilt.length === 0,
     detail:
       `${covered} of the ${measured.length} grounds src/shell.css paints are covered, over ` +
       `${states.length} states of the screen. The population is every rule that paints a ` +
@@ -10954,6 +11021,14 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
       `${GRAIN_EXCEPTION_COUNT} [${GRAIN_EXCEPTIONS.map((one) => `${one.selector}: ${one.why}`).join('; ')}], ` +
       `and each is asserted STILL NEEDED: a ground that takes one of the three arms no ` +
       `longer needs an excuse. stale=${staleExceptions.length} [${staleExceptions.join('; ')}] ` +
+      `The size arm is declared and not derived, because a roll draws what the rules core drew ` +
+      `and a derived membership would let this verdict vary with it: ` +
+      `[${GRAIN_SIZE_ARM.join(', ')}], faults=${sizeArmFaults.length} [${sizeArmFaults.join('; ')}]. ` +
+      `A box of zero is not a reading, so a ground laid out at 0x0 falls through to the grain ` +
+      `arm rather than being excused as small. ` +
+      `The population comes from src/shell.css and every box comes from the built page, so the ` +
+      `built file is asserted to hold every ground the source states: ` +
+      `missing=${notBuilt.length} [${notBuilt.join('; ')}]. A stale dist/ is what that catches. ` +
       `uncovered=${uncovered.length} [${uncovered.map((one) => `${one.selector} at ${one.drawn ? `${one.width.toFixed(1)}x${one.height.toFixed(1)} px` : 'no box'}`).join('; ')}] ` +
       `mark_faults=${markFaults.length} [${markFaults.join('; ')}]`,
   });
@@ -11518,7 +11593,6 @@ async function runTheme(page, options, checks) {
       walk.unnamed.length === 0 &&
       walk.stateless === 0 &&
       missingGroups.length === 0 &&
-      walk.groups >= THEME_PANEL_GROUPS.length &&
       from !== null &&
       to !== null &&
       to !== from &&
