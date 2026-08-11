@@ -93,6 +93,27 @@ jobs:
           node scripts/browser.mjs --a11y --no-webgl \
             --url http://localhost:4173/clatter/ --browser "${browser}"
 
+      # The ground-coverage gate — Unit 4.13.
+      #
+      # Every rule of src/shell.css that paints a ground carries the material
+      # grain, or measures under one coarse feature of the grain that would
+      # apply to it, or is a declared meaning mark, or is the one declared
+      # exception. The gate reads the stylesheet, the computed styles the
+      # browser resolved and the boxes it laid out.
+      #
+      # It is a mode of its own rather than part of `--theme`, because `--theme`
+      # needs a graphics card for its 3D repaint check and no CI runner has one.
+      # This gate needs none, and it judges no renderer, so it skips nothing.
+      # `--no-webgl` DECLARES the machine and the run asserts the refusal landed,
+      # so a pass here says something about the runner and not about a card.
+      - name: Every ground the stylesheet paints carries the grain
+        run: |
+          set -eu
+          browser="$(command -v firefox)"
+          echo "driving ${browser}"
+          node scripts/browser.mjs --grounds --no-webgl \
+            --url http://localhost:4173/clatter/ --browser "${browser}"
+
       # The steps-to-rest gate. It runs the tray physics on the CPU with no
       # renderer, so it cannot flake on a GPU or on a shared runner. It stays
       # out of the validate list, because a validation attempt is capped and a

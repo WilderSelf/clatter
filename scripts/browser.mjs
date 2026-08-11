@@ -10959,6 +10959,59 @@ async function runGroundCoverage(page, checks, options = { captureShell: null })
   });
 }
 
+/**
+ * The ground-coverage gate on its own, so CI can run it.
+ *
+ * **A gate nothing runs is a gate that decays.** `--theme` needs a graphics
+ * card for its 3D repaint check, so CI has never run it and would never have
+ * run this gate either. Nothing the gate measures needs a card: it reads the
+ * stylesheet, the computed styles the browser resolved and the boxes it laid
+ * out. So the gate is a mode of its own, and that mode judges no renderer and
+ * therefore skips nothing. A mode that silently skips is worse than one that
+ * refuses.
+ *
+ * It starts from the defaults, exactly as `--theme` does, so nothing an earlier
+ * run stored decides what this one reads.
+ */
+async function runGrounds(page, options, checks) {
+  register('./ts-resolve.mjs', import.meta.url);
+  await page.evaluate(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // A browser that refuses storage answers the defaults anyway.
+    }
+  });
+  // **The declaration, not an assumption.** `--no-webgl` refuses every WebGL
+  // context before the page loads, so the run proves the gate reads nothing a
+  // graphics card provides rather than merely happening to pass on a machine
+  // that has one. CI names the flag for the same reason the a11y gate does.
+  if (options.noWebgl) {
+    await page.evaluateOnNewDocument(() => {
+      const real = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function refused(kind, ...rest) {
+        if (String(kind).startsWith('webgl')) return null;
+        return real.call(this, kind, ...rest);
+      };
+      window.__webglRefused = true;
+    });
+  }
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('[data-el="roll-button"]', { timeout: 30000 });
+  if (options.noWebgl) {
+    const refused = await page.evaluate(() => window.__webglRefused === true);
+    checks.push({
+      name: 'grounds.the-run-declared-a-machine-with-no-graphics-card',
+      ok: refused,
+      detail:
+        `the run refused every WebGL context before the page loaded, and the page reports the ` +
+        `refusal landed as ${refused}. Without this the gate could pass on a card and say ` +
+        `nothing about the runner that has none.`,
+    });
+  }
+  await runGroundCoverage(page, checks, options);
+}
+
 async function runTheme(page, options, checks) {
   // The oracle is the application's own theme modules, imported here as source.
   // `scripts/ts-resolve.mjs` supplies the extension Vite would have supplied,
@@ -14865,6 +14918,7 @@ function parseArgs(argv) {
     noWebgl: false,
     sheet: false,
     theme: false,
+    grounds: false,
     history: false,
     blockedChunk: false,
     faults: false,
@@ -14919,6 +14973,7 @@ function parseArgs(argv) {
     else if (arg === '--no-webgl') options.noWebgl = true;
     else if (arg === '--sheet') options.sheet = true;
     else if (arg === '--theme') options.theme = true;
+    else if (arg === '--grounds') options.grounds = true;
     else if (arg === '--history') options.history = true;
     else if (arg === '--blocked-chunk') options.blockedChunk = true;
     else if (arg === '--faults') options.faults = true;
@@ -14989,6 +15044,7 @@ function parseArgs(argv) {
     ['--a11y', options.a11y],
     ['--sheet', options.sheet],
     ['--theme', options.theme],
+    ['--grounds', options.grounds],
     ['--history', options.history],
     ['--blocked-chunk', options.blockedChunk],
     ['--faults', options.faults],
@@ -15029,8 +15085,8 @@ function parseArgs(argv) {
   if (options.themeId !== null && !options.table) {
     throw new Error('--theme-id belongs to --table');
   }
-  if (options.noWebgl && !options.a11y) {
-    throw new Error('--no-webgl belongs to --a11y');
+  if (options.noWebgl && !options.a11y && !options.grounds) {
+    throw new Error('--no-webgl belongs to --a11y or --grounds');
   }
   if (options.a11y && options.hardware && options.noWebgl) {
     throw new Error('--hardware and --no-webgl declare opposite machines. Name one.');
@@ -16123,6 +16179,7 @@ async function run(options) {
       options.a11y ||
       options.sheet ||
       options.theme ||
+      options.grounds ||
       options.history ||
       options.blockedChunk ||
       options.faults ||
@@ -16223,6 +16280,8 @@ async function run(options) {
       await runA11y(page, options, checks);
     } else if (options.sheet) {
       await runSheet(page, options, checks);
+    } else if (options.grounds) {
+      await runGrounds(page, options, checks);
     } else if (options.theme) {
       await runTheme(page, options, checks);
     } else if (options.history) {
