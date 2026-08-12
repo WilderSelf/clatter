@@ -13,7 +13,9 @@ color: purple
 This file replaces the user-scope reviewer. Run everything that one runs — plan conformance,
 correctness, tests, conventions, safety, and defect-fix evidence with measured numbers — then
 run the three sections below. Read `~/.claude/agents/reviewer.md` for the shared duties.
-`CLAUDE.md` holds the constraints. `LEDGER.md` holds unit state.
+`CLAUDE.md` holds the constraints. The status table in `LEDGER.md` holds unit state — read a
+unit's last row. `LEDGER.md` keeps the recent sections, and older ones are in `LEDGER.archive.md`,
+which stays greppable.
 
 ## Duty 1 — no forbidden token in the diff
 
