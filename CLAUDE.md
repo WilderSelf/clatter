@@ -1,8 +1,10 @@
 # Clatter — repository instructions
 
 This file loads into every session. It carries the constraints an agent must hold, copied
-verbatim from the approved plan at `~/.claude/plans/clatter.md`. Read `LEDGER.md` for unit
-state — never this file, and never the plan.
+verbatim from the approved plan at `~/.claude/plans/clatter.md`. The status table in `LEDGER.md`
+is the source of truth for unit state — never this file, and never the plan. Read a unit's last
+row. `LEDGER.md` keeps the recent sections. Older sections are in `LEDGER.archive.md`, which stays
+greppable.
 
 ---
 
