@@ -2,5 +2,5 @@
   "validate": ["npm run lint", "npm run typecheck", "npm test", "npm run build"],
   "merge_model": "pr-gated",
   "main_branch": "main",
-  "plan_path": "~/.claude/plans/clatter.md"
+  "notes": "Not driven by the overnight loop: no approved plan. Add plan_path when one exists."
 }
