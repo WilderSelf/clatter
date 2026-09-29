@@ -1,10 +1,9 @@
 # Clatter — repository instructions
 
-This file loads into every session. It carries the constraints an agent must hold, copied
-verbatim from the approved plan at `~/.claude/plans/clatter.md`. The status table in `LEDGER.md`
-is the source of truth for unit state — never this file, and never the plan. Read a unit's last
-row. `LEDGER.md` keeps the recent sections. Older sections are in `LEDGER.archive.md`, which stays
-greppable.
+This file loads into every session. It carries the constraints an agent must hold. This repository
+has no approved plan; the overnight loop does not drive it. The status table in `LEDGER.md` is the
+source of truth for unit state — never this file. Read a unit's last row. `LEDGER.md` keeps the
+recent sections. Older sections are in `LEDGER.archive.md`, which stays greppable.
 
 ---
 
@@ -177,7 +176,7 @@ Named so no agent builds them, and so adding one later is a decision rather than
 | Phase 1 rules core, Units 3.0–3.4 | `implementer`, opus/high | Correctness compounds here. |
 | Table-driven test bulk, fixtures, Phase 4 form work | `assistant`, sonnet/medium | Careful but mechanical. |
 | Ledger rows, README, the original complication text | `scribe`, haiku/low | Prose and bookkeeping. |
-| Every pull request | `reviewer`, opus/high | Add a repository-local `.claude/agents/reviewer.md` with two named duties: no forbidden token in the diff, and no code copied from a GPL-3.0 source. |
+| Every pull request | `reviewer`, opus/high | The user-scope reviewer agent does the review: no forbidden token in the diff, and no code copied from a GPL-3.0 source. |
 
 Recovery is a normal `fix:` pull request. The ledger records the revert. Never edit a ledger row to
 hide a failure.
@@ -186,8 +185,7 @@ hide a failure.
 
 ## Where to find things
 
-- The approved plan, including the unit list and settled decisions, lives at
-  `~/.claude/plans/clatter.md`. It is the authorization boundary for `/advance`.
+- This repository has no approved plan. The overnight loop does not drive it.
 - Unit status lives in `LEDGER.md` in this repository.
 - The normative rules model lives in `specs/0001-rules-model.md` in this repository.
 - Deterministic performance budgets live in `budgets.json` in this repository.
